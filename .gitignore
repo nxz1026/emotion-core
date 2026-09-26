@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 数据产物（快照/报告/回填中转）——不进版本库
+snapshots/
+reports/
+*.jsonl
+*.parquet
+
+# 凭据与证书：绝不入库
+.dbconfig
+*.pem
+.env
+.env.*
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+*.swp
