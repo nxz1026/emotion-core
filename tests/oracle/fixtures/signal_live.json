@@ -1,0 +1,175 @@
+[
+ {
+  "confirm_date": "2024-01-05",
+  "code": "603099",
+  "action": "BUY",
+  "buy_window": "ENHANCED",
+  "checklist": [
+   [
+    "uniqueness",
+    true,
+    "唯一最高板: 长白山(603099) 4板"
+   ],
+   [
+    "exchange",
+    true,
+    "换手板(非一字)"
+   ],
+   [
+    "elimination",
+    true,
+    "昨日最高板组3只→今日幸存1只(要求≥2竞争且仅1幸存)"
+   ],
+   [
+    "min_days",
+    true,
+    "4板 >= 门槛4"
+   ],
+   [
+    "strength_diverge",
+    true,
+    "换手13.62% vs 阈值5.0%"
+   ]
+  ],
+  "status": "ADOPTED",
+  "reason": "长白山 4板 龙头确认"
+ },
+ {
+  "confirm_date": "2026-09-03",
+  "code": "600371",
+  "action": "SELL",
+  "buy_window": null,
+  "checklist": null,
+  "status": "ADOPTED",
+  "reason": "交易端对齐手动清仓"
+ },
+ {
+  "confirm_date": "2026-09-03",
+  "code": "000636",
+  "action": "SELL",
+  "buy_window": null,
+  "checklist": null,
+  "status": "ADOPTED",
+  "reason": "交易端对齐手动清仓"
+ },
+ {
+  "confirm_date": "2026-09-08",
+  "code": "002403",
+  "action": "SECONDARY",
+  "buy_window": "NONE",
+  "checklist": [
+   [
+    "c1 唯一换手高标",
+    true,
+    "唯一换手高标: 爱仕达(002403) 4板"
+   ],
+   [
+    "c2 换手板非一字",
+    true,
+    "换手板(非一字)"
+   ],
+   [
+    "c3 淘汰赛身份",
+    true,
+    "昨日2板身位2只竞争→候选今日晋级3板（次级降档：不要求昨日最高组唯一幸存）"
+   ],
+   [
+    "c4 最低板数门槛",
+    true,
+    "4板 >= 门槛3"
+   ],
+   [
+    "c5 强度与分歧补偿",
+    true,
+    "标准窗口不适用"
+   ],
+   [
+    "W1 同身位扎堆",
+    true,
+    "⚠ 同身位扎堆：绝对最高 4板 3 只（历史组中位-8.69%/胜率8%，建议降仓或放弃）"
+   ]
+  ],
+  "status": "SUGGESTED",
+  "reason": "爱仕达 4板 次级推荐"
+ },
+ {
+  "confirm_date": "2026-09-10",
+  "code": "000978",
+  "action": "SECONDARY",
+  "buy_window": "NONE",
+  "checklist": [
+   [
+    "c1 唯一换手高标",
+    true,
+    "唯一换手高标: 桂林旅游(000978) 4板"
+   ],
+   [
+    "c2 换手板非一字",
+    true,
+    "换手板(非一字)"
+   ],
+   [
+    "c3 淘汰赛身份",
+    true,
+    "昨日2板身位2只竞争→候选今日晋级3板（次级降档：不要求昨日最高组唯一幸存）"
+   ],
+   [
+    "c4 最低板数门槛",
+    true,
+    "4板 >= 门槛3"
+   ],
+   [
+    "c5 强度与分歧补偿",
+    true,
+    "标准窗口不适用"
+   ],
+   [
+    "W1 同身位扎堆",
+    true,
+    "无同身位扎堆"
+   ]
+  ],
+  "status": "SUGGESTED",
+  "reason": "桂林旅游 4板 次级推荐"
+ },
+ {
+  "confirm_date": "2026-09-14",
+  "code": "000993",
+  "action": "SECONDARY",
+  "buy_window": "NONE",
+  "checklist": [
+   [
+    "c1 唯一换手高标",
+    true,
+    "唯一换手高标: 闽东电力(000993) 4板"
+   ],
+   [
+    "c2 换手板非一字",
+    true,
+    "换手板(非一字)"
+   ],
+   [
+    "c3 淘汰赛身份",
+    true,
+    "昨日2板身位2只竞争→候选今日晋级3板（次级降档：不要求昨日最高组唯一幸存）"
+   ],
+   [
+    "c4 最低板数门槛",
+    true,
+    "4板 >= 门槛3"
+   ],
+   [
+    "c5 强度与分歧补偿",
+    true,
+    "标准窗口不适用"
+   ],
+   [
+    "W1 同身位扎堆",
+    true,
+    "无同身位扎堆"
+   ]
+  ],
+  "status": "SUGGESTED",
+  "reason": "闽东电力 4板 次级推荐"
+ }
+]

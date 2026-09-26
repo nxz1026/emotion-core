@@ -61,10 +61,18 @@ def limit_down_price_cents(pre_close_cents: int, code: str) -> int:
 
 
 def is_limit_up(close_cents: int, pre_close_cents: int, code: str) -> bool:
-    """是否涨停（收盘 >= 涨停价）。"""
-    return close_cents >= limit_up_price_cents(pre_close_cents, code)
+    """是否涨停（收盘 == 涨停价）。
+
+    注意：lkl 用精确等于（c_c = up_c），不是 >=。
+    A 股主板 close 不可能超过涨停价，但逐字照搬 lkl 语义。
+    """
+    return close_cents == limit_up_price_cents(pre_close_cents, code)
 
 
 def is_limit_down(close_cents: int, pre_close_cents: int, code: str) -> bool:
-    """是否跌停（收盘 <= 跌停价）。"""
-    return close_cents <= limit_down_price_cents(pre_close_cents, code)
+    """是否跌停（收盘 == 跌停价）。
+
+    注意：lkl 用精确等于（c_c = dn_c），不是 <=。
+    002931 2026-07-08 实测：close=6443 < limit_down=6448 → lkl 判 False。
+    """
+    return close_cents == limit_down_price_cents(pre_close_cents, code)

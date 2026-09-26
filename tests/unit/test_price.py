@@ -82,4 +82,5 @@ class TestIsLimitUp:
         assert is_limit_up(1099, 1000, "600519") is False
 
     def test_above_limit(self):
-        assert is_limit_up(1101, 1000, "600519") is True
+        # lkl 用精确等于（c_c = up_c），close 超过涨停价也判 False
+        assert is_limit_up(1101, 1000, "600519") is False
