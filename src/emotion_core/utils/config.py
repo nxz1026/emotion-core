@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 
 
@@ -20,6 +20,10 @@ class Config:
     # ── 标的池（lkl config.py BOARD_PREFIXES / NEW_ISSUER_FILTER）──
     # D1/R3：梯队与龙头限主板 10%；情绪计数仍走全市场（不在本文件控制）。
     BOARD_PREFIXES: tuple[str, ...] = ("600", "601", "603", "605", "000", "001", "002")
+    LIMIT_RATIO: float = 0.10
+    LIMIT_PCT_BY_PREFIX: dict[str, int] = field(
+        default_factory=lambda: {"68": 120, "30": 120})
+    LIMIT_PCT_DEFAULT: int = 110       # round((1 + LIMIT_RATIO) * 100)
     NEW_ISSUER_MIN_DAYS: int = 90   # 次新排除：首个 bar 距目标日不足 90 自然日
     # 回填窗口边缘：早于此日期上市的老股豁免（无法区分时保留）
     NEW_ISSUER_FLOOR: date = date(2023, 11, 26)
