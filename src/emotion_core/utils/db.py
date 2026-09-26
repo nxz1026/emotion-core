@@ -1,7 +1,8 @@
 """DB 连接层。psycopg3 直连 Postgres；主机与密码运行时取自 ~/.dbconfig。
 
 分工（docs/13 §4.1、docs/11 §4）：
-- data / orchestration：`connect()` —— 读写连接。
+- data / orchestration：`connect()` —— 读写连接；`transaction()` —— 多语句同事务
+  （全量替换类写入必须走它，防 DELETE 已提交而 INSERT 崩溃）。
 - presentation：`connect_ro()` —— 只读连接，连接串级 `default_transaction_read_only=on`，
   由服务端强制拒绝写操作（25006 ReadOnlySqlTransaction），从机制上保证展示层不写库（评审 P5；
   tests/architecture 扫描展示层只许 import `connect_ro`）。
@@ -23,7 +24,8 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +127,25 @@ def connect_ro() -> psycopg.Connection[Any]:
     conn = psycopg.connect(**_kwargs(read_only=True))
     logger.debug("connect ro %s:%s/%s", _DBNAME, _PORT, _USER)
     return conn
+
+
+@contextmanager
+def transaction() -> Iterator[psycopg.Connection[Any]]:
+    """事务型连接：块内多条语句共享同一事务，正常退出提交、异常回滚后重抛。
+
+    「DELETE + INSERT 全量替换」必须走本入口（lkl W3 审计）：两次独立事务下
+    DELETE 已提交而 INSERT 崩溃 = 当日数据永久清零，且不可回滚。
+    块内禁止网络调用（Wind/EM 拉取）——长事务持锁会拖垮并发读。
+    """
+    conn = psycopg.connect(**_kwargs())
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _fetch_df(conn: psycopg.Connection[Any], sql: str,
