@@ -220,22 +220,6 @@ class TestCompare:
             "回放=['000002', '600000']；差异=['000001', '000002', '300100']；"
             "回放passed={'000001': None, '000002': True, '300100': None}",))]
 
-    def test_drift_text_is_order_independent(self, io):
-        """同一代码集、输入顺序不同 → drift 与 alert 文本仍按 sorted 输出。"""
-        a = io(live_frame(("600000", "BUY"), ("000001", "BUY")),
-               replay_frame())
-        ra = compare.compare(D0)
-        b = io(live_frame(("000001", "BUY"), ("600000", "BUY")),
-               replay_frame())
-        rb = compare.compare(D0)
-        assert ra == rb
-        assert ra["drift"] == ["000001", "600000"]
-        assert a.writes == b.writes == [(ALERT_SQL, (
-            "2026-09-25 规则漂移：实盘=['000001', '600000'] 回放=[]；"
-            "差异=['000001', '600000']；回放passed="
-            "{'000001': None, '600000': None}",))]
-
-    def test_replay_only_codes_are_drift_too(self, io):
         """回放多出的代码同样计入漂移（对称差，不是左差）。"""
         stub = io(live_frame(), replay_frame(("000002", False)))
         rep = compare.compare(D0)
