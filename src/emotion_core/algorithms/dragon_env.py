@@ -35,8 +35,11 @@
 与 lkl 的差异（全部是契约/IO 适配，不涉判定规则）：
 1. `lkl.utils.db.query_df` → `emotion_core.utils.db.query_df`（同签名：sql, params → DataFrame）。
 2. persist 的 UPDATE 走 `data/loader.py::update_market_stat_ecosystem`（同一语句、同一字段；
-   jsonb 列由 psycopg 传 text 参数，Postgres 走 I/O assignment cast，已实测通过）。loader 是
-   全项目 SQL 唯一住所，且该入口本就为本模块预留。
+   jsonb 列由 psycopg 传 text 参数，Postgres 走 I/O assignment cast，已实测通过）。**写入口**
+   集中在 loader，本模块不自持任何写 SQL；loader 亦为本模块预留了该入口。
+   读 SQL 则自持 11 处（lkl 原语句逐字）：loader 只有 derived_bar/ladder_day/market_stat 的
+   领域化入口，theme_group/theme_tag/promotion_day 聚合读与其形状不符，与 entry.py /
+   promotion.py / accelerate.py 同先例——待 loader 补齐对应读入口后下沉。
 3. CONFIG 尚未收录 DRAGON_* 键，经 `_cfg` 取 lkl config.py 原值默认（accelerate.py 同先例）；
    键一旦进 utils/config.py 自动生效（本次范围限本文件 + test_dragon_env.py 两文件）。
 4. `lkl.services.accelerate.detect` → `emotion_core.algorithms.accelerate.detect`（同三元组契约）。
