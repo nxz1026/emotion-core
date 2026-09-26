@@ -23,12 +23,27 @@ from emotion_core.algorithms.review.utils import (
     _ENV_MEANING, _seal_notes, _usability, _strip_position_block,
 )
 from emotion_core.services import notify, position
-from emotion_core.utils import dates
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import prev_trading_day
 from emotion_core.utils.db import execute, query_df
 
 log = logging.getLogger("emotion_core.review")
+
+# CONFIG 未收录（emotion.py §5 / review/utils.py 同先例）：取 lkl config.py 原值
+_ACCEL_ENFORCE: bool = getattr(CONFIG, "ACCEL_ENFORCE", False)
+_OVERVIEW_LOOKBACK: int = getattr(CONFIG, "OVERVIEW_LOOKBACK", 20)
+_MIN_UNIVERSE_WARN: int = getattr(CONFIG, "MIN_UNIVERSE_WARN", 3000)
+
+
+def _recent_days_upto(d: date, n: int) -> list[date]:
+    """d 及之前最近 n 个已入库交易日（升序）；不足 n 返回全部。
+
+    契约适配：lkl `utils.dates.recent_trading_days(d, n)` 带参照日；emotion_core
+    同名函数无参照日（只取全库最近 n 日，回填历史日会取错区间），故内联其 SQL。
+    """
+    df = query_df("SELECT DISTINCT date FROM daily_bar WHERE date <= %s"
+                  " ORDER BY date DESC LIMIT %s", (d, n))
+    return sorted(df["date"])
 
 
 def _market_stat_row(trade_date: date | None) -> dict | None:
@@ -115,11 +130,11 @@ def _pool_missing(trade_date: date) -> list[str]:
 
 
 def _quality(trade_date: date) -> dict:
-    """数据质检：对账差异 + 缺数警示。"""
+    """数据质检：对账差异 + 缺数警示。A7：空池≠无差异，真缺失须显式报。"""
     warns = []
     n = query_df("SELECT count(*) n FROM daily_bar WHERE date = %s",
                  (trade_date,))["n"].iloc[0]
-    if n < CONFIG.MIN_UNIVERSE_WARN:
+    if n < _MIN_UNIVERSE_WARN:
         warns.append(f"当日 daily_bar 仅 {n} 行，疑似缺数")
     missing = _pool_missing(trade_date)
     if missing:
@@ -190,25 +205,38 @@ def _dragon_env_of(trade_date: date) -> dict | None:
 
 
 def _health_of(trade_date: date) -> str:
-    """V9：链路健康度——最近一次 review_report 成功落盘距今几个交易日。"""
+    """V9：链路健康度——最近一次 review_report 成功落盘距今几个交易日。
+
+    daily.sh 非交易日 SKIP 是正常行为（不计数）；跨过非交易日的缺口
+    以已入库交易日数衡量，>1 个交易日即显式报「链路疑似断档」。
+    """
+    # P1-11：报告生成中查 max(date) 必然不含「正在生成的今天」——INSERT 在
+    # 报告末尾。把生成日本身视为「即将成功」，gap 只数 (last, trade_date)
+    # 开区间内的交易日，昨日有报告 → gap=0 不误报断档。
     df = query_df(
         "SELECT max(date) AS d FROM review_report WHERE date < %s", (trade_date,))
     last = df["d"].iloc[0]
     if last is None:
         return "链路健康：本库从未产出报告"
-    days = dates.recent_trading_days(trade_date, 60)
+    days = _recent_days_upto(trade_date, 60)
     gap = sum(1 for d_ in days if last < d_ < trade_date)
     return (f"链路健康：最近成功报告 {last}"
             + ("" if gap == 0 else f"（距今 {gap} 个交易日，⚠ 疑似断档）"))
 
 
 def _sec_overview(d: dict) -> str:
-    """⓪ 速览（V9）：链路健康 + 较昨日变化。"""
+    """⓪ 速览（V9）：链路健康 + 较昨日变化。放最前，30 秒读完当日结论。
+
+    产品 A1-1a：首行即「本报告可用于决策」总判（三态：OK/PARTIAL/
+    UNKNOWN），缺数绝不显示绿色——用户不用翻到⑩质检才知道可信度。
+    P1（产品审计）：+ 数据健康度徽章 + 口径覆盖声明 + 空仓原因可见化。
+    """
     u = d.get("usability") or _usability(d)
     mark = {"OK": "✅", "PARTIAL": "⚠", "UNKNOWN": "⚠"}[u["state"]]
     lines = ["## ⓪ 速览", "",
              f"**数据可信度：{mark} {u['state']}** —— {u['note']}",
              "", _health_of(d["date"]), ""]
+    # #7 口径覆盖声明（精简版，完整口径见⑩质检段）
     c = d.get("caliber")
     if c:
         bj = "含" if c.get("include_bj") else "不含"
@@ -216,6 +244,7 @@ def _sec_overview(d: dict) -> str:
                      f" ｜ 含20cm ｜ 自算涨停 {c['counts_self']['zt']} / "
                      f"东财池 {c['counts_em_pool']['zt']}")
     lines.append("")
+    # #2 空仓/不动理由可见化（仅当 dict 含所需字段，否则跳过）
     if not d.get("signal") and "window" in d:
         reason = _no_signal_reason(d)
         if reason:
@@ -223,7 +252,7 @@ def _sec_overview(d: dict) -> str:
     lines.append("**较昨日变化**")
     s, p = d["stat"], d["prev_stat"]
     if not s:
-        lines.append("- 当日 market_stat 无数据（先跑 emotion）")
+        lines.append("- 当日 market_stat 无数据（先跑 `lkl emotion`）")
     else:
         p = p or {}
         for label, key in (("涨停家数", "limit_up_count"),
@@ -244,7 +273,7 @@ def _sec_overview(d: dict) -> str:
 
 def _sec_trend(d: dict) -> str:
     """⑫ 近 N 日走势（V9）：phase/buy_window/生态评级时间线，查异常翻转。"""
-    days = dates.recent_trading_days(d["date"], CONFIG.OVERVIEW_LOOKBACK)
+    days = _recent_days_upto(d["date"], _OVERVIEW_LOOKBACK)
     if len(days) < 2:
         return "## ⑫ 近 20 日走势\n\n历史不足 2 个交易日，无时间线\n"
     df = query_df(
@@ -259,7 +288,11 @@ def _sec_trend(d: dict) -> str:
 
 
 def _sec_reconcile_pos(d: dict) -> str:
-    """⓪附：持仓对账（V9）——ADOPTED 信号无对应 OPEN 持仓 → 漏录警告。"""
+    """⓪附：持仓对账（V9）——ADOPTED 信号无对应 OPEN 持仓 → 漏录警告。
+
+    产品审计 5.1.3：人工回执 adopted 后忘录持仓是纯静默的，退潮清仓等
+    卖出建议不会为该仓位生成。此段堵住盲区：只对账不代录。
+    """
     lines = ["", "**持仓对账**："]
     if not d["orphan_adoptions"]:
         lines.append("已采纳信号与持仓记录一致（或当日无已采纳信号）✓")
@@ -284,13 +317,13 @@ def _orphan_adoptions() -> list[dict]:
 
 
 def _sec_emotion(d: dict) -> str:
-    """① 情绪面板：指标 + 阶段 + 加速横幅。"""
+    """① 情绪面板：指标 + 阶段（R2：区分当日触发/历史延续）+ 加速横幅。"""
     if not d["stat"]:
-        return "## ① 情绪面板\n\nmarket_stat 缺当日数据：先跑 emotion\n"
+        return "## ① 情绪面板\n\nmarket_stat 缺当日数据：先跑 `lkl emotion`\n"
     s = d["stat"]
     banner = ""
     if s.get("accelerate"):
-        mode = "已降级" if CONFIG.ACCEL_ENFORCE else "影子模式，未干预窗口"
+        mode = "已降级" if _ACCEL_ENFORCE else "影子模式，未干预窗口"
         banner = (f"\n\n⚡ **加速事件命中**（{mode}）\n\n{s.get('accel_reason', '')}\n")
     inherited = bool(s.get("phase_inherited"))
     phase_label = f"{s['phase']}（延续）" if inherited else f"{s['phase']}（当日触发）"
@@ -343,8 +376,8 @@ def _theme_tag_rows(trade_date: date) -> pd.DataFrame:
 
 
 def _fmt_false_relation(tags: pd.DataFrame) -> str:
-    """名称相似但题材无交集 → 提示防归同组。"""
-    pairs = theme_svc.false_relation(
+    """名称相似但题材无交集 → 提示防归同组（theme_svc 封装）。"""
+    pairs = theme_svc.false_relation_pairs(
         [(r.code, r.name, list(r.secondary_themes)) for r in tags.itertuples()])
     if not pairs:
         return ""
@@ -356,7 +389,7 @@ def _sec_theme(d: dict) -> str:
     """③ 题材结构（T13：Wind 概念标签+公告催化聚合，仅梯队口径）。"""
     t = d["themes"]
     if t.empty:
-        return "## ③ 题材结构\n\n_未生成（先跑 theme）_\n"
+        return "## ③ 题材结构\n\n_未生成（先跑 lkl theme <date>）_\n"
     lines = ["## ③ 题材结构", "",
              "| 题材 | 最高板 | 中位 | 低位 | 首板* | 完整度 | 状态 | 成员 |",
              "|---|---|---|---|---|---|---|---|"]
@@ -396,7 +429,7 @@ def _sec_promotion(d: dict) -> str:
     """⑤ 晋级矩阵：各层名义/换手双口径与背离度（§1.10）。"""
     p = d["promotion"]
     if p is None or p.empty:
-        return "## ⑤ 晋级矩阵\n\n_未生成（先跑 promotion）_\n"
+        return "## ⑤ 晋级矩阵\n\n_未生成（先跑 `lkl promotion <date>`）_\n"
     lines = ["## ⑤ 晋级矩阵", "",
              "| 层 | 分母 | 名义晋级 | 换手晋级 | 名义率 | 换手率 | 背离 | 失败股今日 |",
              "|---|---|---|---|---|---|---|---|"]
@@ -411,7 +444,11 @@ def _sec_promotion(d: dict) -> str:
 
 
 def _sec_watchlist(d: dict) -> str:
-    """⑥附·自选股状态：当日涨停/炸板/涨跌幅快照（无自选返回空串）。"""
+    """⑥附·自选股状态：当日涨停/炸板/涨跌幅快照（无自选返回空串）。
+
+    P3-3：watchlist 表 + status_rows() 同源渲染（CLI `lkl watch status`
+    与报告段共用），空清单不占报告篇幅。
+    """
     from emotion_core.services import watchlist
     rows = watchlist.status_rows(d["date"])
     if not rows:
@@ -422,10 +459,10 @@ def _sec_watchlist(d: dict) -> str:
 
 
 def _sec_dragon_env(d: dict) -> str:
-    """⑦ 生态评级：三档 + 条件逐项；与 buy_window 语义分开。"""
+    """⑦ 生态评级：三档 + 条件逐项；与 buy_window 语义分开（风险登记13）。"""
     de = d["dragon_env"]
     if not de:
-        return "## ⑦ 生态评级\n\n_未生成（先跑 dragon-env）_\n"
+        return "## ⑦ 生态评级\n\n_未生成（先跑 `lkl dragon-env <date>`）_\n"
     lines = ["## ⑦ 生态评级（龙空龙可用性，**非买入信号**）", "",
              f"**评级：{de['rating']}** —— {_ENV_MEANING.get(de['rating'], '')}"
              f"{_env_caveat(de)}", "",
@@ -450,7 +487,7 @@ def _sec_counter(d: dict) -> str:
 
 
 def _sec_next_check(d: dict) -> str:
-    """⑨ 次日验证点：只写观察条件，禁止写买入指令。"""
+    """⑨ 次日验证点：只写观察条件，禁止写买入指令（引擎 v1 §8 措辞纪律）。"""
     phase = (d["stat"] or {}).get("phase", "")
     lines = ["## ⑨ 次日验证点", ""]
     if not phase:
@@ -464,7 +501,12 @@ def _sec_next_check(d: dict) -> str:
 
 
 def _data_facts_of(d: dict) -> list[str]:
-    """P2-1：信号分层·数据事实层——只放原始可观测数据（不做判断）。"""
+    """P2-1：信号分层·数据事实层——只放原始可观测数据（不做判断）。
+
+    与「关键判据」区分：本层给出候选/梯队/淘汰赛的裸数值与状态，
+    判断（通过与否）由下一层 checklist 给出。数据缺时显式写缺，
+    不编造。
+    """
     facts: list[str] = []
     rows = d["ladder_rows"]
     abs_max = max((r.cont_days for r in rows), default=0)
@@ -484,7 +526,10 @@ def _data_facts_of(d: dict) -> list[str]:
 
 
 def _sec_advice(d: dict) -> str:
-    """⑥ 明日参考：信号 checklist / 空仓理由 / 卖出建议 / 持仓表头。"""
+    """⑥ 明日参考：信号 checklist / 空仓理由 / 卖出建议 / 持仓表头。
+
+    P2（产品审计 #1）：信号分层展示——结论 → 关键判据 → 数据事实 → 风险提示。
+    """
     lines = ["## ⑥ 明日参考（只给信息不给指令）", ""]
     if d["positions"]:
         lines.append("**当前持仓**：" + "、".join(
@@ -500,6 +545,7 @@ def _sec_advice(d: dict) -> str:
         lines.append("")
         lines.append(f"**结论**：{verdict}")
         lines.append("")
+        # P2-1: 数据事实层 —— 原始可观测数据（梯队/淘汰赛/候选，不做判断）
         lines.append("**数据事实**：")
         for f in _data_facts_of(d):
             lines.append(f"- {f}")
@@ -524,7 +570,11 @@ def _sec_advice(d: dict) -> str:
 
 
 def _sec_secondary_block(sec: dict | None) -> list[str]:
-    """V14.1 拆函数（E1 红线）：次级推荐区块——checklist + 观察标注。"""
+    """V14.1 拆函数（E1 红线）：次级推荐区块——checklist + 观察标注。
+
+    NONE 窗口次级系观察记录（不导出、无仓位语义）——显式标注，防读者把
+    禁买日的次级推荐误读为可执行信号（奎爷 2026-09-09 拍板）。
+    """
     if not sec:
         return []
     conds, warns = entry.split_checklist(sec["checklist"])
