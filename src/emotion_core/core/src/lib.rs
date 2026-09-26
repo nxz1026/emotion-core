@@ -7,6 +7,7 @@ pub mod ladder;
 pub mod entry;
 pub mod promotion;
 pub mod ecosystem;
+pub mod accelerate;
 
 #[pymodule]
 fn emotion_core_rust(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -32,5 +33,10 @@ fn emotion_core_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<promotion::PromotionRow>()?;
     m.add_function(wrap_pyfunction!(promotion::layer_row, m)?)?;
     m.add_function(wrap_pyfunction!(promotion::matrix, m)?)?;
+    m.add_class::<accelerate::AccelFacts>()?;
+    m.add_function(wrap_pyfunction!(accelerate::hit, m)?)?;
+    m.add_function(wrap_pyfunction!(accelerate::baseline_median, m)?)?;
+    m.add_function(wrap_pyfunction!(accelerate::top_streak, m)?)?;
+    m.add_function(wrap_pyfunction!(accelerate::detect, m)?)?;
     Ok(())
 }
