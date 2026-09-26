@@ -1,80 +1,172 @@
-"""ladder.build 单元测试：纯函数口径（不连 DB）。
+"""梯队算法单元测试。
 
-口径来源：lkl/services/ladder.py + docs/02 §3.4（H 取换手口径）。
+无 DB：SQL 行选择（主板/次新/ST 过滤）由 tests/oracle/test_ladder_vs_lkl.py 用
+lkl 真实产物对账；本文件锁 fold/persist 的纯逻辑与编排分支。
 """
 from __future__ import annotations
 
 from datetime import date
 
-from emotion_core.algorithms.ladder import build, sole_top, top_group
+import pytest
+
+from emotion_core.algorithms import ladder
+from emotion_core.domain.ladder import LadderDay
 from emotion_core.utils.config import CONFIG
 
-D = date(2026, 9, 24)
+D = date(2024, 1, 2)
+P = date(2023, 12, 29)
 
 
-def row(code: str, cont_days: int, *, is_exchange: bool = True,
-        is_one_word: bool = False, is_bomb: bool = False) -> dict:
-    """derived_bar 行（dict，键 = 列名）。"""
-    return {"date": D, "code": code, "cont_days": cont_days,
-            "is_exchange": is_exchange, "is_one_word": is_one_word,
-            "is_bomb": is_bomb}
+@pytest.fixture
+def stub(monkeypatch):
+    """替换 IO：候选行按日期给定，昨日固定为 P，换手代码集与 derived_bar 行数可控。"""
+    def _apply(rows=(), prev_rows=(), exchange=(), derived_count=1):
+        by_date = {D: [(c, n, x) for c, n, x in rows],
+                   P: [(c, n, x) for c, n, x in prev_rows]}
+        monkeypatch.setattr(ladder, "load_ladder_candidates", lambda d: by_date.get(d, []))
+        monkeypatch.setattr(ladder, "load_exchange_codes", lambda d: set(exchange))
+        monkeypatch.setattr(ladder, "prev_trading_day", lambda d: P)
+        monkeypatch.setattr(ladder, "count_derived_rows", lambda d: derived_count)
+    return _apply
 
 
-def test_build_sorts_desc_and_marks_unique_top():
-    """正常场景：唯一换手最高板（5 板 >= 4）→ 标 is_sole_top，按板数降序。"""
-    ladder = build([row("000002", 3), row("600001", 5), row("600003", 4)])
-
-    assert [r.code for r in ladder] == ["600001", "600003", "000002"]
-    assert [r.is_top for r in ladder] == [True, False, False]
-    assert [r.is_sole_top for r in ladder] == [True, False, False]
-    assert sole_top(ladder).code == "600001"
-    assert [r.code for r in top_group(ladder)] == ["600001"]
+def _by_code(rows: list[LadderDay]) -> dict[str, LadderDay]:
+    return {r.code: r for r in rows}
 
 
-def test_no_sole_top_when_height_tied():
-    """无唯一最高板：两只换手板同高度 → 无唯一高标，均不标记。"""
-    ladder = build([row("600001", 5), row("000002", 5)])
+class TestBuild:
+    """build 的换手口径与 R2 计数。"""
 
-    assert sole_top(ladder) is None
-    assert [r.code for r in top_group(ladder)] == ["000002", "600001"]
-    assert [r.is_top for r in ladder] == [True, True]   # 同身位全员 is_top
-    assert not any(r.is_sole_top for r in ladder)
+    def test_normal_sole_top(self, stub):
+        stub(rows=[("002952", 9, True), ("603530", 4, True), ("002976", 3, False)],
+             prev_rows=[("600519", 5, True)],
+             exchange={"600519", "002952"})
+        rows = ladder.build(D)
+
+        assert [r.code for r in rows] == ["002952", "603530", "002976"]
+        got = _by_code(rows)
+        # 换手板最高身位唯一 = 龙头
+        assert got["002952"].is_top is True and got["002952"].is_sole_top is True
+        assert got["603530"].is_top is False and got["603530"].is_sole_top is False
+        # 一字板（is_exchange=False）不进最高层
+        assert got["002976"].is_top is False and got["002976"].is_exchange is False
+        # R2：昨日最高组 1 只，其中今日仍换手 1 只（600519）
+        assert {(r.y_top_group_count, r.y_top_survivor_count) for r in rows} == {(1, 1)}
+
+    def test_top_ignores_one_word_higher_board(self, stub):
+        """最高板是一字板时不占最高身位（换手口径）。"""
+        stub(rows=[("000001", 7, False), ("600519", 4, True)])
+        rows = _by_code(ladder.build(D))
+
+        assert rows["600519"].is_top is True
+        assert rows["600519"].is_sole_top is True
+        assert rows["000001"].is_top is False
+
+    def test_two_way_top_is_not_sole(self, stub):
+        stub(rows=[("600519", 5, True), ("000001", 5, True)])
+        rows = ladder.build(D)
+
+        assert {r.code for r in rows if r.is_top} == {"600519", "000001"}
+        assert all(r.is_sole_top is False for r in rows)
+        assert ladder.sole_top(rows) is None
+
+    def test_sole_top_below_min_leader_days(self, stub):
+        stub(rows=[("600519", CONFIG.MIN_LEADER_DAYS - 1, True)])
+        rows = ladder.build(D)
+
+        assert rows[0].is_top is True
+        assert rows[0].is_sole_top is False
+        assert ladder.sole_top(rows) is None
+
+    def test_prev_top_group_survivors(self, stub):
+        """昨日最高组 2 只，今日 1 只仍换手。"""
+        stub(rows=[("600519", 3, True)],
+             prev_rows=[("600519", 5, True), ("000001", 5, True), ("002594", 4, True)],
+             exchange={"600519", "002594", "603530"})
+        rows = ladder.build(D)
+
+        assert {(r.y_top_group_count, r.y_top_survivor_count) for r in rows} == {(2, 1)}
+
+    def test_no_candidates_is_empty(self, stub):
+        stub(rows=[], prev_rows=[("600519", 5, True)])
+        assert ladder.build(D) == []
+
+    def test_no_previous_day_counts_zero(self, stub, monkeypatch):
+        stub(rows=[("600519", 5, True)])
+        monkeypatch.setattr(ladder, "prev_trading_day", lambda d: None)
+        rows = ladder.build(D)
+
+        assert (rows[0].y_top_group_count, rows[0].y_top_survivor_count) == (0, 0)
 
 
-def test_one_word_excluded_from_height():
-    """一字板排除：一字 6 板不参与最高层判定，H 取换手板 4 板。"""
-    ladder = build([row("600009", 6, is_exchange=False, is_one_word=True),
-                    row("000002", 4)])
+class TestTopGroupAndSoleTop:
+    """纯函数口径（不依赖 DB）。"""
 
-    one_word = next(r for r in ladder if r.code == "600009")
-    assert not one_word.is_exchange           # 一字板：非换手，不进最高层
-    assert one_word.is_top is False           # 板数虽最高（6>4），不算换手最高层
-    assert one_word.is_sole_top is False      # 一字板可保留在梯队，但不是高标
-    assert [r.code for r in top_group(ladder)] == ["000002"]
-    assert sole_top(ladder).code == "000002"
+    def _row(self, code: str, days: int, exchange: bool = True) -> LadderDay:
+        return LadderDay(date=D, code=code, cont_days=days, is_exchange=exchange,
+                         is_top=False, is_sole_top=False,
+                         y_top_group_count=0, y_top_survivor_count=0)
 
+    def test_top_group_exchange_only(self):
+        rows = [self._row("000001", 7, exchange=False), self._row("600519", 5),
+                self._row("000002", 5), self._row("603530", 3)]
+        assert {r.code for r in ladder.top_group(rows)} == {"600519", "000002"}
 
-def test_min_leader_days_gate():
-    """MIN_LEADER_DAYS 门槛：唯一换手最高板不足 4 板 → None，可显式放宽。"""
-    ladder = build([row("600001", 3), row("000002", 2)])
+    def test_top_group_no_exchange(self):
+        assert ladder.top_group([self._row("000001", 7, exchange=False)]) == []
 
-    assert CONFIG.MIN_LEADER_DAYS == 4
-    assert sole_top(ladder) is None
-    assert not any(r.is_sole_top for r in ladder)
-    assert sole_top(ladder, min_days=3).code == "600001"
-
-    at_gate = build([row("600001", 4)])
-    assert sole_top(at_gate).code == "600001"
-    assert at_gate[0].is_sole_top is True
+    def test_sole_top_min_days_override(self):
+        rows = [self._row("600519", 3)]
+        assert ladder.sole_top(rows) is None
+        assert ladder.sole_top(rows, min_days=3) is not None
 
 
-def test_no_exchange_board_means_empty_top_group():
-    """全一字 / 空输入：同身位组为空，无高标。"""
-    assert build([]) == []
-    assert top_group(build([])) == []
-    assert sole_top(build([])) is None
+class TestYSurvivors:
+    """y_survivors：昨日最高换手组 ∩ 今日换手。"""
 
-    all_one_word = build([row("600009", 5, is_exchange=False, is_one_word=True)])
-    assert top_group(all_one_word) == []
-    assert sole_top(all_one_word) is None
-    assert all_one_word[0].is_sole_top is False
+    def test_survivors_intersection(self, stub):
+        stub(rows=[("600519", 3, True)],
+             prev_rows=[("600519", 5, True), ("000001", 5, True)],
+             exchange={"000001", "603530"})
+        assert ladder.y_survivors(D) == {"000001"}
+
+    def test_no_previous_day(self, stub, monkeypatch):
+        stub(rows=[("600519", 3, True)])
+        monkeypatch.setattr(ladder, "prev_trading_day", lambda d: None)
+        assert ladder.y_survivors(D) == set()
+
+
+class TestPersist:
+    """persist 三个分支：写入 / 真平静清空 / 上游缺数拒绝。"""
+
+    def test_writes_rows(self, stub, monkeypatch):
+        stub(rows=[("002952", 9, True)])
+        calls = []
+        monkeypatch.setattr(ladder, "replace_ladder_day",
+                            lambda d, rows: calls.append((d, rows)) or len(rows))
+
+        n = ladder.persist(D)
+
+        assert n == 1
+        assert calls[0][0] == D
+        assert [r.code for r in calls[0][1]] == ["002952"]
+
+    def test_clears_when_no_ladder_but_derived_rows_exist(self, stub, monkeypatch):
+        """derived_bar 当日有行、候选全被过滤（全 ST / 全无连板）= 真平静，清空当日。"""
+        stub(rows=[], derived_count=4123)
+        calls = []
+        monkeypatch.setattr(ladder, "replace_ladder_day",
+                            lambda d, rows: calls.append((d, rows)) or len(rows))
+
+        assert ladder.persist(D) == 0
+        assert calls == [(D, [])]
+
+    def test_refuses_when_derived_bar_empty(self, stub, monkeypatch):
+        stub(rows=[], derived_count=0)
+        calls = []
+        monkeypatch.setattr(ladder, "replace_ladder_day",
+                            lambda d, rows: calls.append((d, rows)) or len(rows))
+
+        with pytest.raises(RuntimeError, match="上游缺数，拒绝清空"):
+            ladder.persist(D)
+        assert calls == []

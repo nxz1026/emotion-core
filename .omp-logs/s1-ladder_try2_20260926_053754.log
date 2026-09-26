@@ -13029,3 +13029,4 @@ f
 [omp-resilient4] omp-call rc=0
 [omp-resilient4] done-file-absent
 [omp-resilient4] rc=0 but sentinel not accepted
+[watchdog] killed at 05:40:54
