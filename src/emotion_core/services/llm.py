@@ -4,19 +4,6 @@
 参数三级覆盖：LLM_PROFILES[profile] ← 环境变量 LKL_LLM_* ← 调用 kwargs。
 端点实测坑适配（PLAN §E4.1）：json 围栏剥离 / timeout 按档 30~180s /
 仅超时与5xx重试（4xx 直抛）/ 失败也写 llm_call_log(status=ERROR)。
-
-语义逐字照搬 lkl/services/llm.py。差异仅 IO 适配：
-- `from lkl import config` → `from emotion_core.utils.config import CONFIG`；
-  CONFIG 尚未收录 LLM_PROFILES / LLM_CHAIN / LLM_ENABLED / LLM_KEY_ENV /
-  LLM_KEY_FILES，按 notify.py 同先例用 _cfg(name, default) 回退到
-  lkl config.py 原值（默认关闭，同 lkl 拍板③）。
-- `from lkl.utils import db` → `from emotion_core.utils.db import execute`；
-  SQL 与参数顺序逐字不变。
-- `from lkl.services.llm_backend import …` → 内联为本文件尾部（单文件约束，
-  不新建 llm_backend 模块）。
-- `comment()` 内 `from lkl.services import review` →
-  `from emotion_core.algorithms.review.utils import …`（_strip_position_block /
-  _atomic_write 已随 review 迁移）。
 """
 from __future__ import annotations
 
@@ -26,10 +13,17 @@ import re
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import httpx
 
+from emotion_core.services.llm_backend import (
+    LLMNotConfigured,
+    LLMChainExhausted,
+    resolve_chain,
+    resolve_key,
+    fallback_error,
+    short_error,
+)
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import execute
 
@@ -39,7 +33,6 @@ def _cfg(name, default):
     return getattr(CONFIG, name, default)
 
 
-# ── lkl config.py LLM 段原值（CONFIG 尚未收录时回退）──────────────
 LLM_PROFILES = _cfg("LLM_PROFILES", {
     "default": {
         "base_url": "https://token.sensenova.cn/v1",
@@ -59,7 +52,6 @@ LLM_PROFILES = _cfg("LLM_PROFILES", {
         "temperature": 0.3, "max_tokens": 4096, "top_p": 1.0,
         "timeout": 180, "max_retry": 2,
     },
-    # DSA 策略观察首选，密钥 LKL_LLM_API_KEY_AGNES。
     "agnes": {
         "base_url": "https://apihub.agnes-ai.com/v1",
         "model": "agnes-3.0-flash",
@@ -67,91 +59,8 @@ LLM_PROFILES = _cfg("LLM_PROFILES", {
         "timeout": 180, "max_retry": 2,
     },
 })
-LLM_CHAIN = _cfg("LLM_CHAIN", [name.strip() for name in os.environ.get(
-    "LKL_LLM_CHAIN", "").split(",") if name.strip()])
 LLM_ENABLED = _cfg("LLM_ENABLED", os.environ.get(
     "LKL_LLM_ENABLED", "").lower() in ("1", "true", "yes"))
-LLM_KEY_ENV = _cfg("LLM_KEY_ENV", "LKL_LLM_API_KEY")
-LLM_KEY_FILES = _cfg("LLM_KEY_FILES", ["~/.llmkey", ".secrets/llmkey"])
-
-
-# ── 回退链助手（原 lkl/services/llm_backend.py，单文件约束内联）────
-class LLMNotConfigured(RuntimeError):
-    """未配置密钥/未开启时抛出，调用方自行降级。"""
-
-
-class LLMChainExhausted(RuntimeError):
-    """所有可回退后端均失败。"""
-
-
-def _configured_chain() -> list[str]:
-    raw = os.environ.get("LKL_LLM_CHAIN")
-    if raw is None:
-        return list(LLM_CHAIN)
-    return [name.strip() for name in raw.split(",") if name.strip()]
-
-
-def resolve_chain(profile: str) -> list[str]:
-    """解析 profile 回退链，过滤未知项并保持调用 profile 在首位。"""
-    configured = _configured_chain()
-    if not configured:
-        return [profile]
-    names: list[str] = []
-    for name in configured:
-        if name not in LLM_PROFILES:
-            continue
-        if name not in names:
-            names.append(name)
-    if profile not in names:
-        names.insert(0, profile)
-    return names or [profile]
-
-
-def _read_file_key() -> str:
-    for fname in LLM_KEY_FILES:
-        path = Path(fname).expanduser()
-        if not path.exists():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            key, _, value = line.partition("=")
-            if key.strip() == "api_key" and value.strip():
-                return value.strip()
-    return ""
-
-
-def resolve_key(profile: str) -> str:
-    """按 profile 专属环境变量、共享环境变量、密钥文件顺序取密钥。"""
-    specific = os.environ.get(f"LKL_LLM_API_KEY_{profile.upper()}", "").strip()
-    if specific:
-        return specific
-    shared = os.environ.get(LLM_KEY_ENV, "").strip()
-    if shared:
-        return shared
-    key = _read_file_key()
-    if key:
-        return key
-    raise LLMNotConfigured(
-        f"未找到密钥：设 {LLM_KEY_ENV} 或放置 {LLM_KEY_FILES}")
-
-
-def fallback_error(exc: Exception) -> bool:
-    """判断异常是否值得切换后端。"""
-    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
-        return True
-    if isinstance(exc, httpx.HTTPStatusError):
-        response = exc.response
-        return bool(response and (response.status_code in (401, 403, 429)
-                                  or response.status_code >= 500))
-    return False
-
-
-def short_error(exc: Exception, secrets: tuple[str, ...] = ()) -> str:
-    """生成不泄露密钥的短错误文本。"""
-    text = str(exc) or exc.__class__.__name__
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, "[REDACTED]")
-    return text[:160]
 
 
 @dataclass(frozen=True)
@@ -215,10 +124,7 @@ def strip_fence(text: str) -> str:
 
 
 class LLMClient:
-    """OpenAI 兼容客户端，按 profile 链逐后端回退。
-
-    链式回退期间持锁，同实例并发调用串行化。
-    """
+    """OpenAI 兼容客户端，按 profile 链逐后端回退。"""
 
     def __init__(self, profile: str = "default", **overrides) -> None:
         self.profile = profile
@@ -259,7 +165,7 @@ class LLMClient:
                 failures.append(f"{backend}: {err}")
                 self._log_call(None, purpose, self._latency_ms(t0),
                                status="FAILOVER", err=err)
-            except Exception as exc:  # noqa: BLE001 —— 失败后按策略回退
+            except Exception as exc:  # noqa: BLE001
                 err = short_error(exc, (self.api_key,))
                 failures.append(f"{backend}: {err}")
                 self._log_call(None, purpose, self._latency_ms(t0),
@@ -353,21 +259,17 @@ def get_client(profile: str = "default", **overrides) -> LLMClient:
 
 
 def comment(trade_date) -> str:
-    """V9 异步点评：读已落盘报告 → 脱敏 → LLM 点评 → 追加写回文件。
-
-    LLM_ENABLED 默认关（拍板③：功能实现但默认不使用）。发布路径不再等
-    第三方 API；手动 `lkl llm-comment <date>` 或 daily.sh 追加异步执行。
-    返回追加的段文本（未开启/失败返回空串并记日志）。
-    """
+    """V9 异步点评：读已落盘报告 → 脱敏 → LLM 点评 → 追加写回文件。"""
     if not LLM_ENABLED:
         return ""
     from emotion_core.algorithms.review.utils import (_atomic_write,
                                                       _strip_position_block)
+    from pathlib import Path
     out = Path("reports") / f"{trade_date}.md"
     if not out.exists():
         return ""
     md = out.read_text(encoding="utf-8")
-    if "⑪ LLM 点评" in md:                # 幂等：已有点评不重复调用
+    if "⑪ LLM 点评" in md:
         return ""
     try:
         sanitized = _strip_position_block(md)
@@ -376,7 +278,7 @@ def comment(trade_date) -> str:
              "对复盘报告给≤120字要点点评，不构成投资建议。"},
              {"role": "user", "content": sanitized}], purpose="llm-comment")
         section = f"\n## ⑪ LLM 点评（{reply.model}，仅供参考）\n\n{reply.text}\n"
-        _atomic_write(out, md + section)     # P2：点评追加也原子
+        _atomic_write(out, md + section)
         return section
-    except Exception as exc:  # noqa: BLE001 —— 增强面失败不影响主报告
+    except Exception as exc:  # noqa: BLE001
         return f"\n> ⚠ LLM 点评失败（{exc}），报告主体不受影响\n"
