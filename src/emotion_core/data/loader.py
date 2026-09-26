@@ -13,6 +13,7 @@ from emotion_core.domain.bar import Bar, DerivedBar
 from emotion_core.domain.market import MarketStat, Phase
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
+from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import connect, transaction
 
 log = logging.getLogger(__name__)
@@ -103,13 +104,59 @@ def load_signal_history(limit: int = 200) -> list[Signal]:
         ) for r in rows]
 
 
-def upsert_ladder_day(rows: list[LadderDay]) -> int:
-    """写入 ladder_day（DELETE+upsert 同一事务）。"""
+def load_ladder_candidates(d: date) -> list[tuple[str, int, bool]]:
+    """梯队候选行 (code, cont_days, is_exchange)：主板 + 剔 ST + cont_days>=2。
+
+    口径 = lkl/services/ladder.py build() 的 WHERE 子句：主板 7 前缀（R3）、
+    次新剔除（W2，first_bar_date 缺失也剔）、整体剔 ST（C5）。
+    """
+    ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
+    with connect() as conn:
+        rows = conn.execute(
+            f"""SELECT d.code, d.cont_days, d.is_exchange
+                FROM derived_bar d JOIN stock_basic s USING (code)
+                WHERE d.date = %s AND d.cont_days >= 2 AND NOT s.is_st
+                  AND left(d.code, 3) IN ({ph})
+                  AND (s.first_bar_date IS NOT NULL
+                       AND s.first_bar_date <= GREATEST(%s::date - %s * interval '1 day',
+                                                        %s::date))
+                ORDER BY d.cont_days DESC, d.code""",
+            (d, *CONFIG.BOARD_PREFIXES, d, CONFIG.NEW_ISSUER_MIN_DAYS,
+             CONFIG.NEW_ISSUER_FLOOR),
+        ).fetchall()
+    return [(r[0], int(r[1]), bool(r[2])) for r in rows]
+
+
+def load_exchange_codes(d: date) -> set[str]:
+    """当日主板换手板代码集（幸存口径：不受 ST / 连板数过滤，同 lkl y_survivors）。"""
+    ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
+    with connect() as conn:
+        rows = conn.execute(
+            f"""SELECT code FROM derived_bar
+                WHERE date = %s AND is_exchange AND left(code, 3) IN ({ph})""",
+            (d, *CONFIG.BOARD_PREFIXES),
+        ).fetchall()
+    return {r[0] for r in rows}
+
+
+def count_derived_rows(d: date) -> int:
+    """当日 derived_bar 行数（上游完整性凭证：0 行 = 缺数日，禁止清空下游）。"""
+    with connect() as conn:
+        return int(conn.execute(
+            "SELECT count(*) FROM derived_bar WHERE date = %s", (d,)
+        ).fetchone()[0])
+
+
+def replace_ladder_day(d: date, rows: list[LadderDay]) -> int:
+    """按日全量替换 ladder_day（DELETE + upsert 同一事务），rows 为空即清空当日。
+
+    全量替换而非纯 upsert：源数据修正/口径变化后，纯 upsert 留不下「已跌出梯队」
+    的幽灵行（lkl A8）。DELETE 与 INSERT 必须同事务（W3）。
+    """
     with transaction() as conn:
+        conn.execute("DELETE FROM ladder_day WHERE date = %s", (d,))
         if not rows:
             return 0
-        d = rows[0].date
-        conn.execute("DELETE FROM ladder_day WHERE date = %s", (d,))
         data = [(r.date, r.code, r.cont_days, r.is_exchange, r.is_top, r.is_sole_top,
                  r.y_top_group_count, r.y_top_survivor_count) for r in rows]
         conn.executemany(

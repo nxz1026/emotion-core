@@ -25,3 +25,4 @@ reports/
 .vscode/
 .DS_Store
 *.swp
+.omp-logs/
