@@ -1,0 +1,1915 @@
+{
+ "datetime": {
+  "read": [
+   "asel:asel/_dates.py:15",
+   "asel:asel/algorithms/boards.py:22",
+   "asel:asel/algorithms/emotion.py:34",
+   "asel:asel/algorithms/limits.py:14",
+   "asel:asel/algorithms/market.py:12",
+   "asel:asel/algorithms/pools.py:23",
+   "asel:asel/algorithms/promotion.py:44",
+   "asel:asel/algorithms/streak_facts.py:28",
+   "asel:asel/orchestration/_serialize.py:18",
+   "asel:asel/orchestration/board_pipeline.py:61",
+   "asel:asel/orchestration/emotion_pipeline.py:71",
+   "asel:asel/orchestration/pipeline.py:29",
+   "asel:asel/orchestration/pool_pipeline.py:56",
+   "asel:asel/orchestration/production.py:19",
+   "asel:asel/orchestration/production_daily.py:33",
+   "asel:asel/orchestration/promotion_pipeline.py:75",
+   "asel:asel/orchestration/real_pipeline.py:28",
+   "asel:asel/orchestration/series_pipeline.py:46",
+   "asel:asel/orchestration/steps.py:23",
+   "asel:asel/orchestration/streak_pipeline.py:48",
+   "asel:asel/quality/coverage.py:17",
+   "asel:asel/research/contracts.py:11",
+   "asel:asel/semantics/rules.py:9",
+   "asel:asel/semantics/seed.py:12",
+   "asel:asel/sources/free_daily.py:14",
+   "asel:asel/sources/manifest.py:5",
+   "asel:asel/sources/st_events.py:8",
+   "asel:asel/storage/repository.py:32",
+   "asel:backfill_history.py:27",
+   "asel:coverage_report.py:11",
+   "asel:scripts/asel-coverage-gate.py:34",
+   "asel:staging/wind_adapter/seed_quota_ledger.py:12",
+   "asel:staging/wind_adapter/test_wind_adapter.py:6",
+   "asel:staging/wind_adapter/wind_client.py:16",
+   "asel:staging/wind_adapter/wind_sources.py:10",
+   "asel:tests/test_algorithms.py:6",
+   "asel:tests/test_board_pipeline.py:17",
+   "asel:tests/test_coverage_gate.py:9",
+   "asel:tests/test_coverage_report_sections.py:13",
+   "asel:tests/test_dashboard_trend.py:20",
+   "asel:tests/test_differential.py:6",
+   "asel:tests/test_emotion_pipeline.py:9",
+   "asel:tests/test_free_source.py:1",
+   "asel:tests/test_orchestration.py:12",
+   "asel:tests/test_orchestration.py:358",
+   "asel:tests/test_p1_rules.py:6",
+   "asel:tests/test_pool_pipeline.py:16",
+   "asel:tests/test_production_daily.py:21",
+   "asel:tests/test_promotion_pipeline.py:17",
+   "asel:tests/test_quality_coverage.py:6",
+   "asel:tests/test_real_pipeline.py:11",
+   "asel:tests/test_real_pipeline_golden.py:17",
+   "asel:tests/test_repository.py:19",
+   "asel:tests/test_research_isolation.py:20",
+   "asel:tests/test_semantics.py:7",
+   "asel:tests/test_serialize_contract.py:15",
+   "asel:tests/test_series_pipeline.py:10",
+   "asel:tests/test_st_scd2.py:5",
+   "asel:tests/test_streak_facts.py:7",
+   "asel:tests/test_streak_pipeline.py:7",
+   "asel:verify_backfill.py:15",
+   "lkl:dashboard/evidence.py:9",
+   "lkl:dashboard/handler.py:2",
+   "lkl:dashboard/loader.py:28",
+   "lkl:dashboard/signal_calendar.py:4",
+   "lkl:dashboard/signaldetail.py:9",
+   "lkl:dashboard/tradeboard.py:10",
+   "lkl:lkl/config.py:5",
+   "lkl:lkl/main.py:42",
+   "lkl:lkl/main.py:5",
+   "lkl:lkl/models/types.py:5",
+   "lkl:lkl/providers/base.py:4",
+   "lkl:lkl/providers/eastmoney.py:4",
+   "lkl:lkl/providers/pytdx_provider.py:4",
+   "lkl:lkl/providers/sina.py:4",
+   "lkl:lkl/services/accelerate.py:16",
+   "lkl:lkl/services/calibrate.py:10",
+   "lkl:lkl/services/compare.py:11",
+   "lkl:lkl/services/derive.py:14",
+   "lkl:lkl/services/dragon_env.py:13",
+   "lkl:lkl/services/emotion.py:17",
+   "lkl:lkl/services/entry.py:10",
+   "lkl:lkl/services/evaluate.py:9",
+   "lkl:lkl/services/execution.py:4",
+   "lkl:lkl/services/exit.py:4",
+   "lkl:lkl/services/health.py:18",
+   "lkl:lkl/services/ingest.py:130",
+   "lkl:lkl/services/ingest.py:14",
+   "lkl:lkl/services/ladder.py:10",
+   "lkl:lkl/services/outcome.py:9",
+   "lkl:lkl/services/pipeline.py:10",
+   "lkl:lkl/services/position.py:4",
+   "lkl:lkl/services/promotion.py:13",
+   "lkl:lkl/services/review/__init__.py:14",
+   "lkl:lkl/services/review/utils.py:7",
+   "lkl:lkl/services/revision.py:12",
+   "lkl:lkl/services/theme.py:15",
+   "lkl:lkl/services/watchlist.py:13",
+   "lkl:lkl/strategy/context.py:4",
+   "lkl:lkl/strategy/runner.py:7",
+   "lkl:lkl/strategy/universe.py:4",
+   "lkl:lkl/utils/dates.py:4",
+   "lkl:scripts/f5_diff.py:14",
+   "lkl:tests/test_audit_fixes.py:10",
+   "lkl:tests/test_data_providers.py:1",
+   "lkl:tests/test_dates.py:27",
+   "lkl:tests/test_dates.py:36",
+   "lkl:tests/test_dates.py:44",
+   "lkl:tests/test_emotion.py:6",
+   "lkl:tests/test_emotion_db.py:6",
+   "lkl:tests/test_entry.py:103",
+   "lkl:tests/test_entry.py:122",
+   "lkl:tests/test_entry.py:147",
+   "lkl:tests/test_entry.py:2",
+   "lkl:tests/test_evaluate_p3a.py:30",
+   "lkl:tests/test_exit.py:2",
+   "lkl:tests/test_health.py:5",
+   "lkl:tests/test_holdings.py:5",
+   "lkl:tests/test_ladder.py:6",
+   "lkl:tests/test_products.py:8",
+   "lkl:tests/test_review_json.py:3",
+   "lkl:tests/test_strategy_loader.py:1",
+   "lkl:tests/test_strategy_runner.py:2",
+   "lkl:tests/test_theme.py:94",
+   "lkl:tests/test_trade.py:10",
+   "lkl:tests/test_trade.py:119",
+   "lkl:tests/test_trade.py:22",
+   "lkl:tests/test_trade.py:383",
+   "lkl:tests/test_trade.py:594",
+   "lkl:tests/test_trade.py:614",
+   "lkl:tests/test_trade.py:67",
+   "lkl:tests/test_trade.py:85",
+   "lkl:tests/test_trade_db.py:11",
+   "lkl:tests/test_v24.py:5",
+   "lkl:tests/test_v9.py:25",
+   "lkl:tests/test_v9.py:40",
+   "lkl:tests/test_v9.py:54",
+   "lkl:tests/test_v9.py:69",
+   "lkl:tests/test_v9.py:78",
+   "lkl:tests/test_watchlist.py:6"
+  ]
+ },
+ "http": {
+  "read": [
+   "asel:asel/presentation/route_handlers.py:4",
+   "asel:asel/presentation/server.py:17",
+   "asel:asel/presentation/server.py:18",
+   "asel:tests/test_dashboard.py:13",
+   "lkl:dashboard/app.py:10",
+   "lkl:dashboard/handler.py:3"
+  ]
+ },
+ "pathlib": {
+  "read": [
+   "asel:asel/orchestration/pipeline.py:30",
+   "asel:asel/orchestration/production.py:20",
+   "asel:asel/orchestration/production_daily.py:34",
+   "asel:asel/orchestration/real_pipeline.py:30",
+   "asel:asel/orchestration/state.py:13",
+   "asel:asel/orchestration/steps.py:24",
+   "asel:asel/presentation/route_handlers.py:5",
+   "asel:asel/presentation/server.py:19",
+   "asel:asel/presentation/view_loaders.py:10",
+   "asel:asel/research/snapshot_reader.py:17",
+   "asel:asel/storage/dbconfig.py:15",
+   "asel:coverage_report.py:12",
+   "asel:migrations/apply.py:28",
+   "asel:scripts/asel-coverage-gate.py:35",
+   "asel:staging/wind_adapter/seed_quota_ledger.py:13",
+   "asel:staging/wind_adapter/test_wind_adapter.py:7",
+   "asel:staging/wind_adapter/wind_client.py:17",
+   "asel:tests/test_algorithms.py:8",
+   "asel:tests/test_backfill_network_guard.py:14",
+   "asel:tests/test_board_pipeline.py:18",
+   "asel:tests/test_coverage_gate.py:10",
+   "asel:tests/test_coverage_report_sections.py:14",
+   "asel:tests/test_dashboard.py:14",
+   "asel:tests/test_dashboard_board.py:18",
+   "asel:tests/test_dashboard_code.py:21",
+   "asel:tests/test_dashboard_emotion.py:13",
+   "asel:tests/test_dashboard_ladder.py:19",
+   "asel:tests/test_dashboard_pool.py:21",
+   "asel:tests/test_dashboard_prefix.py:17",
+   "asel:tests/test_dashboard_promotion.py:19",
+   "asel:tests/test_dashboard_research.py:13",
+   "asel:tests/test_dashboard_trend.py:21",
+   "asel:tests/test_differential.py:8",
+   "asel:tests/test_emotion_pipeline.py:10",
+   "asel:tests/test_final_acceptance.py:14",
+   "asel:tests/test_free_source.py:54",
+   "asel:tests/test_migrations.py:13",
+   "asel:tests/test_orchestration.py:13",
+   "asel:tests/test_p1_rules.py:126",
+   "asel:tests/test_pool_pipeline.py:17",
+   "asel:tests/test_production_daily.py:22",
+   "asel:tests/test_production_entrypoint.py:13",
+   "asel:tests/test_promotion_pipeline.py:18",
+   "asel:tests/test_quality_coverage.py:8",
+   "asel:tests/test_quality_vwap.py:6",
+   "asel:tests/test_real_pipeline.py:13",
+   "asel:tests/test_real_pipeline_golden.py:18",
+   "asel:tests/test_repository.py:151",
+   "asel:tests/test_repository.py:21",
+   "asel:tests/test_research_export.py:11",
+   "asel:tests/test_research_isolation.py:21",
+   "asel:tests/test_review_fixes.py:4",
+   "asel:tests/test_semantics.py:9",
+   "asel:tests/test_serialize_contract.py:17",
+   "asel:tests/test_series_pipeline.py:12",
+   "asel:tests/test_streak_facts.py:8",
+   "asel:tests/test_streak_pipeline.py:8",
+   "asel:tests/test_view_model.py:13",
+   "lkl:dashboard/app.py:11",
+   "lkl:dashboard/handler.py:4",
+   "lkl:dashboard/loader.py:4",
+   "lkl:dashboard/tradefiles.py:7",
+   "lkl:dashboard/tradestatus.py:9",
+   "lkl:lkl/config.py:6",
+   "lkl:lkl/main.py:6",
+   "lkl:lkl/services/calibrate.py:11",
+   "lkl:lkl/services/doctor.py:10",
+   "lkl:lkl/services/evaluate.py:594",
+   "lkl:lkl/services/llm.py:16",
+   "lkl:lkl/services/llm_backend.py:6",
+   "lkl:lkl/services/review/__init__.py:15",
+   "lkl:lkl/services/review/utils.py:9",
+   "lkl:lkl/services/theme.py:16",
+   "lkl:lkl/strategy/loader.py:7",
+   "lkl:lkl/strategy/runner.py:8",
+   "lkl:lkl/utils/db.py:7",
+   "lkl:lkl/utils/env.py:10",
+   "lkl:scripts/f5_diff.py:15",
+   "lkl:tests/test_consume.py:179",
+   "lkl:tests/test_data_providers.py:2",
+   "lkl:tests/test_products.py:9",
+   "lkl:tests/test_strategy_dash.py:2",
+   "lkl:tests/test_strategy_loader.py:2"
+  ]
+ },
+ "urllib": {
+  "read": [
+   "asel:asel/presentation/research_views.py:13",
+   "asel:asel/presentation/route_handlers.py:7",
+   "asel:asel/presentation/server.py:21",
+   "asel:asel/presentation/view_model.py:15",
+   "asel:asel/presentation/vm_research.py:6",
+   "lkl:dashboard/handler.py:5"
+  ]
+ },
+ "dashboard": {
+  "read": [
+   "lkl:dashboard/app.py:18",
+   "lkl:dashboard/handler.py:7",
+   "lkl:dashboard/strategyview.py:9",
+   "lkl:tests/test_strategy_dash.py:4"
+  ]
+ },
+ "lkl": {
+  "read": [
+   "asel:supervise_backfill.sh:73",
+   "asel:watch_backfill.sh:30",
+   "lkl:dashboard/app.py:14",
+   "lkl:dashboard/evidence.py:11",
+   "lkl:dashboard/handler.py:67",
+   "lkl:dashboard/live.py:4",
+   "lkl:dashboard/live.py:5",
+   "lkl:dashboard/signal_calendar.py:6",
+   "lkl:dashboard/signaldetail.py:11",
+   "lkl:dashboard/signaldetail.py:42",
+   "lkl:dashboard/strategyview.py:10",
+   "lkl:dashboard/tradeboard.py:12",
+   "lkl:dashboard/tradefiles.py:10",
+   "lkl:dashboard/tradefiles.py:9",
+   "lkl:dashboard/tradestatus.py:11",
+   "lkl:dashboard/tradestatus.py:12",
+   "lkl:lkl/config.py:8",
+   "lkl:lkl/main.py:10",
+   "lkl:lkl/main.py:111",
+   "lkl:lkl/main.py:116",
+   "lkl:lkl/main.py:135",
+   "lkl:lkl/main.py:145",
+   "lkl:lkl/main.py:146",
+   "lkl:lkl/main.py:161",
+   "lkl:lkl/main.py:162",
+   "lkl:lkl/main.py:178",
+   "lkl:lkl/main.py:199",
+   "lkl:lkl/main.py:213",
+   "lkl:lkl/main.py:23",
+   "lkl:lkl/main.py:231",
+   "lkl:lkl/main.py:259",
+   "lkl:lkl/main.py:292",
+   "lkl:lkl/main.py:309",
+   "lkl:lkl/main.py:328",
+   "lkl:lkl/main.py:335",
+   "lkl:lkl/main.py:356",
+   "lkl:lkl/main.py:357",
+   "lkl:lkl/main.py:373",
+   "lkl:lkl/main.py:388",
+   "lkl:lkl/main.py:408",
+   "lkl:lkl/main.py:409",
+   "lkl:lkl/main.py:426",
+   "lkl:lkl/main.py:429",
+   "lkl:lkl/main.py:444",
+   "lkl:lkl/main.py:462",
+   "lkl:lkl/main.py:482",
+   "lkl:lkl/main.py:493",
+   "lkl:lkl/main.py:520",
+   "lkl:lkl/main.py:538",
+   "lkl:lkl/main.py:547",
+   "lkl:lkl/main.py:56",
+   "lkl:lkl/main.py:563",
+   "lkl:lkl/main.py:637",
+   "lkl:lkl/main.py:70",
+   "lkl:lkl/main.py:84",
+   "lkl:lkl/main.py:9",
+   "lkl:lkl/models/schema.py:358",
+   "lkl:lkl/providers/__init__.py:3",
+   "lkl:lkl/providers/eastmoney.py:17",
+   "lkl:lkl/providers/eastmoney.py:8",
+   "lkl:lkl/providers/pytdx_provider.py:17",
+   "lkl:lkl/providers/pytdx_provider.py:8",
+   "lkl:lkl/providers/sina.py:9",
+   "lkl:lkl/services/accelerate.py:20",
+   "lkl:lkl/services/accelerate.py:21",
+   "lkl:lkl/services/alerts.py:11",
+   "lkl:lkl/services/alerts.py:71",
+   "lkl:lkl/services/calibrate.py:15",
+   "lkl:lkl/services/calibrate.py:16",
+   "lkl:lkl/services/calibrate.py:17",
+   "lkl:lkl/services/calibrate.py:18",
+   "lkl:lkl/services/compare.py:13",
+   "lkl:lkl/services/compare.py:28",
+   "lkl:lkl/services/derive.py:18",
+   "lkl:lkl/services/derive.py:19",
+   "lkl:lkl/services/doctor.py:12",
+   "lkl:lkl/services/doctor.py:13",
+   "lkl:lkl/services/doctor.py:20",
+   "lkl:lkl/services/doctor.py:31",
+   "lkl:lkl/services/doctor.py:57",
+   "lkl:lkl/services/doctor.py:83",
+   "lkl:lkl/services/doctor.py:84",
+   "lkl:lkl/services/doctor.py:85",
+   "lkl:lkl/services/doctor.py:86",
+   "lkl:lkl/services/dragon_env.py:17",
+   "lkl:lkl/services/dragon_env.py:18",
+   "lkl:lkl/services/dragon_env.py:19",
+   "lkl:lkl/services/emotion.py:21",
+   "lkl:lkl/services/emotion.py:22",
+   "lkl:lkl/services/emotion.py:23",
+   "lkl:lkl/services/emotion.py:24",
+   "lkl:lkl/services/emotion.py:25",
+   "lkl:lkl/services/entry.py:14",
+   "lkl:lkl/services/entry.py:15",
+   "lkl:lkl/services/entry.py:16",
+   "lkl:lkl/services/entry.py:17",
+   "lkl:lkl/services/evaluate.py:13",
+   "lkl:lkl/services/evaluate.py:14",
+   "lkl:lkl/services/evaluate.py:15",
+   "lkl:lkl/services/evaluate.py:16",
+   "lkl:lkl/services/execution.py:6",
+   "lkl:lkl/services/exit.py:6",
+   "lkl:lkl/services/exit.py:7",
+   "lkl:lkl/services/exit.py:8",
+   "lkl:lkl/services/health.py:103",
+   "lkl:lkl/services/health.py:125",
+   "lkl:lkl/services/health.py:20",
+   "lkl:lkl/services/ingest.py:20",
+   "lkl:lkl/services/ingest.py:21",
+   "lkl:lkl/services/ingest.py:30",
+   "lkl:lkl/services/ingest.py:31",
+   "lkl:lkl/services/ingest.py:32",
+   "lkl:lkl/services/ingest.py:39",
+   "lkl:lkl/services/ingest.py:792",
+   "lkl:lkl/services/ladder.py:14",
+   "lkl:lkl/services/ladder.py:15",
+   "lkl:lkl/services/ladder.py:16",
+   "lkl:lkl/services/ladder.py:17",
+   "lkl:lkl/services/llm.py:20",
+   "lkl:lkl/services/llm.py:200",
+   "lkl:lkl/services/llm.py:23",
+   "lkl:lkl/services/llm.py:235",
+   "lkl:lkl/services/llm.py:249",
+   "lkl:lkl/services/llm_backend.py:8",
+   "lkl:lkl/services/notify.py:10",
+   "lkl:lkl/services/outcome.py:11",
+   "lkl:lkl/services/outcome.py:12",
+   "lkl:lkl/services/pipeline.py:12",
+   "lkl:lkl/services/pipeline.py:67",
+   "lkl:lkl/services/position.py:6",
+   "lkl:lkl/services/position.py:7",
+   "lkl:lkl/services/promotion.py:114",
+   "lkl:lkl/services/promotion.py:17",
+   "lkl:lkl/services/promotion.py:18",
+   "lkl:lkl/services/promotion.py:19",
+   "lkl:lkl/services/promotion.py:20",
+   "lkl:lkl/services/review/__init__.py:19",
+   "lkl:lkl/services/review/__init__.py:20",
+   "lkl:lkl/services/review/__init__.py:21",
+   "lkl:lkl/services/review/__init__.py:22",
+   "lkl:lkl/services/review/__init__.py:23",
+   "lkl:lkl/services/review/__init__.py:30",
+   "lkl:lkl/services/review/__init__.py:31",
+   "lkl:lkl/services/review/__init__.py:32",
+   "lkl:lkl/services/review/__init__.py:33",
+   "lkl:lkl/services/review/__init__.py:449",
+   "lkl:lkl/services/review/__init__.py:682",
+   "lkl:lkl/services/review/utils.py:13",
+   "lkl:lkl/services/revision.py:14",
+   "lkl:lkl/services/theme.py:20",
+   "lkl:lkl/services/theme.py:21",
+   "lkl:lkl/services/watchlist.py:15",
+   "lkl:lkl/strategy/context.py:8",
+   "lkl:lkl/strategy/loader.py:9",
+   "lkl:lkl/strategy/runner.py:10",
+   "lkl:lkl/strategy/runner.py:11",
+   "lkl:lkl/strategy/runner.py:12",
+   "lkl:lkl/strategy/universe.py:8",
+   "lkl:lkl/strategy/universe.py:9",
+   "lkl:lkl/utils/dates.py:7",
+   "lkl:lkl/utils/db.py:13",
+   "lkl:lkl/utils/db.py:141",
+   "lkl:lkl/utils/env.py:3",
+   "lkl:lkl/utils/price.py:6",
+   "lkl:scripts/ci_local.sh:74",
+   "lkl:scripts/close.sh:16",
+   "lkl:scripts/daily.sh:31",
+   "lkl:scripts/f5_diff.py:19",
+   "lkl:scripts/f5_diff.py:20",
+   "lkl:scripts/f5_diff.py:22",
+   "lkl:scripts/trade.sh:19",
+   "lkl:scripts/trade.sh:30",
+   "lkl:tests/conftest.py:48",
+   "lkl:tests/test_arch.py:18",
+   "lkl:tests/test_arch.py:31",
+   "lkl:tests/test_audit_fixes.py:15",
+   "lkl:tests/test_audit_fixes.py:160",
+   "lkl:tests/test_audit_fixes.py:17",
+   "lkl:tests/test_audit_fixes.py:186",
+   "lkl:tests/test_audit_fixes.py:196",
+   "lkl:tests/test_audit_fixes.py:197",
+   "lkl:tests/test_audit_fixes.py:216",
+   "lkl:tests/test_audit_fixes.py:82",
+   "lkl:tests/test_consume.py:11",
+   "lkl:tests/test_consume.py:12",
+   "lkl:tests/test_consume.py:13",
+   "lkl:tests/test_data_providers.py:7",
+   "lkl:tests/test_data_providers.py:8",
+   "lkl:tests/test_data_providers.py:9",
+   "lkl:tests/test_dates.py:28",
+   "lkl:tests/test_dates.py:37",
+   "lkl:tests/test_dates.py:45",
+   "lkl:tests/test_dates.py:8",
+   "lkl:tests/test_emotion.py:8",
+   "lkl:tests/test_emotion.py:9",
+   "lkl:tests/test_emotion_db.py:10",
+   "lkl:tests/test_emotion_db.py:11",
+   "lkl:tests/test_emotion_db.py:12",
+   "lkl:tests/test_entry.py:160",
+   "lkl:tests/test_entry.py:4",
+   "lkl:tests/test_entry.py:5",
+   "lkl:tests/test_entry.py:59",
+   "lkl:tests/test_entry.py:72",
+   "lkl:tests/test_evaluate_p3a.py:32",
+   "lkl:tests/test_evaluate_p3a.py:33",
+   "lkl:tests/test_evaluate_p3a.py:4",
+   "lkl:tests/test_exit.py:4",
+   "lkl:tests/test_exit.py:5",
+   "lkl:tests/test_health.py:113",
+   "lkl:tests/test_health.py:123",
+   "lkl:tests/test_health.py:133",
+   "lkl:tests/test_health.py:152",
+   "lkl:tests/test_health.py:162",
+   "lkl:tests/test_health.py:170",
+   "lkl:tests/test_health.py:9",
+   "lkl:tests/test_holdings.py:10",
+   "lkl:tests/test_holdings.py:9",
+   "lkl:tests/test_ladder.py:10",
+   "lkl:tests/test_ladder.py:11",
+   "lkl:tests/test_ladder.py:12",
+   "lkl:tests/test_llm.py:5",
+   "lkl:tests/test_llm_backend.py:6",
+   "lkl:tests/test_llm_backend.py:7",
+   "lkl:tests/test_price.py:4",
+   "lkl:tests/test_products.py:13",
+   "lkl:tests/test_products.py:145",
+   "lkl:tests/test_products.py:152",
+   "lkl:tests/test_products.py:166",
+   "lkl:tests/test_products.py:167",
+   "lkl:tests/test_products.py:178",
+   "lkl:tests/test_products.py:179",
+   "lkl:tests/test_products.py:187",
+   "lkl:tests/test_products.py:188",
+   "lkl:tests/test_products.py:196",
+   "lkl:tests/test_products.py:206",
+   "lkl:tests/test_products.py:56",
+   "lkl:tests/test_products.py:70",
+   "lkl:tests/test_products.py:83",
+   "lkl:tests/test_products.py:98",
+   "lkl:tests/test_review_json.py:56",
+   "lkl:tests/test_review_json.py:8",
+   "lkl:tests/test_review_json.py:9",
+   "lkl:tests/test_schema.py:2",
+   "lkl:tests/test_schema.py:24",
+   "lkl:tests/test_schema.py:31",
+   "lkl:tests/test_schema_guard.py:10",
+   "lkl:tests/test_schema_guard.py:18",
+   "lkl:tests/test_schema_guard.py:38",
+   "lkl:tests/test_schema_guard.py:39",
+   "lkl:tests/test_schema_guard.py:58",
+   "lkl:tests/test_strategy_loader.py:6",
+   "lkl:tests/test_strategy_loader.py:7",
+   "lkl:tests/test_strategy_loader.py:8",
+   "lkl:tests/test_strategy_runner.py:5",
+   "lkl:tests/test_strategy_runner.py:6",
+   "lkl:tests/test_streaks.py:2",
+   "lkl:tests/test_theme.py:2",
+   "lkl:tests/test_trade.py:14",
+   "lkl:tests/test_trade.py:15",
+   "lkl:tests/test_trade.py:537",
+   "lkl:tests/test_trade_db.py:119",
+   "lkl:tests/test_trade_db.py:15",
+   "lkl:tests/test_trade_db.py:16",
+   "lkl:tests/test_trade_db.py:82",
+   "lkl:tests/test_v24.py:10",
+   "lkl:tests/test_v24.py:11",
+   "lkl:tests/test_v24.py:12",
+   "lkl:tests/test_v9.py:11",
+   "lkl:tests/test_v9.py:139",
+   "lkl:tests/test_v9.py:147",
+   "lkl:tests/test_v9.py:154",
+   "lkl:tests/test_v9.py:168",
+   "lkl:tests/test_v9.py:17",
+   "lkl:tests/test_v9.py:192",
+   "lkl:tests/test_v9.py:201",
+   "lkl:tests/test_v9.py:218",
+   "lkl:tests/test_v9.py:226",
+   "lkl:tests/test_v9.py:241",
+   "lkl:tests/test_v9.py:250",
+   "lkl:tests/test_v9.py:259",
+   "lkl:tests/test_v9.py:79",
+   "lkl:tests/test_v9.py:87",
+   "lkl:tests/test_watchlist.py:10",
+   "lkl:tests/test_watchlist.py:11"
+  ]
+ },
+ "__future__": {
+  "read": [
+   "asel:asel/_dates.py:13",
+   "asel:asel/_ordering.py:8",
+   "asel:asel/_payload.py:7",
+   "asel:asel/algorithms/boards.py:18",
+   "asel:asel/algorithms/emotion.py:29",
+   "asel:asel/algorithms/limits.py:11",
+   "asel:asel/algorithms/market.py:8",
+   "asel:asel/algorithms/pools.py:19",
+   "asel:asel/algorithms/price.py:9",
+   "asel:asel/algorithms/promotion.py:40",
+   "asel:asel/algorithms/streak_facts.py:24",
+   "asel:asel/algorithms/streaks.py:7",
+   "asel:asel/orchestration/_serialize.py:14",
+   "asel:asel/orchestration/board_pipeline.py:55",
+   "asel:asel/orchestration/emotion_pipeline.py:66",
+   "asel:asel/orchestration/pipeline.py:22",
+   "asel:asel/orchestration/pool_pipeline.py:50",
+   "asel:asel/orchestration/production.py:14",
+   "asel:asel/orchestration/production_daily.py:25",
+   "asel:asel/orchestration/promotion_pipeline.py:69",
+   "asel:asel/orchestration/real_pipeline.py:20",
+   "asel:asel/orchestration/series_pipeline.py:41",
+   "asel:asel/orchestration/state.py:9",
+   "asel:asel/orchestration/steps.py:17",
+   "asel:asel/orchestration/streak_pipeline.py:42",
+   "asel:asel/presentation/component_views.py:6",
+   "asel:asel/presentation/core_views.py:5",
+   "asel:asel/presentation/render.py:8",
+   "asel:asel/presentation/research_views.py:7",
+   "asel:asel/presentation/route_handlers.py:2",
+   "asel:asel/presentation/server.py:12",
+   "asel:asel/presentation/stock_views.py:5",
+   "asel:asel/presentation/view_loaders.py:7",
+   "asel:asel/presentation/view_model.py:11",
+   "asel:asel/presentation/views.py:9",
+   "asel:asel/presentation/vm_board.py:2",
+   "asel:asel/presentation/vm_common.py:2",
+   "asel:asel/presentation/vm_core.py:2",
+   "asel:asel/presentation/vm_emotion.py:2",
+   "asel:asel/presentation/vm_ladder.py:5",
+   "asel:asel/presentation/vm_models.py:5",
+   "asel:asel/presentation/vm_pool.py:2",
+   "asel:asel/presentation/vm_promotion.py:2",
+   "asel:asel/presentation/vm_research.py:2",
+   "asel:asel/presentation/vm_stock.py:2",
+   "asel:asel/quality/coverage.py:14",
+   "asel:asel/quality/vwap.py:9",
+   "asel:asel/research/__init__.py:12",
+   "asel:asel/research/backtest.py:2",
+   "asel:asel/research/backtest_helpers.py:2",
+   "asel:asel/research/boundary.py:15",
+   "asel:asel/research/contracts.py:8",
+   "asel:asel/research/export.py:11",
+   "asel:asel/research/filtering.py:10",
+   "asel:asel/research/snapshot_reader.py:14",
+   "asel:asel/semantics/price.py:2",
+   "asel:asel/semantics/rules.py:6",
+   "asel:asel/semantics/seed.py:10",
+   "asel:asel/sources/free_daily.py:11",
+   "asel:asel/sources/manifest.py:2",
+   "asel:asel/sources/st_events.py:5",
+   "asel:asel/storage/dbconfig.py:13",
+   "asel:asel/storage/differential.py:25",
+   "asel:asel/storage/repository.py:26",
+   "asel:backfill_history.py:19",
+   "asel:coverage_report.py:7",
+   "asel:migrations/apply.py:21",
+   "asel:scripts/asel-coverage-gate.py:30",
+   "asel:staging/wind_adapter/seed_quota_ledger.py:7",
+   "asel:staging/wind_adapter/test_wind_adapter.py:2",
+   "asel:staging/wind_adapter/wind_client.py:6",
+   "asel:staging/wind_adapter/wind_sources.py:5",
+   "asel:tests/test_algorithms.py:2",
+   "asel:tests/test_backfill_network_guard.py:10",
+   "asel:tests/test_board_pipeline.py:14",
+   "asel:tests/test_coverage_gate.py:6",
+   "asel:tests/test_coverage_report_sections.py:10",
+   "asel:tests/test_dashboard.py:7",
+   "asel:tests/test_dashboard_board.py:11",
+   "asel:tests/test_dashboard_code.py:15",
+   "asel:tests/test_dashboard_emotion.py:7",
+   "asel:tests/test_dashboard_ladder.py:14",
+   "asel:tests/test_dashboard_pool.py:15",
+   "asel:tests/test_dashboard_prefix.py:14",
+   "asel:tests/test_dashboard_promotion.py:12",
+   "asel:tests/test_dashboard_research.py:7",
+   "asel:tests/test_dashboard_trend.py:17",
+   "asel:tests/test_differential.py:2",
+   "asel:tests/test_emotion_pipeline.py:6",
+   "asel:tests/test_final_acceptance.py:10",
+   "asel:tests/test_migrations.py:7",
+   "asel:tests/test_orchestration.py:6",
+   "asel:tests/test_p1_rules.py:2",
+   "asel:tests/test_pool_pipeline.py:13",
+   "asel:tests/test_production_daily.py:14",
+   "asel:tests/test_production_entrypoint.py:9",
+   "asel:tests/test_promotion_pipeline.py:14",
+   "asel:tests/test_quality_coverage.py:2",
+   "asel:tests/test_quality_vwap.py:2",
+   "asel:tests/test_real_pipeline.py:6",
+   "asel:tests/test_real_pipeline_golden.py:13",
+   "asel:tests/test_repository.py:15",
+   "asel:tests/test_research_backtest.py:1",
+   "asel:tests/test_research_export.py:6",
+   "asel:tests/test_research_filtering.py:6",
+   "asel:tests/test_research_isolation.py:13",
+   "asel:tests/test_review_fixes.py:1",
+   "asel:tests/test_semantics.py:2",
+   "asel:tests/test_serialize_contract.py:11",
+   "asel:tests/test_series_pipeline.py:7",
+   "asel:tests/test_st_scd2.py:2",
+   "asel:tests/test_streak_facts.py:4",
+   "asel:tests/test_streak_pipeline.py:4",
+   "asel:tests/test_view_model.py:10",
+   "asel:verify_backfill.py:10",
+   "lkl:dashboard/app.py:6",
+   "lkl:dashboard/evidence.py:7",
+   "lkl:dashboard/httpbase.py:2",
+   "lkl:dashboard/live.py:2",
+   "lkl:dashboard/loader.py:2",
+   "lkl:dashboard/signal_calendar.py:2",
+   "lkl:dashboard/signaldetail.py:7",
+   "lkl:dashboard/strategyview.py:3",
+   "lkl:dashboard/tradeboard.py:8",
+   "lkl:dashboard/tradefiles.py:5",
+   "lkl:dashboard/tradestatus.py:6",
+   "lkl:lkl/config.py:2",
+   "lkl:lkl/main.py:2",
+   "lkl:lkl/models/schema.py:3",
+   "lkl:lkl/models/types.py:2",
+   "lkl:lkl/providers/base.py:2",
+   "lkl:lkl/providers/eastmoney.py:2",
+   "lkl:lkl/providers/pytdx_provider.py:2",
+   "lkl:lkl/providers/sina.py:2",
+   "lkl:lkl/services/accelerate.py:13",
+   "lkl:lkl/services/alerts.py:7",
+   "lkl:lkl/services/calibrate.py:7",
+   "lkl:lkl/services/compare.py:8",
+   "lkl:lkl/services/derive.py:11",
+   "lkl:lkl/services/doctor.py:7",
+   "lkl:lkl/services/dragon_env.py:9",
+   "lkl:lkl/services/emotion.py:14",
+   "lkl:lkl/services/entry.py:6",
+   "lkl:lkl/services/evaluate.py:5",
+   "lkl:lkl/services/execution.py:2",
+   "lkl:lkl/services/exit.py:2",
+   "lkl:lkl/services/health.py:15",
+   "lkl:lkl/services/ingest.py:7",
+   "lkl:lkl/services/ladder.py:7",
+   "lkl:lkl/services/llm.py:8",
+   "lkl:lkl/services/llm_backend.py:2",
+   "lkl:lkl/services/notify.py:5",
+   "lkl:lkl/services/outcome.py:6",
+   "lkl:lkl/services/pipeline.py:7",
+   "lkl:lkl/services/position.py:2",
+   "lkl:lkl/services/promotion.py:10",
+   "lkl:lkl/services/review/__init__.py:10",
+   "lkl:lkl/services/review/utils.py:2",
+   "lkl:lkl/services/revision.py:8",
+   "lkl:lkl/services/theme.py:8",
+   "lkl:lkl/services/watchlist.py:10",
+   "lkl:lkl/strategy/context.py:2",
+   "lkl:lkl/strategy/loader.py:2",
+   "lkl:lkl/strategy/runner.py:2",
+   "lkl:lkl/strategy/universe.py:2",
+   "lkl:lkl/utils/dates.py:2",
+   "lkl:lkl/utils/db.py:2",
+   "lkl:lkl/utils/env.py:7",
+   "lkl:lkl/utils/price.py:2",
+   "lkl:scripts/f5_diff.py:9",
+   "lkl:tests/test_consume.py:5",
+   "lkl:tests/test_holdings.py:2",
+   "lkl:tests/test_products.py:6",
+   "lkl:tests/test_trade.py:7",
+   "lkl:tests/test_trade_db.py:8",
+   "lkl:tests/test_v9.py:7"
+  ]
+ },
+ "theme_group": {
+  "read": [
+   "lkl:dashboard/evidence.py:18",
+   "lkl:lkl/services/dragon_env.py:136",
+   "lkl:lkl/services/dragon_env.py:72",
+   "lkl:lkl/services/dragon_env.py:78",
+   "lkl:lkl/services/review/__init__.py:358",
+   "lkl:lkl/services/theme.py:283"
+  ],
+  "write": [
+   "lkl:lkl/services/theme.py:283",
+   "lkl:lkl/services/theme.py:284"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:219"
+  ]
+ },
+ "daily_bar": {
+  "read": [
+   "asel:coverage_report.py:187",
+   "asel:coverage_report.py:202",
+   "asel:coverage_report.py:281",
+   "asel:coverage_report.py:305",
+   "asel:supervise_backfill.sh:76",
+   "asel:tests/test_coverage_report_sections.py:26",
+   "asel:verify_backfill.py:176",
+   "asel:verify_backfill.py:195",
+   "asel:verify_backfill.py:80",
+   "asel:watch_backfill.sh:33",
+   "lkl:dashboard/evidence.py:36",
+   "lkl:dashboard/live.py:20",
+   "lkl:lkl/services/derive.py:57",
+   "lkl:lkl/services/doctor.py:33",
+   "lkl:lkl/services/doctor.py:88",
+   "lkl:lkl/services/dragon_env.py:205",
+   "lkl:lkl/services/emotion.py:73",
+   "lkl:lkl/services/emotion.py:74",
+   "lkl:lkl/services/evaluate.py:483",
+   "lkl:lkl/services/evaluate.py:65",
+   "lkl:lkl/services/evaluate.py:92",
+   "lkl:lkl/services/ingest.py:774",
+   "lkl:lkl/services/ingest.py:775",
+   "lkl:lkl/services/ingest.py:786",
+   "lkl:lkl/services/ladder.py:31",
+   "lkl:lkl/services/outcome.py:29",
+   "lkl:lkl/services/promotion.py:39",
+   "lkl:lkl/services/promotion.py:41",
+   "lkl:lkl/services/review/__init__.py:128",
+   "lkl:lkl/services/watchlist.py:61",
+   "lkl:lkl/strategy/context.py:23",
+   "lkl:lkl/utils/dates.py:24",
+   "lkl:lkl/utils/dates.py:31",
+   "lkl:lkl/utils/dates.py:41",
+   "lkl:lkl/utils/dates.py:59"
+  ],
+  "write": [
+   "lkl:lkl/services/ingest.py:602",
+   "lkl:lkl/services/ingest.py:661",
+   "lkl:lkl/services/ingest.py:675"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:18"
+  ]
+ },
+ "derived_bar": {
+  "read": [
+   "lkl:dashboard/evidence.py:41",
+   "lkl:lkl/services/accelerate.py:41",
+   "lkl:lkl/services/accelerate.py:59",
+   "lkl:lkl/services/accelerate.py:80",
+   "lkl:lkl/services/accelerate.py:82",
+   "lkl:lkl/services/accelerate.py:91",
+   "lkl:lkl/services/derive.py:132",
+   "lkl:lkl/services/derive.py:154",
+   "lkl:lkl/services/derive.py:89",
+   "lkl:lkl/services/dragon_env.py:31",
+   "lkl:lkl/services/emotion.py:116",
+   "lkl:lkl/services/emotion.py:117",
+   "lkl:lkl/services/emotion.py:119",
+   "lkl:lkl/services/emotion.py:161",
+   "lkl:lkl/services/emotion.py:185",
+   "lkl:lkl/services/emotion.py:52",
+   "lkl:lkl/services/emotion.py:71",
+   "lkl:lkl/services/emotion.py:92",
+   "lkl:lkl/services/emotion.py:94",
+   "lkl:lkl/services/evaluate.py:71",
+   "lkl:lkl/services/exit.py:19",
+   "lkl:lkl/services/health.py:53",
+   "lkl:lkl/services/ingest.py:851",
+   "lkl:lkl/services/ladder.py:29",
+   "lkl:lkl/services/ladder.py:77",
+   "lkl:lkl/services/ladder.py:94",
+   "lkl:lkl/services/promotion.py:37",
+   "lkl:lkl/services/promotion.py:40",
+   "lkl:lkl/services/promotion.py:93",
+   "lkl:lkl/services/review/__init__.py:114",
+   "lkl:lkl/services/review/__init__.py:655",
+   "lkl:lkl/services/review/__init__.py:80",
+   "lkl:lkl/services/watchlist.py:51",
+   "lkl:lkl/services/watchlist.py:60",
+   "lkl:lkl/strategy/context.py:23",
+   "lkl:tests/test_ladder.py:19",
+   "lkl:tests/test_watchlist.py:61"
+  ],
+  "write": [
+   "lkl:lkl/services/derive.py:60"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:32"
+  ]
+ },
+ "signal": {
+  "read": [
+   "lkl:dashboard/signal_calendar.py:18",
+   "lkl:dashboard/signaldetail.py:18",
+   "lkl:dashboard/tradeboard.py:18",
+   "lkl:lkl/services/compare.py:21",
+   "lkl:lkl/services/entry.py:328",
+   "lkl:lkl/services/evaluate.py:470",
+   "lkl:lkl/services/evaluate.py:483",
+   "lkl:lkl/services/health.py:75",
+   "lkl:lkl/services/ingest.py:853",
+   "lkl:lkl/services/outcome.py:55",
+   "lkl:lkl/services/review/__init__.py:307",
+   "lkl:lkl/services/review/__init__.py:51",
+   "lkl:lkl/services/review/__init__.py:62",
+   "lkl:tests/test_trade_db.py:103",
+   "lkl:tests/test_trade_db.py:26",
+   "lkl:tests/test_trade_db.py:31",
+   "lkl:tests/test_trade_db.py:95"
+  ],
+  "write": [
+   "lkl:lkl/services/entry.py:216",
+   "lkl:tests/test_trade.py:250",
+   "lkl:tests/test_trade.py:274",
+   "lkl:tests/test_trade.py:439",
+   "lkl:tests/test_trade_db.py:26",
+   "lkl:tests/test_trade_db.py:69"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:113"
+  ]
+ },
+ "signal_outcome": {
+  "read": [
+   "lkl:dashboard/signal_calendar.py:19",
+   "lkl:lkl/services/calibrate.py:71",
+   "lkl:lkl/services/health.py:76",
+   "lkl:lkl/services/outcome.py:56",
+   "lkl:tests/test_emotion_db.py:50"
+  ],
+  "write": [
+   "lkl:lkl/services/outcome.py:66"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:128"
+  ]
+ },
+ "position": {
+  "read": [
+   "lkl:dashboard/live.py:11",
+   "lkl:dashboard/tradeboard.py:33",
+   "lkl:dashboard/tradeboard.py:47",
+   "lkl:lkl/services/position.py:27",
+   "lkl:lkl/services/review/__init__.py:309",
+   "lkl:tests/test_consume.py:105",
+   "lkl:tests/test_consume.py:124",
+   "lkl:tests/test_consume.py:134",
+   "lkl:tests/test_consume.py:173",
+   "lkl:tests/test_consume.py:34",
+   "lkl:tests/test_consume.py:85",
+   "lkl:tests/test_holdings.py:53",
+   "lkl:tests/test_holdings.py:68",
+   "lkl:tests/test_trade_db.py:100",
+   "lkl:tests/test_trade_db.py:124",
+   "lkl:tests/test_trade_db.py:25",
+   "lkl:tests/test_trade_db.py:89"
+  ],
+  "write": [
+   "lkl:lkl/services/position.py:13",
+   "lkl:tests/test_consume.py:105",
+   "lkl:tests/test_consume.py:124",
+   "lkl:tests/test_consume.py:173",
+   "lkl:tests/test_consume.py:82",
+   "lkl:tests/test_consume.py:85",
+   "lkl:tests/test_holdings.py:53",
+   "lkl:tests/test_holdings.py:55",
+   "lkl:tests/test_holdings.py:68",
+   "lkl:tests/test_holdings.py:92",
+   "lkl:tests/test_trade.py:207",
+   "lkl:tests/test_trade.py:300",
+   "lkl:tests/test_trade.py:410",
+   "lkl:tests/test_trade.py:531",
+   "lkl:tests/test_trade_db.py:25",
+   "lkl:tests/test_trade_db.py:72"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:155"
+  ]
+ },
+ "stock_basic": {
+  "read": [
+   "lkl:dashboard/strategyview.py:59",
+   "lkl:lkl/main.py:123",
+   "lkl:lkl/services/accelerate.py:41",
+   "lkl:lkl/services/accelerate.py:59",
+   "lkl:lkl/services/derive.py:153",
+   "lkl:lkl/services/derive.py:57",
+   "lkl:lkl/services/dragon_env.py:137",
+   "lkl:lkl/services/emotion.py:52",
+   "lkl:lkl/services/emotion.py:72",
+   "lkl:lkl/services/evaluate.py:227",
+   "lkl:lkl/services/evaluate.py:449",
+   "lkl:lkl/services/ingest.py:477",
+   "lkl:lkl/services/ingest.py:596",
+   "lkl:lkl/services/ingest.py:671",
+   "lkl:lkl/services/ladder.py:30",
+   "lkl:lkl/services/promotion.py:38",
+   "lkl:lkl/services/review/__init__.py:359",
+   "lkl:lkl/services/review/__init__.py:370",
+   "lkl:lkl/services/theme.py:144",
+   "lkl:lkl/services/watchlist.py:24",
+   "lkl:lkl/strategy/runner.py:93"
+  ],
+  "write": [
+   "lkl:lkl/services/ingest.py:490"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:7"
+  ]
+ },
+ "trade_event": {
+  "read": [
+   "lkl:dashboard/tradeboard.py:36"
+  ],
+  "write": [
+   "lkl:tests/test_trade.py:271",
+   "lkl:tests/test_trade.py:436",
+   "lkl:tests/test_trade.py:477"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:307"
+  ]
+ },
+ "pipeline_state": {
+  "read": [
+   "lkl:dashboard/tradeboard.py:49",
+   "lkl:lkl/services/pipeline.py:77"
+  ],
+  "write": [
+   "lkl:lkl/services/pipeline.py:34",
+   "lkl:lkl/services/pipeline.py:47",
+   "lkl:lkl/services/pipeline.py:60"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:303"
+  ]
+ },
+ "import": {
+  "write": [
+   "asel:tests/test_dashboard_board.py:13",
+   "asel:tests/test_dashboard_emotion.py:9",
+   "asel:tests/test_dashboard_ladder.py:16",
+   "asel:tests/test_dashboard_pool.py:17",
+   "asel:tests/test_dashboard_promotion.py:14",
+   "asel:tests/test_dashboard_research.py:9",
+   "asel:tests/test_research_backtest.py:3",
+   "lkl:scripts/f5_diff.py:11"
+  ]
+ },
+ "types": {
+  "read": [
+   "asel:asel/orchestration/steps.py:25",
+   "asel:tests/test_research_backtest.py:4",
+   "asel:tests/test_research_export.py:35",
+   "asel:tests/test_serialize_contract.py:70",
+   "lkl:tests/test_entry.py:58",
+   "lkl:tests/test_strategy_runner.py:3"
+  ]
+ },
+ "decimal": {
+  "read": [
+   "asel:asel/algorithms/limits.py:15",
+   "asel:asel/algorithms/market.py:13",
+   "asel:asel/algorithms/price.py:11",
+   "asel:asel/orchestration/_serialize.py:19",
+   "asel:asel/orchestration/real_pipeline.py:29",
+   "asel:asel/presentation/render.py:10",
+   "asel:asel/presentation/vm_core.py:3",
+   "asel:asel/quality/coverage.py:18",
+   "asel:asel/quality/vwap.py:11",
+   "asel:asel/semantics/price.py:4",
+   "asel:asel/semantics/rules.py:10",
+   "asel:asel/semantics/seed.py:13",
+   "asel:asel/sources/free_daily.py:15",
+   "asel:asel/storage/repository.py:33",
+   "asel:tests/test_algorithms.py:7",
+   "asel:tests/test_differential.py:7",
+   "asel:tests/test_free_source.py:2",
+   "asel:tests/test_orchestration.py:570",
+   "asel:tests/test_quality_coverage.py:7",
+   "asel:tests/test_quality_vwap.py:5",
+   "asel:tests/test_real_pipeline.py:12",
+   "asel:tests/test_repository.py:20",
+   "asel:tests/test_semantics.py:8",
+   "asel:tests/test_serialize_contract.py:16",
+   "asel:tests/test_series_pipeline.py:11",
+   "lkl:lkl/services/review/utils.py:8",
+   "lkl:lkl/utils/price.py:4",
+   "lkl:tests/test_price.py:35",
+   "lkl:tests/test_review_json.py:4"
+  ]
+ },
+ "market_stat": {
+  "read": [
+   "lkl:lkl/services/accelerate.py:124",
+   "lkl:lkl/services/calibrate.py:57",
+   "lkl:lkl/services/calibrate.py:90",
+   "lkl:lkl/services/dragon_env.py:297",
+   "lkl:lkl/services/emotion.py:143",
+   "lkl:lkl/services/emotion.py:404",
+   "lkl:lkl/services/emotion.py:415",
+   "lkl:lkl/services/entry.py:179",
+   "lkl:lkl/services/evaluate.py:239",
+   "lkl:lkl/services/exit.py:12",
+   "lkl:lkl/services/review/__init__.py:277",
+   "lkl:lkl/services/review/__init__.py:41",
+   "lkl:lkl/strategy/context.py:40",
+   "lkl:tests/test_emotion_db.py:17"
+  ],
+  "write": [
+   "lkl:lkl/services/emotion.py:450",
+   "lkl:lkl/services/emotion.py:480"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:59"
+  ]
+ },
+ "alert": {
+  "write": [
+   "lkl:lkl/services/alerts.py:22",
+   "lkl:lkl/services/compare.py:35",
+   "lkl:tests/test_products.py:124",
+   "lkl:tests/test_products.py:139"
+  ],
+  "read": [
+   "lkl:lkl/services/alerts.py:24",
+   "lkl:lkl/services/alerts.py:41",
+   "lkl:lkl/services/alerts.py:51",
+   "lkl:lkl/services/alerts.py:64"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:311"
+  ]
+ },
+ "typing": {
+  "read": [
+   "asel:asel/_dates.py:16",
+   "asel:asel/_ordering.py:10",
+   "asel:asel/_payload.py:9",
+   "asel:asel/algorithms/emotion.py:35",
+   "asel:asel/algorithms/pools.py:24",
+   "asel:asel/algorithms/price.py:12",
+   "asel:asel/algorithms/promotion.py:45",
+   "asel:asel/algorithms/streak_facts.py:29",
+   "asel:asel/orchestration/_serialize.py:20",
+   "asel:asel/orchestration/board_pipeline.py:62",
+   "asel:asel/orchestration/emotion_pipeline.py:72",
+   "asel:asel/orchestration/pipeline.py:31",
+   "asel:asel/orchestration/pool_pipeline.py:57",
+   "asel:asel/orchestration/production.py:21",
+   "asel:asel/orchestration/production_daily.py:35",
+   "asel:asel/orchestration/promotion_pipeline.py:76",
+   "asel:asel/orchestration/real_pipeline.py:31",
+   "asel:asel/orchestration/series_pipeline.py:47",
+   "asel:asel/orchestration/state.py:14",
+   "asel:asel/orchestration/steps.py:26",
+   "asel:asel/orchestration/streak_pipeline.py:49",
+   "asel:asel/presentation/component_views.py:8",
+   "asel:asel/presentation/core_views.py:7",
+   "asel:asel/presentation/render.py:12",
+   "asel:asel/presentation/research_views.py:14",
+   "asel:asel/presentation/route_handlers.py:6",
+   "asel:asel/presentation/server.py:20",
+   "asel:asel/presentation/stock_views.py:7",
+   "asel:asel/presentation/view_loaders.py:11",
+   "asel:asel/presentation/view_model.py:14",
+   "asel:asel/presentation/views.py:11",
+   "asel:asel/presentation/vm_board.py:4",
+   "asel:asel/presentation/vm_common.py:4",
+   "asel:asel/presentation/vm_core.py:4",
+   "asel:asel/presentation/vm_emotion.py:4",
+   "asel:asel/presentation/vm_ladder.py:7",
+   "asel:asel/presentation/vm_models.py:8",
+   "asel:asel/presentation/vm_pool.py:4",
+   "asel:asel/presentation/vm_promotion.py:4",
+   "asel:asel/presentation/vm_research.py:4",
+   "asel:asel/presentation/vm_stock.py:4",
+   "asel:asel/quality/coverage.py:19",
+   "asel:asel/quality/vwap.py:12",
+   "asel:asel/research/backtest.py:5",
+   "asel:asel/research/backtest_helpers.py:4",
+   "asel:asel/research/boundary.py:19",
+   "asel:asel/research/contracts.py:12",
+   "asel:asel/research/export.py:16",
+   "asel:asel/research/filtering.py:12",
+   "asel:asel/research/snapshot_reader.py:18",
+   "asel:asel/semantics/price.py:5",
+   "asel:asel/semantics/rules.py:11",
+   "asel:asel/sources/free_daily.py:16",
+   "asel:asel/sources/manifest.py:8",
+   "asel:asel/sources/st_events.py:9",
+   "asel:asel/storage/dbconfig.py:16",
+   "asel:asel/storage/differential.py:27",
+   "asel:asel/storage/repository.py:34",
+   "asel:coverage_report.py:13",
+   "asel:staging/wind_adapter/wind_client.py:18",
+   "asel:staging/wind_adapter/wind_sources.py:11",
+   "asel:tests/test_production_daily.py:23",
+   "lkl:lkl/main.py:7",
+   "lkl:lkl/providers/base.py:5",
+   "lkl:lkl/utils/db.py:8"
+  ]
+ },
+ "ladder_day": {
+  "read": [
+   "lkl:lkl/main.py:122",
+   "lkl:lkl/services/dragon_env.py:134",
+   "lkl:lkl/services/dragon_env.py:139",
+   "lkl:lkl/services/dragon_env.py:185",
+   "lkl:lkl/services/dragon_env.py:200",
+   "lkl:lkl/services/evaluate.py:164",
+   "lkl:lkl/services/evaluate.py:448",
+   "lkl:lkl/services/ladder.py:112",
+   "lkl:lkl/services/ladder.py:127",
+   "lkl:lkl/services/review/__init__.py:371",
+   "lkl:lkl/services/theme.py:159",
+   "lkl:lkl/services/theme.py:248",
+   "lkl:lkl/services/theme.py:275",
+   "lkl:lkl/services/theme.py:317",
+   "lkl:lkl/strategy/context.py:30"
+  ],
+  "write": [
+   "lkl:lkl/services/ladder.py:112",
+   "lkl:lkl/services/ladder.py:127",
+   "lkl:lkl/services/ladder.py:128"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:101"
+  ]
+ },
+ "limit_pool_em": {
+  "read": [
+   "lkl:lkl/main.py:124",
+   "lkl:lkl/models/schema.py:345",
+   "lkl:lkl/services/derive.py:132",
+   "lkl:lkl/services/derive.py:152",
+   "lkl:lkl/services/ingest.py:749",
+   "lkl:lkl/services/ladder.py:32",
+   "lkl:lkl/services/review/__init__.py:109",
+   "lkl:lkl/services/review/__init__.py:145",
+   "lkl:lkl/services/review/__init__.py:652",
+   "lkl:lkl/strategy/universe.py:20"
+  ],
+  "write": [
+   "lkl:lkl/services/ingest.py:749",
+   "lkl:lkl/services/ingest.py:751"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:46"
+  ]
+ },
+ "watchlist": {
+  "write": [
+   "lkl:lkl/services/watchlist.py:23",
+   "lkl:lkl/services/watchlist.py:33"
+  ],
+  "read": [
+   "lkl:lkl/services/watchlist.py:33",
+   "lkl:lkl/services/watchlist.py:38",
+   "lkl:lkl/services/watchlist.py:59"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:315"
+  ]
+ },
+ "data_revision": {
+  "write": [
+   "lkl:lkl/services/revision.py:37"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:318"
+  ]
+ },
+ "collections": {
+  "read": [
+   "asel:asel/algorithms/boards.py:20",
+   "asel:asel/algorithms/emotion.py:32",
+   "asel:asel/algorithms/market.py:10",
+   "asel:asel/algorithms/pools.py:21",
+   "asel:asel/algorithms/promotion.py:42",
+   "asel:asel/algorithms/streak_facts.py:26",
+   "asel:asel/algorithms/streaks.py:9",
+   "asel:asel/orchestration/_serialize.py:17",
+   "asel:asel/orchestration/board_pipeline.py:59",
+   "asel:asel/orchestration/emotion_pipeline.py:70",
+   "asel:asel/orchestration/pipeline.py:27",
+   "asel:asel/orchestration/pool_pipeline.py:54",
+   "asel:asel/orchestration/promotion_pipeline.py:73",
+   "asel:asel/orchestration/real_pipeline.py:26",
+   "asel:asel/orchestration/series_pipeline.py:45",
+   "asel:asel/orchestration/state.py:12",
+   "asel:asel/orchestration/steps.py:21",
+   "asel:asel/orchestration/streak_pipeline.py:46",
+   "lkl:lkl/services/ingest.py:287",
+   "lkl:lkl/services/revision.py:11"
+  ]
+ },
+ "review_report": {
+  "read": [
+   "lkl:lkl/services/health.py:40",
+   "lkl:lkl/services/review/__init__.py:214"
+  ],
+  "write": [
+   "lkl:lkl/services/review/__init__.py:766"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:167"
+  ]
+ },
+ "hot_rank": {
+  "write": [
+   "lkl:lkl/services/ingest.py:827",
+   "lkl:lkl/services/ingest.py:845"
+  ],
+  "read": [
+   "lkl:lkl/services/review/__init__.py:600",
+   "lkl:lkl/services/review/__init__.py:609",
+   "lkl:lkl/strategy/context.py:33",
+   "lkl:lkl/strategy/universe.py:21"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:148"
+  ]
+ },
+ "ingest_progress": {
+  "write": [
+   "lkl:lkl/services/ingest.py:471"
+  ],
+  "read": [
+   "lkl:lkl/services/ingest.py:478"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:196"
+  ]
+ },
+ "concurrent": {
+  "read": [
+   "asel:backfill_history.py:714",
+   "lkl:lkl/services/ingest.py:13"
+  ]
+ },
+ "exc": {
+  "read": [
+   "asel:asel/_dates.py:54",
+   "asel:asel/orchestration/pipeline.py:420",
+   "asel:asel/orchestration/production.py:49",
+   "asel:asel/orchestration/production.py:64",
+   "asel:asel/orchestration/production_daily.py:514",
+   "asel:asel/orchestration/production_daily.py:521",
+   "asel:asel/presentation/server.py:258",
+   "asel:asel/sources/free_daily.py:62",
+   "asel:asel/sources/free_daily.py:79",
+   "asel:asel/storage/repository.py:337",
+   "asel:asel/storage/repository.py:353",
+   "asel:asel/storage/repository.py:370",
+   "asel:asel/storage/repository.py:432",
+   "asel:scripts/asel-coverage-gate.py:99",
+   "asel:staging/wind_adapter/wind_client.py:153",
+   "asel:staging/wind_adapter/wind_client.py:162",
+   "lkl:lkl/providers/eastmoney.py:27",
+   "lkl:lkl/providers/pytdx_provider.py:34",
+   "lkl:lkl/providers/sina.py:29",
+   "lkl:lkl/services/ingest.py:102",
+   "lkl:lkl/services/ingest.py:106",
+   "lkl:lkl/services/ingest.py:144",
+   "lkl:lkl/services/ingest.py:148",
+   "lkl:lkl/services/ingest.py:391",
+   "lkl:lkl/services/review/__init__.py:743"
+  ]
+ },
+ "pytdx": {
+  "read": [
+   "lkl:lkl/services/ingest.py:518"
+  ]
+ },
+ "theme_tag": {
+  "write": [
+   "lkl:lkl/services/theme.py:206",
+   "lkl:lkl/services/theme.py:328"
+  ],
+  "read": [
+   "lkl:lkl/services/dragon_env.py:135",
+   "lkl:lkl/services/dragon_env.py:185",
+   "lkl:lkl/services/evaluate.py:514",
+   "lkl:lkl/services/review/__init__.py:370",
+   "lkl:lkl/services/theme.py:242",
+   "lkl:lkl/services/theme.py:269",
+   "lkl:lkl/services/theme.py:328",
+   "lkl:lkl/strategy/context.py:32"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:203"
+  ]
+ },
+ "eval_result": {
+  "write": [
+   "lkl:lkl/services/evaluate.py:597"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:173"
+  ]
+ },
+ "promotion_day": {
+  "write": [
+   "lkl:lkl/services/promotion.py:116",
+   "lkl:lkl/services/promotion.py:125",
+   "lkl:lkl/services/promotion.py:126"
+  ],
+  "read": [
+   "lkl:lkl/services/dragon_env.py:118",
+   "lkl:lkl/services/dragon_env.py:97",
+   "lkl:lkl/services/dragon_env.py:99",
+   "lkl:lkl/services/promotion.py:116",
+   "lkl:lkl/services/promotion.py:125",
+   "lkl:lkl/services/review/__init__.py:190"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:88"
+  ]
+ },
+ "llm_call_log": {
+  "write": [
+   "lkl:lkl/services/llm.py:203",
+   "lkl:lkl/strategy/runner.py:30"
+  ],
+  "ddl": [
+   "lkl:lkl/models/schema.py:183"
+  ]
+ },
+ "dataclasses": {
+  "read": [
+   "asel:asel/algorithms/boards.py:21",
+   "asel:asel/algorithms/emotion.py:33",
+   "asel:asel/algorithms/limits.py:13",
+   "asel:asel/algorithms/market.py:11",
+   "asel:asel/algorithms/pools.py:22",
+   "asel:asel/algorithms/promotion.py:43",
+   "asel:asel/algorithms/streak_facts.py:27",
+   "asel:asel/orchestration/board_pipeline.py:60",
+   "asel:asel/orchestration/pipeline.py:28",
+   "asel:asel/orchestration/pool_pipeline.py:55",
+   "asel:asel/orchestration/production_daily.py:32",
+   "asel:asel/orchestration/promotion_pipeline.py:74",
+   "asel:asel/orchestration/real_pipeline.py:27",
+   "asel:asel/orchestration/steps.py:22",
+   "asel:asel/orchestration/streak_pipeline.py:47",
+   "asel:asel/presentation/view_model.py:13",
+   "asel:asel/presentation/vm_models.py:7",
+   "asel:asel/presentation/vm_research.py:3",
+   "asel:asel/presentation/vm_stock.py:3",
+   "asel:asel/research/contracts.py:10",
+   "asel:asel/semantics/rules.py:8",
+   "asel:asel/sources/free_daily.py:13",
+   "asel:asel/sources/manifest.py:4",
+   "asel:asel/sources/st_events.py:7",
+   "asel:asel/storage/repository.py:31",
+   "asel:staging/wind_adapter/wind_client.py:15",
+   "asel:staging/wind_adapter/wind_sources.py:9",
+   "asel:tests/test_semantics.py:6",
+   "lkl:lkl/models/types.py:4",
+   "lkl:lkl/services/llm.py:15",
+   "lkl:lkl/strategy/loader.py:6"
+  ]
+ },
+ "tops": {
+  "read": [
+   "lkl:lkl/services/dragon_env.py:206",
+   "lkl:lkl/services/dragon_env.py:208"
+  ]
+ },
+ "nxt": {
+  "read": [
+   "lkl:lkl/services/dragon_env.py:208"
+  ]
+ },
+ "desc": {
+  "read": [
+   "asel:migrations/0002_p0_reference.sql:88",
+   "lkl:lkl/services/review/__init__.py:191"
+  ]
+ },
+ "integer": {
+  "read": [
+   "lkl:lkl/models/schema.py:91"
+  ]
+ },
+ "pg_constraint": {
+  "read": [
+   "asel:tests/test_migrations.py:450",
+   "lkl:lkl/models/schema.py:340"
+  ]
+ },
+ "strategy_signal": {
+  "ddl": [
+   "lkl:lkl/models/schema.py:233"
+  ],
+  "write": [
+   "lkl:lkl/strategy/runner.py:105"
+  ],
+  "read": [
+   "lkl:lkl/strategy/runner.py:38"
+  ]
+ },
+ "contextlib": {
+  "read": [
+   "lkl:lkl/utils/db.py:6"
+  ]
+ },
+ "zoneinfo": {
+  "read": [
+   "lkl:lkl/utils/dates.py:5"
+  ]
+ },
+ "storage": {
+  "read": [
+   "asel:backfill_history.py:39",
+   "asel:backfill_history.py:40",
+   "asel:coverage_report.py:18",
+   "asel:migrations/apply.py:33",
+   "asel:scripts/asel-coverage-gate.py:67",
+   "asel:tests/test_differential.py:13",
+   "asel:tests/test_migrations.py:326",
+   "asel:tests/test_migrations.py:333",
+   "asel:tests/test_migrations.py:344",
+   "asel:tests/test_migrations.py:356",
+   "asel:tests/test_migrations.py:411",
+   "asel:tests/test_production_daily.py:400",
+   "asel:tests/test_repository.py:25",
+   "asel:tests/test_repository.py:492",
+   "asel:verify_backfill.py:24"
+  ]
+ },
+ "date": {
+  "read": [
+   "asel:coverage_report.py:247",
+   "asel:migrations/0002_p0_reference.sql:40",
+   "asel:migrations/0002_p0_reference.sql:68",
+   "asel:tests/test_coverage_report_sections.py:35"
+  ]
+ },
+ "daily_bar_raw": {
+  "read": [
+   "asel:asel/orchestration/production_daily.py:187",
+   "asel:asel/orchestration/production_daily.py:208",
+   "asel:asel/orchestration/series_pipeline.py:109",
+   "asel:asel/orchestration/series_pipeline.py:119",
+   "asel:asel/orchestration/series_pipeline.py:122",
+   "asel:asel/orchestration/series_pipeline.py:127",
+   "asel:asel/orchestration/streak_pipeline.py:106",
+   "asel:asel/orchestration/streak_pipeline.py:109",
+   "asel:asel/orchestration/streak_pipeline.py:114",
+   "asel:asel/orchestration/streak_pipeline.py:96",
+   "asel:scripts/asel-coverage-gate.py:16",
+   "asel:scripts/asel-coverage-gate.py:74",
+   "asel:scripts/asel-coverage-gate.py:77",
+   "asel:scripts/asel-coverage-gate.py:86",
+   "asel:supervise_backfill.sh:74",
+   "asel:tests/test_coverage_report_sections.py:43",
+   "asel:tests/test_coverage_report_sections.py:44",
+   "asel:tests/test_coverage_report_sections.py:45",
+   "asel:tests/test_coverage_report_sections.py:46",
+   "asel:tests/test_production_daily.py:413",
+   "asel:tests/test_production_daily.py:425",
+   "asel:watch_backfill.sh:31"
+  ],
+  "ddl": [
+   "asel:migrations/0006_core_daily_bar.sql:22"
+  ],
+  "write": [
+   "asel:asel/storage/repository.py:161",
+   "asel:tests/test_repository.py:182",
+   "asel:tests/test_repository.py:371",
+   "asel:tests/test_repository.py:468"
+  ]
+ },
+ "security_master": {
+  "read": [
+   "asel:asel/orchestration/production_daily.py:216",
+   "asel:asel/orchestration/streak_pipeline.py:124",
+   "asel:backfill_history.py:179",
+   "asel:backfill_history.py:382",
+   "asel:backfill_history.py:397",
+   "asel:scripts/asel-coverage-gate.py:17",
+   "asel:scripts/asel-coverage-gate.py:81",
+   "asel:supervise_backfill.sh:75",
+   "asel:tests/test_coverage_report_sections.py:40",
+   "asel:watch_backfill.sh:32"
+  ],
+  "write": [
+   "asel:backfill_history.py:81"
+  ],
+  "ddl": [
+   "asel:migrations/0006_core_daily_bar.sql:41"
+  ]
+ },
+ "semantics": {
+  "read": [
+   "asel:backfill_history.py:37",
+   "asel:tests/test_algorithms.py:31",
+   "asel:tests/test_algorithms.py:32",
+   "asel:tests/test_differential.py:12",
+   "asel:tests/test_p1_rules.py:10",
+   "asel:tests/test_real_pipeline.py:29",
+   "asel:tests/test_real_pipeline_golden.py:25",
+   "asel:tests/test_research_isolation.py:224",
+   "asel:tests/test_semantics.py:17",
+   "asel:tests/test_semantics.py:18",
+   "asel:tests/test_streak_pipeline.py:29",
+   "asel:verify_backfill.py:22"
+  ]
+ },
+ "ops_raw_manifest": {
+  "ddl": [
+   "asel:migrations/0003_p0_ops.sql:10"
+  ],
+  "write": [
+   "asel:asel/storage/repository.py:193",
+   "asel:tests/test_repository.py:349"
+  ]
+ },
+ "ops_pipeline_state": {
+  "ddl": [
+   "asel:migrations/0003_p0_ops.sql:42"
+  ]
+ },
+ "ops_data_revision": {
+  "ddl": [
+   "asel:migrations/0003_p0_ops.sql:64"
+  ]
+ },
+ "ops_quota_ledger": {
+  "ddl": [
+   "asel:migrations/0003_p0_ops.sql:83"
+  ]
+ },
+ "ref_trading_calendar": {
+  "ddl": [
+   "asel:migrations/0002_p0_reference.sql:12"
+  ]
+ },
+ "ref_limit_rule": {
+  "ddl": [
+   "asel:migrations/0002_p0_reference.sql:34"
+  ],
+  "read": [
+   "asel:asel/storage/repository.py:181",
+   "asel:tests/test_repository.py:282"
+  ]
+ },
+ "ref_security_status": {
+  "ddl": [
+   "asel:migrations/0002_p0_reference.sql:66"
+  ],
+  "read": [
+   "asel:asel/orchestration/production_daily.py:213",
+   "asel:asel/orchestration/streak_pipeline.py:121",
+   "asel:asel/storage/repository.py:188",
+   "asel:tests/test_repository.py:310"
+  ]
+ },
+ "ref_adjust_factor": {
+  "ddl": [
+   "asel:migrations/0002_p0_reference.sql:96"
+  ]
+ },
+ "ref_dividend": {
+  "ddl": [
+   "asel:migrations/0002_p0_reference.sql:114"
+  ]
+ },
+ "schema_version": {
+  "ddl": [
+   "asel:migrations/0001_schema_version.sql:12"
+  ]
+ },
+ "preregistration": {
+  "ddl": [
+   "asel:migrations/0005_research_isolation.sql:26"
+  ]
+ },
+ "cohort": {
+  "ddl": [
+   "asel:migrations/0005_research_isolation.sql:52"
+  ]
+ },
+ "label": {
+  "ddl": [
+   "asel:migrations/0005_research_isolation.sql:75"
+  ]
+ },
+ "result": {
+  "ddl": [
+   "asel:migrations/0005_research_isolation.sql:99"
+  ]
+ },
+ "annotation": {
+  "ddl": [
+   "asel:migrations/0005_research_isolation.sql:124"
+  ]
+ },
+ "call_log": {
+  "ddl": [
+   "asel:migrations/0005_research_isolation.sql:145"
+  ]
+ },
+ "orchestration": {
+  "read": [
+   "asel:tests/test_board_pipeline.py:38",
+   "asel:tests/test_emotion_pipeline.py:52",
+   "asel:tests/test_emotion_pipeline.py:53",
+   "asel:tests/test_emotion_pipeline.py:60",
+   "asel:tests/test_emotion_pipeline.py:61",
+   "asel:tests/test_emotion_pipeline.py:65",
+   "asel:tests/test_emotion_pipeline.py:66",
+   "asel:tests/test_orchestration.py:21",
+   "asel:tests/test_orchestration.py:22",
+   "asel:tests/test_orchestration.py:23",
+   "asel:tests/test_pool_pipeline.py:35",
+   "asel:tests/test_production_daily.py:31",
+   "asel:tests/test_production_daily.py:32",
+   "asel:tests/test_production_entrypoint.py:21",
+   "asel:tests/test_promotion_pipeline.py:48",
+   "asel:tests/test_real_pipeline.py:21",
+   "asel:tests/test_real_pipeline_golden.py:24",
+   "asel:tests/test_research_isolation.py:223",
+   "asel:tests/test_serialize_contract.py:23",
+   "asel:tests/test_series_pipeline.py:21",
+   "asel:tests/test_streak_pipeline.py:23"
+  ]
+ },
+ "algorithms": {
+  "read": [
+   "asel:tests/test_algorithms.py:16",
+   "asel:tests/test_algorithms.py:28",
+   "asel:tests/test_algorithms.py:29",
+   "asel:tests/test_algorithms.py:30",
+   "asel:tests/test_board_pipeline.py:26",
+   "asel:tests/test_board_pipeline.py:35",
+   "asel:tests/test_board_pipeline.py:36",
+   "asel:tests/test_board_pipeline.py:37",
+   "asel:tests/test_emotion_pipeline.py:18",
+   "asel:tests/test_emotion_pipeline.py:45",
+   "asel:tests/test_emotion_pipeline.py:67",
+   "asel:tests/test_emotion_pipeline.py:68",
+   "asel:tests/test_pool_pipeline.py:25",
+   "asel:tests/test_pool_pipeline.py:26",
+   "asel:tests/test_pool_pipeline.py:34",
+   "asel:tests/test_promotion_pipeline.py:26",
+   "asel:tests/test_promotion_pipeline.py:33",
+   "asel:tests/test_promotion_pipeline.py:34",
+   "asel:tests/test_promotion_pipeline.py:47",
+   "asel:tests/test_series_pipeline.py:20",
+   "asel:tests/test_streak_facts.py:16",
+   "asel:tests/test_streak_facts.py:26",
+   "asel:tests/test_streak_pipeline.py:16",
+   "asel:tests/test_streak_pipeline.py:17"
+  ]
+ },
+ "snapshots": {
+  "read": [
+   "asel:tests/test_board_pipeline.py:44",
+   "asel:tests/test_emotion_pipeline.py:69",
+   "asel:tests/test_orchestration.py:41",
+   "asel:tests/test_pool_pipeline.py:41",
+   "asel:tests/test_production_daily.py:33",
+   "asel:tests/test_production_entrypoint.py:23",
+   "asel:tests/test_promotion_pipeline.py:54",
+   "asel:tests/test_real_pipeline.py:30",
+   "asel:tests/test_real_pipeline_golden.py:26",
+   "asel:tests/test_series_pipeline.py:34",
+   "asel:tests/test_streak_pipeline.py:30"
+  ]
+ },
+ "presentation": {
+  "read": [
+   "asel:tests/test_dashboard.py:22",
+   "asel:tests/test_dashboard_board.py:26",
+   "asel:tests/test_dashboard_board.py:27",
+   "asel:tests/test_dashboard_code.py:29",
+   "asel:tests/test_dashboard_code.py:30",
+   "asel:tests/test_dashboard_emotion.py:21",
+   "asel:tests/test_dashboard_emotion.py:22",
+   "asel:tests/test_dashboard_ladder.py:27",
+   "asel:tests/test_dashboard_ladder.py:28",
+   "asel:tests/test_dashboard_pool.py:29",
+   "asel:tests/test_dashboard_pool.py:30",
+   "asel:tests/test_dashboard_prefix.py:21",
+   "asel:tests/test_dashboard_promotion.py:27",
+   "asel:tests/test_dashboard_promotion.py:28",
+   "asel:tests/test_dashboard_research.py:21",
+   "asel:tests/test_dashboard_research.py:22",
+   "asel:tests/test_dashboard_research.py:538",
+   "asel:tests/test_dashboard_trend.py:25",
+   "asel:tests/test_dashboard_trend.py:26",
+   "asel:tests/test_production_entrypoint.py:22",
+   "asel:tests/test_real_pipeline.py:28",
+   "asel:tests/test_research_backtest.py:8",
+   "asel:tests/test_research_export.py:37",
+   "asel:tests/test_review_fixes.py:6",
+   "asel:tests/test_view_model.py:19",
+   "asel:tests/test_view_model.py:26",
+   "asel:tests/test_view_model.py:27",
+   "asel:tests/test_view_model.py:57",
+   "asel:tests/test_view_model.py:85"
+  ]
+ },
+ "test_dashboard": {
+  "read": [
+   "asel:tests/test_dashboard_board.py:28",
+   "asel:tests/test_dashboard_code.py:31",
+   "asel:tests/test_dashboard_emotion.py:23",
+   "asel:tests/test_dashboard_ladder.py:29",
+   "asel:tests/test_dashboard_pool.py:31",
+   "asel:tests/test_dashboard_prefix.py:22",
+   "asel:tests/test_dashboard_promotion.py:29",
+   "asel:tests/test_dashboard_research.py:23",
+   "asel:tests/test_dashboard_trend.py:27"
+  ]
+ },
+ "from": {
+  "write": [
+   "asel:asel/algorithms/emotion.py:31",
+   "asel:tests/test_research_backtest.py:3"
+  ],
+  "read": [
+   "asel:asel/storage/differential.py:252"
+  ]
+ },
+ "copy": {
+  "read": [
+   "asel:tests/test_research_backtest.py:3"
+  ]
+ },
+ "research": {
+  "read": [
+   "asel:tests/test_research_backtest.py:10",
+   "asel:tests/test_research_export.py:13",
+   "asel:tests/test_research_filtering.py:10",
+   "asel:tests/test_research_isolation.py:29",
+   "asel:tests/test_research_isolation.py:330"
+  ]
+ },
+ "quality": {
+  "read": [
+   "asel:asel/quality/__init__.py:2",
+   "asel:asel/quality/__init__.py:3",
+   "asel:tests/test_quality_coverage.py:16",
+   "asel:tests/test_quality_vwap.py:14"
+  ]
+ },
+ "sources": {
+  "read": [
+   "asel:tests/test_free_source.py:6",
+   "asel:tests/test_free_source.py:7",
+   "asel:tests/test_p1_rules.py:15",
+   "asel:tests/test_repository.py:244",
+   "asel:tests/test_st_scd2.py:7"
+  ]
+ },
+ "assert": {
+  "read": [
+   "asel:tests/test_st_scd2.py:111"
+  ]
+ },
+ "payload": {
+  "write": [
+   "asel:tests/test_view_model.py:468"
+  ]
+ },
+ "asel_research": {
+  "ddl": [
+   "asel:tests/test_research_isolation.py:75"
+  ]
+ },
+ "tests": {
+  "read": [
+   "asel:tests/test_review_fixes.py:7"
+  ]
+ },
+ "wind_client": {
+  "read": [
+   "asel:staging/wind_adapter/seed_quota_ledger.py:19",
+   "asel:staging/wind_adapter/test_wind_adapter.py:15",
+   "asel:staging/wind_adapter/wind_sources.py:13"
+  ]
+ },
+ "raw": {
+  "read": [
+   "asel:staging/wind_adapter/seed_quota_ledger.py:75"
+  ]
+ },
+ "wind_sources": {
+  "read": [
+   "asel:staging/wind_adapter/test_wind_adapter.py:26"
+  ]
+ },
+ "those": {
+  "read": [
+   "asel:asel/sources/free_daily.py:6"
+  ]
+ },
+ "and": {
+  "read": [
+   "asel:asel/sources/st_events.py:103"
+  ]
+ },
+ "current_name": {
+  "read": [
+   "asel:asel/sources/st_events.py:149"
+  ]
+ },
+ "html": {
+  "read": [
+   "asel:asel/presentation/render.py:11"
+  ]
+ },
+ "importlib": {
+  "read": [
+   "asel:asel/presentation/research_views.py:12"
+  ]
+ },
+ "component_views": {
+  "read": [
+   "asel:asel/presentation/views.py:46"
+  ]
+ },
+ "bars": {
+  "read": [
+   "asel:asel/orchestration/production_daily.py:213",
+   "asel:asel/orchestration/series_pipeline.py:132",
+   "asel:asel/orchestration/streak_pipeline.py:120"
+  ]
+ },
+ "codes": {
+  "read": [
+   "asel:asel/orchestration/series_pipeline.py:131",
+   "asel:asel/orchestration/streak_pipeline.py:119"
+  ]
+ },
+ "days": {
+  "read": [
+   "asel:asel/orchestration/series_pipeline.py:131",
+   "asel:asel/orchestration/streak_pipeline.py:119"
+  ]
+ },
+ "the": {
+  "read": [
+   "asel:asel/algorithms/emotion.py:470"
+  ]
+ },
+ "its": {
+  "read": [
+   "asel:asel/algorithms/emotion.py:488"
+  ]
+ },
+ "streak": {
+  "read": [
+   "asel:asel/algorithms/pools.py:266"
+  ]
+ },
+ "base": {
+  "read": [
+   "asel:asel/storage/differential.py:190"
+  ]
+ }
+}

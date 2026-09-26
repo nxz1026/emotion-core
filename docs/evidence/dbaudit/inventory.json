@@ -1,0 +1,402 @@
+[
+ {
+  "table": "asel.daily_bar_raw",
+  "rows": 14402582,
+  "bytes": 3047743488,
+  "date_cols": [
+   "date",
+   "fetched_at"
+  ],
+  "date_range": "2010-01-04 ~ 2026-09-24"
+ },
+ {
+  "table": "asel.ops_data_revision",
+  "rows": 0,
+  "bytes": 24576,
+  "date_cols": [
+   "trade_date",
+   "revised_at"
+  ]
+ },
+ {
+  "table": "asel.ops_pipeline_state",
+  "rows": 0,
+  "bytes": 24576,
+  "date_cols": [
+   "trade_date",
+   "started_at",
+   "finished_at"
+  ]
+ },
+ {
+  "table": "asel.ops_quota_ledger",
+  "rows": 0,
+  "bytes": 24576,
+  "date_cols": [
+   "window_start",
+   "window_end",
+   "recorded_at"
+  ]
+ },
+ {
+  "table": "asel.ops_raw_manifest",
+  "rows": 0,
+  "bytes": 32768,
+  "date_cols": [
+   "fetched_at_utc"
+  ]
+ },
+ {
+  "table": "asel.ref_adjust_factor",
+  "rows": 56930,
+  "bytes": 13811712,
+  "date_cols": [
+   "trade_date",
+   "as_of",
+   "available_at",
+   "fetched_at"
+  ],
+  "date_range": "2023-05-29 ~ 2026-09-24"
+ },
+ {
+  "table": "asel.ref_dividend",
+  "rows": 0,
+  "bytes": 16384,
+  "date_cols": [
+   "ex_date",
+   "as_of",
+   "available_at"
+  ]
+ },
+ {
+  "table": "asel.ref_limit_rule",
+  "rows": 0,
+  "bytes": 65536,
+  "date_cols": [
+   "valid_from",
+   "valid_to",
+   "available_at",
+   "created_at"
+  ]
+ },
+ {
+  "table": "asel.ref_security_status",
+  "rows": 0,
+  "bytes": 32768,
+  "date_cols": [
+   "valid_from",
+   "valid_to",
+   "available_at",
+   "ingested_at"
+  ]
+ },
+ {
+  "table": "asel.ref_trading_calendar",
+  "rows": 0,
+  "bytes": 24576,
+  "date_cols": [
+   "cal_date",
+   "prev_open_date",
+   "next_open_date",
+   "as_of",
+   "available_at"
+  ]
+ },
+ {
+  "table": "asel.schema_version",
+  "rows": 5,
+  "bytes": 49152,
+  "date_cols": [
+   "applied_at"
+  ],
+  "date_range": "2026-09-18 10:28:33.965248+00 ~ 2026-09-18 11:35:14.213938+00"
+ },
+ {
+  "table": "asel.security_master",
+  "rows": 5930,
+  "bytes": 1073152,
+  "date_cols": [
+   "list_date",
+   "delist_date",
+   "bar_first_date",
+   "bar_last_date",
+   "updated_at",
+   "available_at"
+  ],
+  "date_range": "1990-12-19 ~ 2022-05-25"
+ },
+ {
+  "table": "asel_research.annotation",
+  "rows": 0,
+  "bytes": 24576,
+  "date_cols": [
+   "created_at"
+  ]
+ },
+ {
+  "table": "asel_research.call_log",
+  "rows": 0,
+  "bytes": 24576,
+  "date_cols": [
+   "created_at"
+  ]
+ },
+ {
+  "table": "asel_research.cohort",
+  "rows": 0,
+  "bytes": 65536,
+  "date_cols": [
+   "as_of",
+   "created_at"
+  ]
+ },
+ {
+  "table": "asel_research.label",
+  "rows": 0,
+  "bytes": 65536,
+  "date_cols": [
+   "label_date",
+   "created_at"
+  ]
+ },
+ {
+  "table": "asel_research.preregistration",
+  "rows": 0,
+  "bytes": 49152,
+  "date_cols": [
+   "frozen_at",
+   "created_at"
+  ]
+ },
+ {
+  "table": "asel_research.result",
+  "rows": 0,
+  "bytes": 65536,
+  "date_cols": [
+   "computed_at",
+   "created_at"
+  ]
+ },
+ {
+  "table": "public.alert",
+  "rows": 8,
+  "bytes": 32768,
+  "date_cols": [
+   "created_at",
+   "acked_at"
+  ],
+  "date_range": "2026-09-03 14:40:52.539477+00 ~ 2026-09-24 09:31:01.574892+00"
+ },
+ {
+  "table": "public.daily_bar",
+  "rows": 3510495,
+  "bytes": 490037248,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2023-11-21 ~ 2026-09-24"
+ },
+ {
+  "table": "public.data_revision",
+  "rows": 73,
+  "bytes": 65536,
+  "date_cols": [
+   "trade_date",
+   "created_at"
+  ],
+  "date_range": "2026-09-02 ~ 2026-09-24"
+ },
+ {
+  "table": "public.derived_bar",
+  "rows": 3339347,
+  "bytes": 797065216,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2023-12-04 ~ 2026-09-24"
+ },
+ {
+  "table": "public.eval_result",
+  "rows": 12,
+  "bytes": 73728,
+  "date_cols": [
+   "start_date",
+   "end_date",
+   "created_at"
+  ],
+  "date_range": "2024-01-01 ~ 2026-08-20"
+ },
+ {
+  "table": "public.hot_rank",
+  "rows": 436968,
+  "bytes": 33513472,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2025-08-31 ~ 2026-09-24"
+ },
+ {
+  "table": "public.ingest_progress",
+  "rows": 5554,
+  "bytes": 622592,
+  "date_cols": [
+   "done_at"
+  ],
+  "date_range": "2026-08-31 04:22:13.289267+00 ~ 2026-08-31 05:04:14.376171+00"
+ },
+ {
+  "table": "public.ladder_day",
+  "rows": 8656,
+  "bytes": 958464,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2024-01-02 ~ 2026-09-24"
+ },
+ {
+  "table": "public.limit_pool_em",
+  "rows": 3015,
+  "bytes": 434176,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2026-08-11 ~ 2026-09-24"
+ },
+ {
+  "table": "public.llm_call_log",
+  "rows": 384,
+  "bytes": 98304,
+  "date_cols": [
+   "ts"
+  ],
+  "date_range": "2026-08-31 05:55:38.729087+00 ~ 2026-09-24 09:50:48.356028+00"
+ },
+ {
+  "table": "public.market_stat",
+  "rows": 661,
+  "bytes": 1187840,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2024-01-02 ~ 2026-09-24"
+ },
+ {
+  "table": "public.pipeline_state",
+  "rows": 10,
+  "bytes": 65536,
+  "date_cols": [
+   "for_date",
+   "started_at",
+   "finished_at"
+  ],
+  "date_range": "None ~ None"
+ },
+ {
+  "table": "public.position",
+  "rows": 4,
+  "bytes": 49152,
+  "date_cols": [
+   "entry_date",
+   "closed_date"
+  ],
+  "date_range": "2026-08-28 ~ 2026-09-04"
+ },
+ {
+  "table": "public.promotion_day",
+  "rows": 3305,
+  "bytes": 393216,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2024-01-02 ~ 2026-09-24"
+ },
+ {
+  "table": "public.review_report",
+  "rows": 21,
+  "bytes": 180224,
+  "date_cols": [
+   "date",
+   "created_at"
+  ],
+  "date_range": "2026-08-10 ~ 2026-09-24"
+ },
+ {
+  "table": "public.signal",
+  "rows": 6,
+  "bytes": 65536,
+  "date_cols": [
+   "confirm_date",
+   "feedback_date",
+   "created_at"
+  ],
+  "date_range": "2024-01-05 ~ 2026-09-14"
+ },
+ {
+  "table": "public.signal_outcome",
+  "rows": 6,
+  "bytes": 32768,
+  "date_cols": [
+   "confirm_date",
+   "updated_at"
+  ],
+  "date_range": "2024-01-05 ~ 2026-09-14"
+ },
+ {
+  "table": "public.stock_basic",
+  "rows": 5554,
+  "bytes": 1138688,
+  "date_cols": [
+   "list_date",
+   "updated_at",
+   "first_bar_date"
+  ],
+  "date_range": "None ~ None"
+ },
+ {
+  "table": "public.strategy_signal",
+  "rows": 302,
+  "bytes": 253952,
+  "date_cols": [
+   "trade_date",
+   "created_at"
+  ],
+  "date_range": "2026-09-11 ~ 2026-09-24"
+ },
+ {
+  "table": "public.theme_group",
+  "rows": 825,
+  "bytes": 180224,
+  "date_cols": [
+   "date"
+  ],
+  "date_range": "2026-08-31 ~ 2026-09-24"
+ },
+ {
+  "table": "public.theme_tag",
+  "rows": 180,
+  "bytes": 163840,
+  "date_cols": [
+   "date",
+   "evidence_date"
+  ],
+  "date_range": "2026-08-31 ~ 2026-09-24"
+ },
+ {
+  "table": "public.trade_event",
+  "rows": 466,
+  "bytes": 98304,
+  "date_cols": [
+   "for_date",
+   "created_at"
+  ],
+  "date_range": "2026-09-03 ~ 2026-09-11"
+ },
+ {
+  "table": "public.watchlist",
+  "rows": 0,
+  "bytes": 16384,
+  "date_cols": [
+   "added_at"
+  ]
+ }
+]
