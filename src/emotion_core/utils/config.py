@@ -18,7 +18,10 @@ class Config:
     DATA_START: date = date(2024, 1, 1)  # 判定口径起点（数据层保留 2010 起）
 
     # ── 状态机（lkl emotion.py）──────────────
-    CLIMAX_ZT: int = 80  # 高潮：涨停家数 >
+    CLIMAX_ZT: int = 80              # 高潮：涨停家数 >
+    CLIMAX_AMPLITUDE: float = 15.0  # 高潮：最高板振幅 ≥(%)
+    FERMENT_ZT_PERF: float = 1.5    # 发酵：昨涨停表现 ≥(%)
+    CLIMAX_AMPLITUDE: float = 15.0  # 高潮：最高板振幅 ≥(%)
     ICE_ZT_MAX: int = 40  # 冰点：涨停家数 < 且最高板 ≤ 3
     BOMB_RATE_FALLBACK: float = 0.42  # 自适应炸板阈值 fallback
     BOMB_RATE_WINDOW: int = 30  # 前 30 交易日 median+σ
@@ -33,6 +36,14 @@ class Config:
 
     # ── 运维 ──────────────────────────────────
     MIN_COVERAGE: float = 0.90  # 覆盖率硬门槛（asel A12）
+
+    # ── 状态机额外阈值（lkl emotion.py）──────────────
+    EBB_ZT_PERF: float = -2.0              # 退潮：昨涨停表现 ≤ (%)
+    EBB_LD_MIN: int = 15                   # 退潮：跌停数绝对下限
+    EBB_LD_MULT: float = 2.0               # 退潮：跌停数 ≥ 昨日的 EBB_LD_MULT 倍
+    ICE_MAX_DAYS: int = 3                  # 冰点持续上限
+    DIVERGE_NEG_MIN: int = 3               # 高潮分歧降级：负反馈 ≥
+    DIVERGE_WINDOW: str = "NONE"           # 分歧降级窗口
 
     # ── 开关 ──────────────────────────────────
     SECONDARY_EXPORT_ENABLED: bool = False  # 次级推荐影子模式
