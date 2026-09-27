@@ -26,6 +26,7 @@ STEPS = [
     ("promotion", "晋级率"),
     ("theme", "题材"),
     ("ecosystem", "生态评级"),
+    ("strategy", "策略观察"),
     ("outcome", "结果回填"),
     ("health", "健康推送"),
 ]
@@ -110,6 +111,9 @@ def _run_step(step: str, trade_date: date) -> None:
     elif step == "ecosystem":
         from emotion_core.services.ecosystem_service import run as ecosystem_run
         ecosystem_run(trade_date)
+    elif step == "strategy":
+        from emotion_core.services.strategy import run_for_date as strategy_run
+        strategy_run(trade_date)
     elif step == "outcome":
         from emotion_core.services.replay_service import run as replay_run
         # outcome 回填

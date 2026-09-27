@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from emotion_core.utils.config import CONFIG
@@ -135,3 +136,171 @@ def short_error(exc: Exception, secrets: tuple[str, ...] = ()) -> str:
         if secret:
             text = text.replace(secret, "[REDACTED]")
     return text[:160]
+
+
+# ── LLM Client (strategy observer) ──────────────────
+
+import threading
+import time
+import httpx as _httpx
+
+from emotion_core.utils.config import CONFIG
+
+
+class LLMReply:
+    """LLM 回复包装。"""
+    __slots__ = ("text", "prompt_tokens", "completion_tokens", "latency_ms", "model")
+
+    def __init__(self, text: str, prompt_tokens: int, completion_tokens: int,
+                 latency_ms: int, model: str):
+        self.text = text
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.latency_ms = latency_ms
+        self.model = model
+
+
+class LLMClient:
+    """OpenAI 兼容客户端，按 profile 链逐后端回退。"""
+
+    def __init__(self, profile: str = "default", **overrides) -> None:
+        self.profile = profile
+        self._overrides = overrides
+        self._lock = threading.Lock()
+        self.params = _resolve_params(profile, overrides)
+        self.api_key = resolve_key(profile)
+        self._request_profile = profile
+
+    def chat(self, messages: list[dict], purpose: str = "chat",
+             json_mode: bool = False) -> LLMReply:
+        with self._lock:
+            original = (self.profile, self.params, self.api_key)
+            try:
+                return self._chat_locked(messages, purpose, json_mode)
+            finally:
+                self.profile, self.params, self.api_key = original
+
+    def _chat_locked(self, messages: list[dict], purpose: str,
+                     json_mode: bool) -> LLMReply:
+        chain = resolve_chain(self.profile)
+        failures: list[str] = []
+        for backend in chain:
+            t0 = time.monotonic()
+            try:
+                self._select_backend(backend, backend == self.profile)
+                payload = self._payload(messages, json_mode)
+                data = self._post(payload, allow_status_retry=len(chain) > 1)
+                return self._reply(data, t0)
+            except LLMNotConfigured:
+                err = "LLMNotConfigured"
+                failures.append(f"{backend}: {err}")
+            except Exception as exc:
+                err = short_error(exc, (self.api_key,))
+                failures.append(f"{backend}: {err}")
+                if len(chain) == 1 or not fallback_error(exc):
+                    raise
+        raise LLMChainExhausted("LLM 回退链耗尽：" + "；".join(failures))
+
+    def _payload(self, messages: list[dict], json_mode: bool) -> dict:
+        p = self.params
+        payload = {"model": p["model"], "messages": messages,
+                   "temperature": p["temperature"], "max_tokens": p["max_tokens"],
+                   "top_p": p["top_p"]}
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        return payload
+
+    def _select_backend(self, profile: str, is_request: bool = True) -> None:
+        self.profile = profile
+        self.params = _resolve_params(profile,
+                                      self._overrides if is_request else {})
+        self.api_key = resolve_key(profile)
+
+    def _reply(self, data: dict, t0: float) -> LLMReply:
+        msg = data["choices"][0]["message"]
+        usage = data.get("usage") or {}
+        latency = int((time.monotonic() - t0) * 1000)
+        text = msg.get("content") or ""
+        # strip ```
+        m = _FENCE.match(text)
+        if m:
+            text = m.group(1)
+        return LLMReply(text, int(usage.get("prompt_tokens", 0)),
+                        int(usage.get("completion_tokens", 0)), latency,
+                        data.get("model", self.params["model"]))
+
+    def _post(self, payload: dict, allow_status_retry: bool = True) -> dict:
+        url = self.params["base_url"].rstrip("/") + "/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        last: Exception = RuntimeError("unreachable")
+        for attempt in range(self.params.get("max_retry", 2) + 1):
+            try:
+                resp = _httpx.post(url, json=payload, headers=headers,
+                                   timeout=self.params["timeout"])
+                resp.raise_for_status()
+                return resp.json()
+            except _httpx.HTTPStatusError as exc:
+                if not allow_status_retry or not fallback_error(exc):
+                    raise
+                last = exc
+            except (_httpx.TimeoutException, _httpx.TransportError) as exc:
+                last = exc
+            if attempt < self.params.get("max_retry", 2):
+                time.sleep(2 ** attempt)
+        raise last
+
+
+_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+
+_DEFAULT_PROFILES: dict[str, dict] = {
+    "default": {
+        "base_url": "https://token.sensenova.cn/v1",
+        "model": "glm-5.2",
+        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
+        "timeout": 120, "max_retry": 2,
+    },
+    "fast": {
+        "base_url": "https://token.sensenova.cn/v1",
+        "model": "deepseek-v4-flash",
+        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
+        "timeout": 30, "max_retry": 2,
+    },
+    "smart": {
+        "base_url": "https://token.sensenova.cn/v1",
+        "model": "sensenova-6.8-flash-lite",
+        "temperature": 0.3, "max_tokens": 4096, "top_p": 1.0,
+        "timeout": 180, "max_retry": 2,
+    },
+    "agnes": {
+        "base_url": "https://apihub.agnes-ai.com/v1",
+        "model": "agnes-3.0-flash",
+        "temperature": 0.2, "max_tokens": 8192, "top_p": 1.0,
+        "timeout": 180, "max_retry": 2,
+    },
+}
+
+_ENV_MAP = {"EC_LLM_MODEL": "model", "EC_LLM_TEMPERATURE": "temperature",
+            "EC_LLM_MAX_TOKENS": "max_tokens", "EC_LLM_TOP_P": "top_p",
+            "EC_LLM_TIMEOUT": "timeout", "EC_LLM_BASE_URL": "base_url"}
+
+
+def _resolve_params(profile: str, overrides: dict | None = None) -> dict:
+    """三级参数合并：profile ← env ← kwargs。"""
+    base = dict(LLM_PROFILES.get(profile, _DEFAULT_PROFILES.get(profile, _DEFAULT_PROFILES["default"])))
+    for env, key in _ENV_MAP.items():
+        raw = os.environ.get(env)
+        if raw is not None and key in base:
+            base[key] = _cast(raw, base[key])
+    if overrides:
+        base.update({k: v for k, v in overrides.items() if k in base})
+    return base
+
+
+def _cast(value: str, like):
+    if isinstance(like, bool):
+        return value.lower() in ("1", "true")
+    if isinstance(like, int):
+        return int(value)
+    if isinstance(like, float):
+        return float(value)
+    return value

@@ -10,6 +10,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import date
+import os
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,14 @@ class Config:
     LLM_PROFILE: str | None = None  # None=关；'agnes'=启用
 
     # ── 策略观察台 ─────────────────────────────
-    STRATEGY_REPORTS_DIR: str = "/home/ubuntu/DSH/longkonglong/reports"
+    STRATEGY_ENABLED: bool = os.environ.get("EC_STRATEGY_ENABLED", "").lower() in ("1", "true", "yes")
+    STRATEGY_PROFILE: str = os.environ.get("EC_STRATEGY_PROFILE", "agnes")
+    STRATEGY_MAX_TOKENS: int = int(os.environ.get("EC_STRATEGY_MAX_TOKENS", "8192"))
+    STRATEGY_MAX_LLM: int = int(os.environ.get("EC_STRATEGY_MAX_LLM", "50"))
+    STRATEGY_MAX_UNIVERSE: int = int(os.environ.get("EC_STRATEGY_MAX_UNIVERSE", "80"))
+    STRATEGY_HOT_N: int = int(os.environ.get("EC_STRATEGY_HOT_N", "20"))
+    STRATEGY_VERSION: str = os.environ.get("EC_STRATEGY_VERSION", "emotion-core-dev")
+    STRATEGY_REPORTS_DIR: str = os.environ.get("EC_STRATEGY_REPORTS_DIR", "/home/ubuntu/DSH/longkonglong/reports")
 
 
 CONFIG = Config()
