@@ -18,19 +18,19 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from emotion_core.utils.db import transaction
 
 log = logging.getLogger("emotion_core.cleanup")
 
-# 清理策略（表名 → 保留天数；None = 全删/归档）
-RETENTION_DAYS: dict[str, int | None] = {
-    "limit_pool_em": 30,
-    "alert": 90,
-    "llm_call_log": None,   # 按条数保留，见 KEEP_LATEST
-    "eval_result": None,    # 按条数保留，见 KEEP_LATEST
-    "ingest_progress": None,  # 归档或删除
+# 清理策略（表名 → (时间列, 保留天数)；None = 全删/归档）
+RETENTION: dict[str, tuple[str, int | None]] = {
+    "limit_pool_em": ("date", 30),
+    "alert": ("created_at", 90),
+    "llm_call_log": ("id", None),   # 按条数保留，见 KEEP_LATEST
+    "eval_result": ("id", None),    # 按条数保留，见 KEEP_LATEST
+    "ingest_progress": ("done_at", None),  # 归档或删除
 }
 
 KEEP_LATEST: dict[str, int] = {
@@ -51,11 +51,11 @@ PROTECTED: tuple[str, ...] = (
 
 def cleanup_dry_run() -> dict[str, int]:
     """预览清理（不实际删除）。返回各表预计删除行数。"""
-    today = date.today()
+    now = datetime.now()
     plan: dict[str, int] = {}
     with transaction() as conn:
         with conn.cursor() as cur:
-            for table, days in RETENTION_DAYS.items():
+            for table, (col, days) in RETENTION.items():
                 if table in PROTECTED:
                     continue
                 if days is None and table not in KEEP_LATEST:
@@ -64,8 +64,8 @@ def cleanup_dry_run() -> dict[str, int]:
                     plan[table] = cur.fetchone()[0]
                 elif days is not None:
                     cur.execute(
-                        f"SELECT count(*) FROM {table} WHERE date < %s",
-                        (today - timedelta(days=days),)
+                        f"SELECT count(*) FROM {table} WHERE {col} < %s",
+                        (now - timedelta(days=days),)
                     )
                     plan[table] = cur.fetchone()[0]
                 elif table in KEEP_LATEST:
@@ -83,11 +83,11 @@ def cleanup_dry_run() -> dict[str, int]:
 
 def cleanup() -> dict[str, int]:
     """执行清理（幂等）。返回各表删除行数。"""
-    today = date.today()
+    now = datetime.now()
     deleted: dict[str, int] = {}
     with transaction() as conn:
         with conn.cursor() as cur:
-            for table, days in RETENTION_DAYS.items():
+            for table, (col, days) in RETENTION.items():
                 if table in PROTECTED:
                     continue
                 if table == "ingest_progress":
@@ -96,8 +96,8 @@ def cleanup() -> dict[str, int]:
                     deleted[table] = cur.rowcount
                 elif days is not None:
                     cur.execute(
-                        f"DELETE FROM {table} WHERE date < %s",
-                        (today - timedelta(days=days),)
+                        f"DELETE FROM {table} WHERE {col} < %s",
+                        (now - timedelta(days=days),)
                     )
                     deleted[table] = cur.rowcount
                 elif table in KEEP_LATEST:

@@ -90,20 +90,27 @@ def upsert_daily_bars(rows: list[tuple]) -> int:
     """写入 daily_bar（幂等 upsert）。返回写入行数。"""
     if not rows:
         return 0
+    from psycopg import sql
+
     with transaction() as conn:
         with conn.cursor() as cur:
-            args = ",".join(
-                cur.mogrify("(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", r).decode()
-                for r in rows
+            # 构造 VALUES 子句（psycopg3 cursor 无 mogrify，用 sql.Literal）
+            values = sql.SQL(", ").join(
+                sql.SQL("({})").format(sql.SQL(", ").join(sql.Literal(v) for v in row))
+                for row in rows
             )
-            cur.execute(
-                f"INSERT INTO daily_bar ({','.join(BAR_COLS)}) VALUES {args} "
+            query = sql.SQL(
+                "INSERT INTO daily_bar ({}) VALUES {} "
                 "ON CONFLICT (code, date) DO UPDATE SET "
                 "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, "
                 "close=EXCLUDED.close, pre_close=EXCLUDED.pre_close, "
                 "volume=EXCLUDED.volume, amount=EXCLUDED.amount, "
                 "turnover_rate=EXCLUDED.turnover_rate"
+            ).format(
+                sql.SQL(", ").join(sql.Identifier(c) for c in BAR_COLS),
+                values,
             )
+            cur.execute(query)
     return len(rows)
 
 
