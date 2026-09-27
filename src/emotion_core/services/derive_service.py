@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 
 from emotion_core.algorithms import indicators
 from emotion_core.domain.bar import Bar
@@ -14,28 +15,55 @@ from emotion_core.utils.db import query_df, transaction
 log = logging.getLogger("emotion_core.derive_service")
 
 
+def _to_cents(v) -> int:
+    """Decimal 元 → int 分。处理 NaN。"""
+    if v is None:
+        return 0
+    f = float(v)
+    if f != f:  # NaN check
+        return 0
+    return int(round(f * 100))
+
+
 def _load_bars(trade_date: date) -> list[Bar]:
-    """从 daily_bar 加载当日原始日线。"""
+    """从 daily_bar 加载最近 30 天日线（用于连板计算）。
+
+    只加载在 trade_date 有数据的股票的最近 30 天日线。
+    """
+    # 获取 trade_date 有数据的所有股票代码
+    codes_df = query_df(
+        "SELECT DISTINCT code FROM daily_bar WHERE date = %s", (trade_date,)
+    )
+    if codes_df.empty:
+        return []
+    codes = list(codes_df["code"])
+
+    # 加载这些股票最近 30 天的日线
+    start_date = trade_date - timedelta(days=45)  # 45 天窗口确保连板不丢
     df = query_df(
-        "SELECT code, date, open_cents, high_cents, low_cents, close_cents,"
-        " pre_close_cents, volume, turnover_rate"
-        " FROM daily_bar WHERE date = %s ORDER BY code, date",
-        (trade_date,),
+        "SELECT code, date, open, high, low, close, pre_close, volume, turnover_rate"
+        " FROM daily_bar WHERE code = ANY(%s) AND date >= %s ORDER BY code, date",
+        (codes, start_date),
     )
     return [
         Bar(
             code=str(r.code),
             date=r.date,
-            open_cents=int(r.open_cents),
-            high_cents=int(r.high_cents),
-            low_cents=int(r.low_cents),
-            close_cents=int(r.close_cents),
-            pre_close_cents=int(r.pre_close_cents),
-            volume=int(r.volume),
+            open_cents=_to_cents(r.open),
+            high_cents=_to_cents(r.high),
+            low_cents=_to_cents(r.low),
+            close_cents=_to_cents(r.close),
+            pre_close_cents=_to_cents(r.pre_close),
+            volume=int(r.volume) if r.volume else 0,
             turnover_rate=float(r.turnover_rate) if r.turnover_rate is not None else 0.0,
         )
         for r in df.itertuples()
     ]
+
+
+def _filter_by_date(bars: list[Bar], trade_date: date) -> list[Bar]:
+    """过滤指定日期的 Bar。"""
+    return [b for b in bars if b.date == trade_date]
 
 
 def _persist_derived(rows: list) -> int:
@@ -48,17 +76,17 @@ def _persist_derived(rows: list) -> int:
         )
         data = [
             (
-                r.code, r.date, r.is_limit_up, r.is_limit_down, r.is_one_word,
-                r.is_exchange, r.is_bomb, r.touched_limit, r.cont_days,
-                r.amplitude, r.quality,
+                r.code, r.date, r.is_limit_up, r.touched_limit, r.is_bomb,
+                r.is_one_word, r.is_exchange, r.is_limit_down, r.cont_days,
+                r.amplitude,
             )
             for r in rows
         ]
         with conn.cursor() as cur:
             cur.executemany(
-                "INSERT INTO derived_bar (code, date, is_limit_up, is_limit_down,"
-                " is_one_word, is_exchange, is_bomb, touched_limit, cont_days,"
-                " amplitude, quality) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO derived_bar (code, date, is_limit_up, touched_limit,"
+                " is_bomb, is_one_word, is_exchange, is_limit_down, cont_days,"
+                " amplitude) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 data,
             )
     return len(data)
@@ -73,11 +101,13 @@ def run(trade_date: date) -> int:
     Returns:
         写入行数。
     """
-    bars = _load_bars(trade_date)
-    if not bars:
+    all_bars = _load_bars(trade_date)
+    if not all_bars:
         log.warning("derive_service %s: daily_bar 无数据", trade_date)
         return 0
-    derived = indicators.compute_derived(bars)
-    n = _persist_derived(derived)
+    derived = indicators.compute_derived(all_bars)
+    # 只写入指定日期的结果
+    today_derived = _filter_by_date(derived, trade_date)
+    n = _persist_derived(today_derived)
     log.info("derive_service %s: %d 行", trade_date, n)
     return n

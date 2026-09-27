@@ -21,6 +21,7 @@ STEPS = [
     ("sync", "数据同步"),
     ("derive", "判据+连板"),
     ("market", "状态机"),
+    ("ladder", "梯队"),
     ("signal", "买入信号"),
     ("promotion", "晋级率"),
     ("theme", "题材"),
@@ -94,6 +95,9 @@ def _run_step(step: str, trade_date: date) -> None:
     elif step == "market":
         from emotion_core.services.market_service import run as market_run
         market_run(trade_date)
+    elif step == "ladder":
+        from emotion_core.algorithms import ladder
+        ladder.persist(trade_date)
     elif step == "signal":
         from emotion_core.services.signal_service import run as signal_run
         signal_run(trade_date)

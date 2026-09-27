@@ -43,9 +43,10 @@ def _load_day_metrics(trade_date: date) -> Optional[state.DayMetrics]:
         limit_up_count=int(r["zt_count"]),
         max_limit_days=max_h,
         limit_down_count=int(r["ld_count"]),
-        bomb_threshold=CONFIG.BOMB_THRESHOLD,
+        bomb_threshold=CONFIG.BOMB_RATE_FALLBACK,
         has_candidate=max_h >= CONFIG.MIN_LEADER_DAYS,
         tradable_max_days=int(r["max_ex_h"]) if r["max_ex_h"] else 0,
+        bomb_rate=None,
         zt_performance=zt_perf,
         top_amplitude=float(r["top_amp"]) if r["top_amp"] else None,
         top_broke=None,
@@ -81,20 +82,23 @@ def run(trade_date: date) -> int:
 
     states = state.classify_series(series)
     today_state = states[-1]
+    today_metrics = series[-1]
 
     with transaction() as conn:
         conn.execute(
             "INSERT INTO market_stat (date, phase, buy_window, force_liquidate,"
-            " reason, max_height, zt_count, ld_count, tradable_max_days)"
+            " reason, max_limit_days, limit_up_count, limit_down_count, tradable_max_days)"
             " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
             " ON CONFLICT (date) DO UPDATE SET"
             " phase = EXCLUDED.phase, buy_window = EXCLUDED.buy_window,"
-            " force_liquidate = EXCLUDED.force_liquidate, reason = EXCLUDED.reason",
+            " force_liquidate = EXCLUDED.force_liquidate, reason = EXCLUDED.reason,"
+            " max_limit_days = EXCLUDED.max_limit_days, limit_up_count = EXCLUDED.limit_up_count,"
+            " limit_down_count = EXCLUDED.limit_down_count, tradable_max_days = EXCLUDED.tradable_max_days",
             (
                 trade_date, today_state.phase, today_state.buy_window,
                 today_state.force_liquidate, today_state.reason,
-                today_state.max_limit_days, today_state.limit_up_count,
-                today_state.limit_down_count, today_state.tradable_max_days,
+                today_metrics.max_limit_days, today_metrics.limit_up_count,
+                today_metrics.limit_down_count, today_metrics.tradable_max_days,
             ),
         )
     log.info("market_service %s: %s", trade_date, today_state.phase)
