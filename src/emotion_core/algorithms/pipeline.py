@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from emotion_core.utils.config import config_hash
 from emotion_core.utils.db import execute, query_df
 
 log = logging.getLogger("emotion_core.pipeline")
@@ -54,14 +55,20 @@ RERUN = {
 
 def mark_running(step: str, for_date: date | None = None,
                  detail: str = "") -> None:
-    """步骤开始：status=RUNNING，记 started_at（幂等覆盖上次）。"""
+    """步骤开始：status=RUNNING，记 started_at + config_hash（幂等覆盖上次）。
+
+    config_hash 由 `utils/config.py` 的 `config_hash()` 现算（审核文档 §9 第 7 条：
+    此前函数无调用方、表无该列），三张表（pipeline_state / signal / eval_result）
+    同写一值，可据此判断同一天两次运行是否同参数。
+    """
     execute(
         "INSERT INTO pipeline_state (step, status, for_date, detail,"
-        " started_at) VALUES (%s,'RUNNING',%s,%s, now())"
+        " started_at, config_hash) VALUES (%s,'RUNNING',%s,%s, now(), %s)"
         " ON CONFLICT (step) DO UPDATE SET status='RUNNING',"
         " for_date=EXCLUDED.for_date, detail=EXCLUDED.detail,"
-        " started_at=now(), finished_at=null, exit_code=null",
-        (step, for_date, detail))
+        " started_at=now(), finished_at=null, exit_code=null,"
+        " config_hash=EXCLUDED.config_hash",
+        (step, for_date, detail, config_hash()))
 
 
 def mark_done(step: str, for_date: date | None = None,
@@ -70,12 +77,13 @@ def mark_done(step: str, for_date: date | None = None,
     status = "OK" if exit_code == 0 else "FAILED"
     execute(
         "INSERT INTO pipeline_state (step, status, for_date, detail,"
-        " started_at, finished_at, exit_code)"
-        " VALUES (%s,%s,%s,%s, now(), now(), %s)"
+        " started_at, finished_at, exit_code, config_hash)"
+        " VALUES (%s,%s,%s,%s, now(), now(), %s, %s)"
         " ON CONFLICT (step) DO UPDATE SET status=EXCLUDED.status,"
         " for_date=EXCLUDED.for_date, detail=EXCLUDED.detail,"
-        " finished_at=now(), exit_code=EXCLUDED.exit_code",
-        (step, status, for_date, detail, exit_code))
+        " finished_at=now(), exit_code=EXCLUDED.exit_code,"
+        " config_hash=EXCLUDED.config_hash",
+        (step, status, for_date, detail, exit_code, config_hash()))
 
 
 def mark_failed(step: str, detail: str,
@@ -83,11 +91,13 @@ def mark_failed(step: str, detail: str,
     """步骤异常兜底：FAILED + 详情 + 入 alert（A2-7 闭环，不静默）。"""
     execute(
         "INSERT INTO pipeline_state (step, status, for_date, detail,"
-        " finished_at, exit_code) VALUES (%s,'FAILED',%s,%s, now(), 1)"
+        " finished_at, exit_code, config_hash)"
+        " VALUES (%s,'FAILED',%s,%s, now(), 1, %s)"
         " ON CONFLICT (step) DO UPDATE SET status='FAILED',"
         " for_date=EXCLUDED.for_date, detail=EXCLUDED.detail,"
-        " finished_at=now(), exit_code=1",
-        (step, for_date, detail[:500]))
+        " finished_at=now(), exit_code=1,"
+        " config_hash=EXCLUDED.config_hash",
+        (step, for_date, detail[:500], config_hash()))
     try:
         from emotion_core.algorithms import alerts
         alerts.record("ERROR", "pipeline", f"步骤 {step} 失败：{detail[:200]}")
@@ -99,7 +109,7 @@ def overview() -> list[dict]:
     """全部步骤状态（升序按最近活动），失败步骤附重跑命令。"""
     df = query_df(
         "SELECT step, status, for_date, detail, started_at, finished_at,"
-        " exit_code FROM pipeline_state"
+        " exit_code, config_hash FROM pipeline_state"
         " ORDER BY coalesce(finished_at, started_at) DESC")
     out = []
     for r in df.itertuples():
@@ -110,6 +120,7 @@ def overview() -> list[dict]:
                     "for_date": r.for_date.isoformat() if r.for_date else None,
                     "detail": r.detail, "duration_s": dur,
                     "exit_code": r.exit_code,
+                    "config_hash": r.config_hash,
                     "rerun": RERUN.get(r.step)})
     return out
 

@@ -26,14 +26,23 @@ class Config:
         default_factory=lambda: {"68": 120, "30": 120})
     LIMIT_PCT_DEFAULT: int = 110       # round((1 + LIMIT_RATIO) * 100)
     NEW_ISSUER_MIN_DAYS: int = 90   # 次新排除：首个 bar 距目标日不足 90 自然日
-    # 回填窗口边缘：早于此日期上市的老股豁免（无法区分时保留）
-    NEW_ISSUER_FLOOR: date = date(2023, 11, 26)
+    # 次新豁免地板 = **数据层最早 bar 日期**（不变式：地板 ≥ daily_bar 的 min(date)）。
+    # 语义：first_bar_date <= GREATEST(目标日-90d, 地板) 视作老股豁免。
+    # 原值 date(2023,11,26) 是 lkl 的数据起点，被逐字搬到窗口不同的本库
+    # （daily_bar 最早 2024-01-02）→ 2024-01-02~2024-03-29 共 58 个交易日里
+    # GREATEST(...) < first_bar_date，**每只股票都算次新**，情绪计数全 0
+    # （实测 58 天 limit_up_count=0；2024-04-01 起 target-90d 超过数据起点，恢复 78）。
+    # 取 EM 日线首日 2024-01-02：窗口首日入池的老股（无法区分上市日）全部豁免，
+    # 之后上市的真次新仍按 90 自然日剔除。
+    NEW_ISSUER_FLOOR: date = date(2024, 1, 2)
+    # C7：北交所不参与情绪判定（数据层保留 daily_bar / stock_basic）。
+    # 代码形态：6 位纯代码 4/83/87/88 开头、920 开头（新代码段），及 akshare 的 bj 前缀。
+    BSE_EXCLUDED_PREFIXES: tuple[str, ...] = ("4", "8", "920", "bj")
 
     # ── 状态机（lkl emotion.py）──────────────
     CLIMAX_ZT: int = 80              # 高潮：涨停家数 >
     CLIMAX_AMPLITUDE: float = 15.0  # 高潮：最高板振幅 ≥(%)
     FERMENT_ZT_PERF: float = 1.5    # 发酵：昨涨停表现 ≥(%)
-    CLIMAX_AMPLITUDE: float = 15.0  # 高潮：最高板振幅 ≥(%)
     ICE_ZT_MAX: int = 40  # 冰点：涨停家数 < 且最高板 ≤ 3
     BOMB_RATE_FALLBACK: float = 0.42  # 自适应炸板阈值 fallback
     BOMB_RATE_WINDOW: int = 30  # 前 30 交易日 median+σ

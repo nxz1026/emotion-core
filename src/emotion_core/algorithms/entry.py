@@ -59,7 +59,7 @@ from typing import Any, Callable
 from emotion_core.algorithms import ladder
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
-from emotion_core.utils.config import CONFIG
+from emotion_core.utils.config import CONFIG, config_hash
 from emotion_core.utils.db import connect, transaction
 from emotion_core.utils.dates import prev_trading_day, today_sh
 
@@ -417,12 +417,14 @@ def check_signal(trade_date: date,
 
 _INSERT_SQL = """
 INSERT INTO signal (confirm_date, code, action, reason, buy_window, checklist,
-                    strategy_version, status)
-VALUES (%s, %s, %s, NULL, %s, %s::jsonb, %s, 'SUGGESTED')
+                    strategy_version, status, source, config_hash)
+VALUES (%s, %s, %s, NULL, %s, %s::jsonb, %s, 'SUGGESTED', %s, %s)
 ON CONFLICT (confirm_date, code, action) DO UPDATE SET
   buy_window       = EXCLUDED.buy_window,
   checklist        = EXCLUDED.checklist,
-  strategy_version = COALESCE(EXCLUDED.strategy_version, signal.strategy_version)
+  strategy_version = COALESCE(EXCLUDED.strategy_version, signal.strategy_version),
+  source           = COALESCE(signal.source, EXCLUDED.source),
+  config_hash      = EXCLUDED.config_hash
 """
 
 
@@ -433,11 +435,15 @@ def _persist(sig: Signal, window: str, rows: list[Row]) -> None:
     不覆写历史 reason；strategy_version 取 CONFIG.STRATEGY_VERSION，缺键写 NULL 且
     冲突时保留库内旧值（COALESCE——不做有损覆写）。
     checklist 存的是逐项行 (标签, ok, 说明)——与 lkl 存量 signal.checklist 同形。
+    source（审核文档 §9 第 10 条）：写 live / replay，冲突时**保留库内首个来源**
+    （COALESCE——回放不得把实盘信号改标成 replay，反之亦然；历史 NULL 行顺带补全）。
+    config_hash：本次产出的策略版本指纹，冲突时按最后一次运行覆盖。
     """
     with transaction() as conn:
         conn.execute(_INSERT_SQL, (sig.date, sig.code, sig.action.value, window,
                                    json.dumps(rows, ensure_ascii=False),
-                                   _cfg("STRATEGY_VERSION", None)))
+                                   _cfg("STRATEGY_VERSION", None),
+                                   sig.source.value, config_hash()))
 
 
 # ---- 次级推荐（次推荐）：放宽阈值，独立落库，action='SECONDARY' ----

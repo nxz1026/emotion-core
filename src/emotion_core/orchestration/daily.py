@@ -11,6 +11,7 @@ import sys
 from datetime import date
 
 from emotion_core.orchestration import pipeline
+from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocked
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import trading_days
 
@@ -19,6 +20,7 @@ log = logging.getLogger("emotion_core.daily")
 # 步骤注册表（顺序即执行顺序）
 STEPS = [
     ("sync", "数据同步"),
+    ("coverage", "覆盖率门槛"),
     ("derive", "判据+连板"),
     ("market", "状态机"),
     ("ladder", "梯队"),
@@ -76,6 +78,11 @@ def run_daily(trade_date: date | None = None, *, from_step: str | None = None, d
         try:
             _run_step(step, trade_date)
             pipeline.mark_done(step, trade_date)
+        except CoverageBlocked as exc:
+            # 半截数据比报错危险：拒绝装配，专用退出码 76（docs/01 A12）。
+            pipeline.mark_failed(step, trade_date, str(exc))
+            log.error("daily blocked at %s: %s", step, exc)
+            return EXIT_COVERAGE_BLOCKED
         except Exception as exc:
             pipeline.mark_failed(step, trade_date, str(exc))
             log.error("daily failed at %s: %s", step, exc)
@@ -90,6 +97,9 @@ def _run_step(step: str, trade_date: date) -> None:
     if step == "sync":
         from emotion_core.services.ingest import snapshot_daily
         snapshot_daily(trade_date)
+    elif step == "coverage":
+        from emotion_core.services.coverage import gate
+        gate(trade_date)          # 不足 0.90 抛 CoverageBlocked → 退出码 76
     elif step == "derive":
         from emotion_core.services.derive_service import run as derive_run
         derive_run(trade_date)
@@ -115,11 +125,15 @@ def _run_step(step: str, trade_date: date) -> None:
         from emotion_core.services.strategy import run_for_date as strategy_run
         strategy_run(trade_date)
     elif step == "outcome":
-        from emotion_core.services.replay_service import run as replay_run
-        # outcome 回填
-        replay_run(trade_date, trade_date)
+        # 回填 signal_outcome（L3 结果），不是回填 signal——replay_service 是
+        # 「历史 signal 回填」另一件事，此前接错（审核文档 §9 第 12 条）。
+        from emotion_core.algorithms import outcome
+        outcome.backfill()
     elif step == "health":
-        log.info("health: 健康推送（TODO）")
+        # 三条断档检查（报告/数据链/信号回填）→ 去重入 alert 队列 → 推 webhook。
+        # health.push 内部对 webhook 失败降级为 warning，不抛（不拦主链）。
+        from emotion_core.algorithms import health
+        health.push(trade_date)
     else:
         raise ValueError(f"未知步骤: {step}")
 

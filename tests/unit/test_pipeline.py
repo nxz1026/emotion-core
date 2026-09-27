@@ -19,10 +19,12 @@ import pytest
 
 from emotion_core.algorithms import alerts as alerts_mod
 from emotion_core.algorithms import pipeline
+from emotion_core.utils.config import config_hash
 
 D0 = date(2026, 9, 26)
 COLS = ["step", "status", "for_date", "detail",
-        "started_at", "finished_at", "exit_code"]
+        "started_at", "finished_at", "exit_code", "config_hash"]
+H = config_hash()
 
 
 class FakeDB:
@@ -65,23 +67,25 @@ def test_mark_running_sql_params_and_reset(db):
     sql, params = one_call(db)
     assert_sql(
         sql,
-        "INSERT INTO pipeline_state (step, status, for_date, detail, started_at)",
-        "VALUES (%s,'RUNNING',%s,%s, now())",          # 状态字面量 + started_at=now()
+        "INSERT INTO pipeline_state (step, status, for_date, detail, started_at,"
+        " config_hash)",
+        "VALUES (%s,'RUNNING',%s,%s, now(), %s)",      # 状态字面量 + started_at=now()
         "ON CONFLICT (step) DO UPDATE SET status='RUNNING'",   # 幂等覆盖上次
         "for_date=EXCLUDED.for_date",
         "detail=EXCLUDED.detail",
         "started_at=now()",                            # 重跑重置开始时刻
         "finished_at=null",                            # 清上次结束时刻
         "exit_code=null",                              # 清上次退出码
+        "config_hash=EXCLUDED.config_hash",            # 每次运行记配置指纹
     )
-    assert sql.count("%s") == 3
-    assert params == ("fetch", D0, "拉取中")
+    assert sql.count("%s") == 4
+    assert params == ("fetch", D0, "拉取中", H)
 
 
 def test_mark_running_defaults(db):
     pipeline.mark_running("derive")
     sql, params = one_call(db)
-    assert params == ("derive", None, "")
+    assert params == ("derive", None, "", H)
     assert "status='RUNNING'" in sql and "now()" in sql
 
 
@@ -94,21 +98,22 @@ def test_mark_done_status_by_exit_code(db, exit_code, status):
     assert_sql(
         sql,
         "INSERT INTO pipeline_state (step, status, for_date, detail,"
-        " started_at, finished_at, exit_code)",
-        "VALUES (%s,%s,%s,%s, now(), now(), %s)",      # 两端 now()
+        " started_at, finished_at, exit_code, config_hash)",
+        "VALUES (%s,%s,%s,%s, now(), now(), %s, %s)",  # 两端 now()
         "ON CONFLICT (step) DO UPDATE SET status=EXCLUDED.status",
         "for_date=EXCLUDED.for_date",
         "detail=EXCLUDED.detail",
         "finished_at=now()",
         "exit_code=EXCLUDED.exit_code",
+        "config_hash=EXCLUDED.config_hash",
     )
-    assert sql.count("%s") == 5
-    assert params == ("emotion", status, D0, "done", exit_code)
+    assert sql.count("%s") == 6
+    assert params == ("emotion", status, D0, "done", exit_code, H)
 
 
 def test_mark_done_defaults(db):
     pipeline.mark_done("ladder")
-    assert one_call(db)[1] == ("ladder", "OK", None, "", 0)
+    assert one_call(db)[1] == ("ladder", "OK", None, "", 0, H)
 
 
 # ── mark_failed ─────────────────────────────────────────────
@@ -123,15 +128,17 @@ def test_mark_failed_truncates_and_enqueues_alert(db, monkeypatch):
     assert_sql(
         sql,
         "INSERT INTO pipeline_state (step, status, for_date, detail,"
-        " finished_at, exit_code) VALUES (%s,'FAILED',%s,%s, now(), 1)",
+        " finished_at, exit_code, config_hash)"
+        " VALUES (%s,'FAILED',%s,%s, now(), 1, %s)",
         "ON CONFLICT (step) DO UPDATE SET status='FAILED'",
         "for_date=EXCLUDED.for_date",
         "detail=EXCLUDED.detail",
         "finished_at=now()",
         "exit_code=1",
+        "config_hash=EXCLUDED.config_hash",
     )
-    assert sql.count("%s") == 3
-    step, for_date_param, db_detail = params
+    assert sql.count("%s") == 4
+    step, for_date_param, db_detail, _h = params
     assert (step, for_date_param) == ("review", D0)
     assert db_detail == long_detail[:500]
     assert len(db_detail) == 500
@@ -143,7 +150,7 @@ def test_mark_failed_truncates_and_enqueues_alert(db, monkeypatch):
 def test_mark_failed_default_for_date(db, monkeypatch):
     monkeypatch.setattr(alerts_mod, "record", lambda *a: None)
     pipeline.mark_failed("theme", "短")
-    assert one_call(db)[1] == ("theme", None, "短")
+    assert one_call(db)[1] == ("theme", None, "短", H)
 
 
 def test_mark_failed_swallows_alert_error(db, monkeypatch, caplog):
@@ -160,7 +167,7 @@ def test_mark_failed_swallows_alert_error(db, monkeypatch, caplog):
 
     assert calls == [("ERROR", "pipeline", "步骤 fetch 失败：拉取失败")]
     sql, params = one_call(db)                          # FAILED 记录仍落库
-    assert sql.count("%s") == 3 and params == ("fetch", D0, "拉取失败")
+    assert sql.count("%s") == 4 and params == ("fetch", D0, "拉取失败", H)
     assert any(r.levelno == logging.DEBUG
                and r.name == "emotion_core.pipeline"
                and r.getMessage() == "告警入队失败（不拦 FAILED 记录）"
@@ -174,13 +181,14 @@ def frame(dtype=object) -> pd.DataFrame:
         {"step": "fetch", "status": "OK", "for_date": D0, "detail": "ok",
          "started_at": datetime(2026, 9, 26, 10, 0, 0),
          "finished_at": datetime(2026, 9, 26, 10, 0, 12, 340000),
-         "exit_code": 0},
+         "exit_code": 0, "config_hash": H},
         {"step": "derive", "status": "FAILED", "for_date": None, "detail": "bad",
          "started_at": datetime(2026, 9, 26, 11, 0, 0),
-         "finished_at": None, "exit_code": 1},
+         "finished_at": None, "exit_code": 1, "config_hash": H},
         {"step": "unknown-step", "status": "OK", "for_date": None, "detail": None,
          "started_at": None,
-         "finished_at": datetime(2026, 9, 26, 12, 0, 0), "exit_code": None},
+         "finished_at": datetime(2026, 9, 26, 12, 0, 0), "exit_code": None,
+         "config_hash": H},
     ], columns=COLS, dtype=dtype)
 
 
@@ -192,7 +200,7 @@ def test_overview_shape(db):
     assert_sql(
         sql,
         "SELECT step, status, for_date, detail, started_at, finished_at,"
-        " exit_code FROM pipeline_state",
+        " exit_code, config_hash FROM pipeline_state",
         "ORDER BY coalesce(finished_at, started_at) DESC",   # 最近活动在前
     )
     assert params == ()
@@ -200,10 +208,11 @@ def test_overview_shape(db):
     assert len(out) == 3
     fetch, derive, unknown = out
     assert set(fetch) == {"step", "status", "for_date", "detail", "duration_s",
-                          "exit_code", "rerun"}
+                          "exit_code", "config_hash", "rerun"}
     # 两端非 None → round(秒差, 1)
     assert fetch == {"step": "fetch", "status": "OK", "for_date": "2026-09-26",
                      "detail": "ok", "duration_s": 12.3, "exit_code": 0,
+                     "config_hash": H,
                      "rerun": "lkl fetch sync"}
     # 任一端 None → duration None；for_date None → None
     assert derive["duration_s"] is None
@@ -219,7 +228,7 @@ def test_overview_rounds_one_decimal(db):
         {"step": "theme", "status": "OK", "for_date": None, "detail": "",
          "started_at": datetime(2026, 9, 26, 10, 0, 0),
          "finished_at": datetime(2026, 9, 26, 10, 0, 0, 123456),
-         "exit_code": 0},
+         "exit_code": 0, "config_hash": H},
     ])
     assert pipeline.overview()[0]["duration_s"] == 0.1
 

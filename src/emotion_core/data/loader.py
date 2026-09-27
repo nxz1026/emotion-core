@@ -13,7 +13,7 @@ from emotion_core.domain.bar import Bar, DerivedBar
 from emotion_core.domain.market import MarketStat, Phase
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
-from emotion_core.utils.config import CONFIG
+from emotion_core.utils.config import CONFIG, config_hash
 from emotion_core.utils.db import connect, transaction
 
 log = logging.getLogger(__name__)
@@ -175,21 +175,29 @@ def replace_ladder_day(d: date, rows: list[LadderDay]) -> int:
 
 
 def upsert_promotion_day(rows: list[dict]) -> int:
-    """写入 promotion_day。rows 是 dict 列表。"""
+    """写入 promotion_day（按日 DELETE + upsert，列集与 algorithms/promotion.py 一致）。
+
+    列集与 ON CONFLICT 子句**必须**与 `promotion._INSERT_SQL` 逐列相同：此前本函数
+    漏写 `promote_from` 且冲突时不更新它，同一张表两条写入路径会产出不同结果
+    （审核文档 §9 第 6 条）。守护测试见
+    tests/unit/test_promotion_persist_parity.py。
+    """
     with transaction() as conn:
         if not rows:
             return 0
         d = rows[0]["date"]
         conn.execute("DELETE FROM promotion_day WHERE date = %s", (d,))
-        data = [(r["date"], r["layer"], r["promote_nominal"], r["promote_exchange"],
-                 r.get("rate_nominal"), r.get("rate_exchange"), r.get("divergence"),
+        data = [(r["date"], r["layer"], r["promote_from"], r["promote_nominal"],
+                 r["promote_exchange"], r.get("rate_nominal"),
+                 r.get("rate_exchange"), r.get("divergence"),
                  r.get("fail_perf")) for r in rows]
         conn.executemany(
             """INSERT INTO promotion_day
-               (date, layer, promote_nominal, promote_exchange, rate_nominal,
-                rate_exchange, divergence, fail_perf)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               (date, layer, promote_from, promote_nominal, promote_exchange,
+                rate_nominal, rate_exchange, divergence, fail_perf)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (date, layer) DO UPDATE SET
+                 promote_from=EXCLUDED.promote_from,
                  promote_nominal=EXCLUDED.promote_nominal,
                  promote_exchange=EXCLUDED.promote_exchange,
                  rate_nominal=EXCLUDED.rate_nominal,
@@ -202,20 +210,29 @@ def upsert_promotion_day(rows: list[dict]) -> int:
 
 
 def insert_signal(sig: Signal) -> int:
-    """写入 signal。"""
+    """写入 signal（列集与 algorithms/entry.py 的 `_persist` 一致）。
+
+    source / config_hash 与 `entry._INSERT_SQL` 同列：source 区分实盘 live 与
+    历史回填 replay（审核文档 §9 第 10 条），config_hash 记产出该信号的策略版本。
+    ON CONFLICT 用库上真实唯一约束 (confirm_date, code, action)——旧写法
+    (code, confirm_date) 与 `signal_confirm_date_code_action_key` 不匹配，调用即
+    InvalidColumnReference（entry.py 模块文档 §6 已记录）。
+    """
     with transaction() as conn:
         cl = sig.checklist
         return conn.execute(
             """INSERT INTO signal
-               (confirm_date, code, action, buy_window, checklist, status)
-               VALUES (%s, %s, %s, %s, %s, %s)
-               ON CONFLICT (code, confirm_date) DO UPDATE SET
-                 action=EXCLUDED.action, buy_window=EXCLUDED.buy_window,
-                 checklist=EXCLUDED.checklist, status=EXCLUDED.status""",
+               (confirm_date, code, action, buy_window, checklist, status,
+                source, config_hash)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (confirm_date, code, action) DO UPDATE SET
+                 buy_window=EXCLUDED.buy_window,
+                 checklist=EXCLUDED.checklist, status=EXCLUDED.status,
+                 source=EXCLUDED.source, config_hash=EXCLUDED.config_hash""",
             (sig.date, sig.code, sig.action.value, None,
              {"c1": cl.c1_uniqueness, "c2": cl.c2_exchange, "c3": cl.c3_elimination,
               "c4": cl.c4_min_days, "c5": cl.c5_strength_diverge, "w1": cl.w1_crowding},
-             sig.status),
+             sig.status, sig.source.value, config_hash()),
         ).rowcount
 
 

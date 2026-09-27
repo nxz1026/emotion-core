@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from pathlib import Path
@@ -25,8 +26,8 @@ from pathlib import Path
 import pandas as pd
 
 from emotion_core.algorithms import evaluate
-from emotion_core.utils.config import CONFIG
-from emotion_core.utils.db import query_df
+from emotion_core.utils.config import CONFIG, config_hash
+from emotion_core.utils.db import query_df, transaction
 from emotion_core.utils.dates import trading_days
 
 log = logging.getLogger("emotion_core.calibrate")
@@ -110,10 +111,28 @@ def _proposals(full: pd.DataFrame, recent: pd.DataFrame, days: int) -> list[str]
     return out
 
 
+def _persist_eval_result(name: str, start: date, end: date,
+                         params: dict, result: dict) -> int:
+    """落 eval_result（审核文档 §9 第 8 条：此前该表只有 DDL 与清理策略，无写入方）。
+
+    `params` / `result` 为 jsonb；只存提案事实，不改任何阈值（本模块"只提案不落库"
+    的语义不变——落的是提案本身，不是被采纳的参数）。
+    """
+    with transaction() as conn:
+        return conn.execute(
+            "INSERT INTO eval_result (name, start_date, end_date, params,"
+            " result, config_hash) VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s)",
+            (name, start, end,
+             json.dumps(params, ensure_ascii=False),
+             json.dumps(result, ensure_ascii=False),
+             config_hash())).rowcount
+
+
 def proposal(end: date | None = None, days: int = 60) -> str:
-    """生成周度校准提案报告，返回文件路径。"""
+    """生成周度校准提案报告，落 reports/calib-<date>.md + eval_result 一行。"""
     end = end or trading_days(CONFIG.DATA_START, date.today())[-1]
     full, recent, recent_start = _quality_stats(end, days)
+    proposals = _proposals(full, recent, days)
     md = "\n".join([
         f"# 校准提案 {end}（频率：周）\n",
         "> 只提案不落库；改 config 须奎爷批准并重跑 emotion+evaluate。\n",
@@ -121,11 +140,16 @@ def proposal(end: date | None = None, days: int = 60) -> str:
                                                  recent_start),
         "## ② 阈值敏感度\n\n" + _threshold_sensitivity(),
         "## ③ 信号实测（开盘价代理）\n\n" + _outcome_summary(),
-        "## ④ 提案\n\n" + "\n".join(f"- {p}"
-                                    for p in _proposals(full, recent, days)),
+        "## ④ 提案\n\n" + "\n".join(f"- {p}" for p in proposals),
     ])
     out = Path("reports") / f"calib-{end}.md"
     out.parent.mkdir(exist_ok=True)
     out.write_text(md + "\n", encoding="utf-8")
-    log.info("校准提案 -> %s", out)
+    n = _persist_eval_result(
+        "calib", recent_start, end,
+        {"days": days, "data_start": CONFIG.DATA_START.isoformat(),
+         "min_coverage": CONFIG.MIN_COVERAGE},
+        {"markdown": md, "report_path": str(out), "proposals": proposals,
+         "signals_full": _agg(full), "signals_recent": _agg(recent)})
+    log.info("校准提案 -> %s（eval_result +%d 行）", out, n)
     return str(out)

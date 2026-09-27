@@ -25,7 +25,10 @@
 2. CONFIG 尚未收录 ACCEL_* 键，经 `_cfg` 取 lkl config.py 原值默认（同 entry.py §5 先例）；
    键一旦进 utils/config.py 自动生效（本次范围限本文件 + test_accelerate.py 两文件）。
 3. NEW_ISSUER_FILTER 由 CONFIG.NEW_ISSUER_MIN_DAYS / NEW_ISSUER_FLOOR 参数化拼装
-   （与 data/loader.py 同先例），默认值 90 自然日 / 2023-11-26 与 lkl 字面量逐字等价。
+   （与 data/loader.py 同先例）；门槛 90 自然日与 lkl 一致，**地板不再取 lkl 的
+   2023-11-26**——那是 lkl 的数据起点，搬到本库（daily_bar 最早 2024-01-02）会让
+   2024-01-02~2024-03-29 共 58 个交易日「所有股票都算次新」→ 计数全 0。现取本库
+   日线首日 2024-01-02，理由与证据见 utils/config.py 的 NEW_ISSUER_FLOOR 注释。
 4. 自持 SQL 4 处（lkl 原语句）：loader 无加速事件相关入口，且本模块不得改其他文件；
    与 entry.py §6 / promotion.py `_fetch_pairs` 同先例，待 loader 补入口后下沉。
 

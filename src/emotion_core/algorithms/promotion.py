@@ -65,7 +65,8 @@ WHERE y.date = %(prev)s
   AND y.cont_days >= 1
   AND left(y.code, 3) = ANY(%(boards)s)
   AND s.first_bar_date IS NOT NULL
-  AND s.first_bar_date <= GREATEST(%(prev)s - interval '90 days', date '2023-11-26')
+  AND s.first_bar_date <= GREATEST(%(prev)s::date
+                                   - %(days)s * interval '1 day', %(floor)s::date)
 """
 
 # 昨日每只连板股的一行：(昨日板数, 今日板数, 今日是否换手, 今日涨幅%|None)
@@ -86,8 +87,11 @@ def _today_bar_count(cur: Any, trade_date: date) -> int:
 
 
 def _fetch_pairs(cur: Any, trade_date: date, prev: date) -> list[Pair]:
-    """取昨日→今日配对行（主板 + 剔次新）。"""
-    cur.execute(_PAIRS_SQL, {"d": trade_date, "prev": prev, "boards": list(BOARD_PREFIXES)})
+    """取昨日→今日配对行（主板 + 剔次新，90 日门槛与地板取自 config 单一来源）。"""
+    cur.execute(_PAIRS_SQL, {"d": trade_date, "prev": prev,
+                             "boards": list(BOARD_PREFIXES),
+                             "days": CONFIG.NEW_ISSUER_MIN_DAYS,
+                             "floor": CONFIG.NEW_ISSUER_FLOOR})
     return [(int(r[0]), int(r[1]), bool(r[2]), None if r[3] is None else float(r[3]))
             for r in cur.fetchall()]
 

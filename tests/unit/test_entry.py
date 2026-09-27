@@ -19,6 +19,7 @@ from typing import Any, Iterator
 from emotion_core.algorithms import entry
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, SignalSource
+from emotion_core.utils.config import config_hash
 from emotion_core.algorithms.entry import (
     check_secondary_signal,
     check_signal,
@@ -264,12 +265,19 @@ class TestCheckSignal:
                                         "c3 淘汰赛身份", "c4 最低板数门槛",
                                         "c5 强度与分歧补偿", "W1 同身位扎堆"]
         assert [r[1] for r in rows] == [True] * 6      # W1 恒 True（说明里写扎堆与否）
+        # §9 第 10/7 条：落库带 source 与 config_hash，且 source 保留首个来源
+        assert "source" in sql and "config_hash" in sql
+        assert params[5] == entry.CONFIG.STRATEGY_VERSION
+        assert params[6] == "live"
+        assert params[7] == config_hash() and len(params[7]) == 12
+        assert "COALESCE(signal.source, EXCLUDED.source)" in sql
 
     def test_source_marked_replay(self, monkeypatch):
-        patch_io(monkeypatch, today=[cand(cont=4, code="600001")], prev=_prev_rows(),
-                 survivors={"600001"})
+        calls = patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
+                         prev=_prev_rows(), survivors={"600001"})
         sig = check_signal(D, SignalSource.REPLAY)
         assert sig is not None and sig.source is SignalSource.REPLAY
+        assert calls["sql"][0][1][6] == "replay", "回填信号必须在库内标 replay"
 
     def test_none_window_blocks_buy_and_tries_secondary(self, monkeypatch):
         """V14.1：禁买日主 BUY 恒不落库，但仍尝试次级（接线存在）。"""

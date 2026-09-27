@@ -53,8 +53,11 @@
 同一交易日分别调 lkl.services.dragon_env 与本模块同名函数，逐值比对。
 """
 
-# ✅ 已有 Rust 实现：src/emotion_core/core/src/ecosystem.rs
-# 本文件保留作为参考实现和对账基准，不删除。
+# ⚠️ 尚无 Rust 实现（审核文档 §9 第 9 条）：src/emotion_core/core/src/ecosystem.rs
+# 目前只有一行 `pub struct Ecosystem;` 占位，且未在 core/src/lib.rs 注册任何
+# pyfunction——生态评级**只有本文件一份 Python 实现**。此前这里写"✅ 已有 Rust 实现"
+# 是错的（唯一一处伪实现声明），已按事实改写。
+# 移植须按 docs/13 S1 的"先 Python 参考实现、后 Rust、再 oracle 对账"流程另立工单。
 
 from __future__ import annotations
 

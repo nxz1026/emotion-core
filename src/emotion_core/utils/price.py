@@ -30,14 +30,15 @@ from __future__ import annotations
 def board_pct_milli(code: str) -> int:
     """返回涨跌幅的千分比（主板 100 = 10.0%，创业/科创 200 = 20%，北交所 300 = 30%）。
 
-    北交所代码格式：纯代码 8xxxxx/4xxxxx，或 akshare symbol 前缀 bj。
+    北交所代码格式：纯代码 4/8/920 开头，或 akshare symbol 前缀 bj。
+    （C7 后北交所不进 derived_bar，此处仍必须给对——唯一实现不该有已知错分支。）
     """
     if code.startswith("bj"):
         return 300  # 北交所 30%（akshare symbol 格式）
     if code.startswith(("30", "68")):
         return 200  # 创业板/科创板 20%
-    if code.startswith(("4", "8")):
-        return 300  # 北交所 30%（纯代码格式）
+    if code.startswith(("4", "8", "92")):
+        return 300  # 北交所 30%（纯代码格式 43/83/87/88/920）
     return 100  # 主板 10%
 
 

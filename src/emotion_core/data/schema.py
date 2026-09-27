@@ -23,6 +23,9 @@ DDL: dict[str, str] = {
             list_date    date,
             market       text,
             is_st        boolean NOT NULL DEFAULT false,
+            industry     text,
+            market_cap   double precision,
+            in_market    boolean NOT NULL DEFAULT true,
             float_shares double precision,
             first_bar_date date,
             updated_at   timestamptz NOT NULL DEFAULT now()
@@ -135,6 +138,8 @@ DDL: dict[str, str] = {
             feedback_price numeric(12,3),
             feedback_date  date,
             strategy_version text,
+            source         text,
+            config_hash    text,
             created_at     timestamptz NOT NULL DEFAULT now(),
             UNIQUE (confirm_date, code, action)
         )""",
@@ -189,6 +194,7 @@ DDL: dict[str, str] = {
             end_date   date,
             params     jsonb,
             result     jsonb,
+            config_hash text,
             created_at timestamptz NOT NULL DEFAULT now()
         )""",
     "llm_call_log": """
@@ -264,7 +270,8 @@ DDL: dict[str, str] = {
             detail text,
             started_at timestamptz,
             finished_at timestamptz,
-            exit_code integer
+            exit_code integer,
+            config_hash text
         )""",
     "trade_event": """
         CREATE TABLE IF NOT EXISTS trade_event (

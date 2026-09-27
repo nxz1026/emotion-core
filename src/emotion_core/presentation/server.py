@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from jinja2 import Environment, FileSystemLoader
 
 from emotion_core.presentation import loaders, strategy_view
+from emotion_core.utils import price as price_util
 
 log = logging.getLogger("emotion_core.dash")
 
@@ -148,6 +149,21 @@ def _load_logic_data() -> dict:
     }
 
 
+def _limit_price_formula() -> str:
+    """涨停价文案：板比从唯一实现 utils/price 现算，展示层不得重写公式。
+
+    此前这里写死主板版公式（×1.10 的分整数式），只对主板成立、且与
+    utils/price.py 的分整数式不同源（审核文档 §9 第 4 条 / S5）。现改为引用
+    实现名 + 由 board_pct_milli 现算出的板块取值，改实现即改文案。
+    """
+    pcts = sorted({price_util.board_pct_milli(c)
+                   for c in ("600000", "300001", "680001",
+                             "bj430001", "430001")})
+    return ("(pre_close_cents * (1000 + pct) + 500) // 1000"
+            "（分整数；pct = utils/price.board_pct_milli(code) ∈ "
+            f"{pcts}）")
+
+
 def _load_algorithm_data() -> dict:
     """加载算法层数据。"""
     from emotion_core.utils.config import CONFIG
@@ -159,10 +175,12 @@ def _load_algorithm_data() -> dict:
         market = {}
 
     formulas = {
-        "涨停价": "(pre_close_cents * 110 + 50) // 1000",
-        "is_limit_up": "close_cents == limit_up_price(pre_close_cents)",
-        "is_one_word": "low_cents >= limit_up_price",
-        "is_exchange": "is_limit_up AND low_cents < limit_up_price",
+        "涨停价": _limit_price_formula(),
+        "is_limit_up": ("close_cents == utils/price.limit_up_price_cents("
+                        "pre_close_cents, code)"),
+        "is_one_word": "low_cents >= limit_up_price_cents(pre_close_cents, code)",
+        "is_exchange": ("is_limit_up AND low_cents < "
+                        "limit_up_price_cents(pre_close_cents, code)"),
         "cont_days": "连续涨停天数（停牌断档不打断）",
         "phase": "优先级: 退潮 > 高潮 > 发酵 > 冰点",
         "promote_nominal": "今日 cont_days >= 昨日+1 的只数 / 昨日该层只数",

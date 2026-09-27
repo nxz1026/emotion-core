@@ -66,9 +66,16 @@ def _rule_ebb(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -
 
 
 def _rule_climax(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -> bool:
+    """高潮：涨停家数 / 炸板率越阈 / 最高板振幅越阈。
+
+    `top_amplitude` 用 `_gt` 护 None（当日无涨停股时 max(amplitude)=NULL →
+    indicators 给 None）。此前裸比较 `None > 15.0` 会抛 TypeError——零涨停日
+    直接把 emotion.run_range 打崩（本模块与 emotion.classify 共用 _RULES）。
+    None 的语义是「没有最高板振幅可比」→ 该分支不触发。
+    """
     return (t.limit_up_count > CONFIG.CLIMAX_ZT
             or _gt(t.bomb_rate, t.bomb_threshold)
-            or t.top_amplitude > CONFIG.CLIMAX_AMPLITUDE)
+            or _gt(t.top_amplitude, CONFIG.CLIMAX_AMPLITUDE))
 
 
 def _rule_ferment(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -> bool:
