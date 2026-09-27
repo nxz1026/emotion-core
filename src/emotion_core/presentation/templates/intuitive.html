@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}直观层{% endblock %}
+{% block content %}
+<div class="card">
+    <h1>今日结论</h1>
+    <p class="lead">市场处于 <strong>{{ phase }}</strong> 阶段</p>
+    {% if recommendation %}
+    <div class="recommendation">
+        <h2>推荐</h2>
+        <p><code>{{ recommendation.code }}</code> · {{ recommendation.cont_days }}板</p>
+    </div>
+    {% else %}
+    <p class="muted">今日无推荐</p>
+    {% endif %}
+</div>
+{% endblock %}

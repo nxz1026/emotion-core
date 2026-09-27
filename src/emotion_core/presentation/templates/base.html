@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Core · {% block title %}{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <a href="/" class="brand">Emotion Core</a>
+            <nav class="nav">
+                <a href="/">直观</a>
+                <a href="/logic">逻辑</a>
+                <a href="/algorithm">算法</a>
+                <button id="theme-toggle" onclick="toggleTheme()">🌙</button>
+            </nav>
+        </div>
+    </header>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">
+        <div class="container">
+            <small>统计参考，非投资建议</small>
+        </div>
+    </footer>
+    <script src="/static/app.js"></script>
+</body>
+</html>

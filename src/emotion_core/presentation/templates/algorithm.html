@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}算法层{% endblock %}
+{% block content %}
+<div class="card">
+    <h1>算法口径</h1>
+    <table>
+        <thead><tr><th>指标</th><th>计算方式</th></tr></thead>
+        <tbody>
+            {% for key, value in formulas.items() %}
+            <tr><td>{{ key }}</td><td><code>{{ value }}</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
