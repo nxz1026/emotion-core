@@ -105,7 +105,7 @@ function updateSortHeaders(){
     sortDirectionButton.textContent=sortDirection==='asc'?'升序 ↑':'降序 ↓';
     document.querySelectorAll('th[data-sort]').forEach(h=>{
         const active=h.dataset.sort===sortKey;
-        h.textContent=`${sortLabels[h.dataset.sort]}${active?(sortDirection==='asc?' ↑':' ↓'):''}`;
+        h.textContent=`${sortLabels[h.dataset.sort]}${active?(sortDirection==='asc'?' ↑':' ↓'):''}`;
     });
 }
 function init(){
