@@ -39,9 +39,9 @@ _DBCONFIG_FILE = "~/.dbconfig"
 _HOST_KEY = "$RDSHOST"
 _PASSWORD_KEY = "$DB_PW"
 _PORT = 5432
-_DBNAME = "longkonglong"  # 与 lkl/asel 同库（docs/evidence/merge-analysis §1.1）；换库只改这一行
+_DBNAME = "emotion_core"  # emotion-core 专用库（阶段 4 新建）
 _USER = "postgres"
-_SSLMODE = "verify-full"
+_SSLMODE = "prefer"  # 本地库不需要 verify-full；prefer 自动协商
 _SSLROOTCERT = "~/global-bundle.pem"
 
 # 链路防挂死：握手 15s 上限 + TCP keepalive 探活（无超时的 connect 会永久睡）
