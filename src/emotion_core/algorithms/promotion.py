@@ -22,6 +22,10 @@ daily_bar 价格连接。本实现按 docs/07 §2.5「逐字搬」补齐，语�
 分工：算法层做纯计算（`_matrix`/`_layer_row`），SQL 取数集中在 `_fetch_pairs`（本模块内，
 数据访问层 loader 尚无晋级专用查询）。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/promotion.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import logging

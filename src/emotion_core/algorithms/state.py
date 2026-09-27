@@ -9,6 +9,10 @@
 
 window_of: 发酵→STANDARD, 高潮→ENHANCED, 冰点/退潮→NONE（退潮还 force_liquidate）
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/state.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 from dataclasses import dataclass

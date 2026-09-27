@@ -25,6 +25,10 @@ distribution_stats / hypothesis_test / walk_forward / adoption_summary 等）
 5. 自持 SQL（lkl 原语句）5 处：base 收盘、前向 bars、derived_bar 涨停止、退潮日、
    stock_basic 漂移列——data 层无同口径入口，先例见 entry.py 模块文档 §6。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/evaluate.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import logging

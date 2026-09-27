@@ -29,6 +29,10 @@
 
 自持 SQL 2 处（lkl 原语句）：signal LEFT JOIN signal_outcome 待办集、基准日收盘价。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/outcome.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import logging

@@ -43,6 +43,10 @@ theme_tag 行（services 层的读 SQL 补 ORDER BY）以获得可复现 top_cod
 - false_relation：2026-09-24 真实输入与 lkl 输出相同（当日无判例，两侧均为 []）。
 tests/unit/test_theme.py 锁纯逻辑与注入分支（无 DB）。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/theme.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import logging

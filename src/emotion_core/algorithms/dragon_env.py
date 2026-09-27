@@ -52,6 +52,10 @@
 对账：tests/unit/test_dragon_env.py（无 DB，纯逻辑与降级分支）；另用真实库差分对账——
 同一交易日分别调 lkl.services.dragon_env 与本模块同名函数，逐值比对。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/ecosystem.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import json

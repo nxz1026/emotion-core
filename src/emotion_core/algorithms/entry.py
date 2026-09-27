@@ -43,6 +43,10 @@
 对账：tests/unit/test_entry.py（逐条件行为，不连库）；另有真实库差分对账——同一候选/窗口
 分别调 lkl.services.entry.checklist 与本模块，逐项比对 ok/None。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/entry.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import json

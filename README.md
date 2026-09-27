@@ -45,19 +45,39 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 ## 当前阶段
 
-**阶段 2b：Rust 移植（进行中）· 阶段 3：PyO3 绑定接线（已完成）**
+**阶段 2b：Rust 移植（已完成）· 阶段 3：PyO3 绑定接线（已完成）**
 
 Python 参考实现（阶段 2a）全部完成：10 个算法模块 + 495 tests 全绿。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
+### Python ↔ Rust 模块对照
+
+| Python（参考实现） | Rust（生产实现） | 对账测试 |
+|---|---|---|
+| `indicators.py` + `derive.py` | `indicators.rs`（`compute_derived`） | ✅ |
+| `state.py` | `state.rs` | ✅ |
+| `ladder.py` | `ladder.rs` | ✅ |
+| `promotion.py` | `promotion.rs` | ✅ |
+| `entry.py` | `entry.rs` | ✅ |
+| `accelerate.py` | `accelerate.rs` | ✅ 33 tests |
+| `exit.py` | `exit.rs` | ✅ 25 tests |
+| `theme.py` | `theme.rs` | ✅ 143 tests |
+| `dragon_env.py` | `ecosystem.rs` | ✅ |
+| `evaluate.py` | `evaluate.rs` | ✅ 52 tests |
+| `outcome.py` | `outcome.rs` | ✅ 41 tests |
+
+> Python 文件保留作为参考实现和对账基准，不删除。每个文件头部已标注对应的 Rust 模块路径。
+
 | 层 | 状态 |
 |---|---|
 | 阶段 2a Python 参考实现 | ✅ 完成（10 模块，495 tests） |
-| 阶段 2b Rust 移植 | 🚧 进行中（6/10 模块：indicators/state/ladder/entry/promotion/accelerate） |
-| 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成（`core/__init__.py` 加载 .so，22 导出） |
-| 阶段 4 编排层 | ⏳ 待开始 |
-| 阶段 5 LLM 层 | ⏳ 待开始 |
-| 阶段 6 上线 | ⏳ 待开始 |
+| 阶段 2b Rust 移植 | ✅ 完成（10/10 模块） |
+| 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成（`core/__init__.py` 加载 .so） |
+| 阶段 4 数据层 | ⏳ 待开始（DB 迁移 + 数据同步 + 清理） |
+| 阶段 5 编排层 | ⏳ 待开始 |
+| 阶段 6 展示层 | ⏳ 待开始 |
+| 阶段 7 LLM 层 | ⏳ 待开始 |
+| 阶段 8 上线 | ⏳ 待开始 |
 
 设计文档（阶段 0~1 全部定稿）：
 

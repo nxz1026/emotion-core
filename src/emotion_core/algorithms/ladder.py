@@ -20,6 +20,10 @@ SQL 住 data/loader.py（架构纪律：SQL 唯一住所，docs/11 §4、loader 
 对账：tests/oracle/test_ladder_vs_lkl.py（fixture 快照逐字段）；另已用 661 天全量
 DB 回放验证全部 6 个业务字段 0 处不一致。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/ladder.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import logging

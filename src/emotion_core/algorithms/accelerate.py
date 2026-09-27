@@ -33,6 +33,10 @@
 同一交易日分别调 lkl.services.accelerate 与本模块的 heights / oneword_ratio / _top_streak /
 _baseline_ratio / detect，逐值比对。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/accelerate.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 from datetime import date, timedelta

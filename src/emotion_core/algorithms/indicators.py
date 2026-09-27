@@ -11,6 +11,10 @@
 数据来源：lkl derive.py:48-95（SQL 整数式 + 窗口函数）
 对账 oracle：tests/oracle/fixtures/streaks_sample.json
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/indicators.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 from emotion_core.domain.bar import Bar, DerivedBar

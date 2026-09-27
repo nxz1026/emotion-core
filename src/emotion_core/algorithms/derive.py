@@ -7,6 +7,10 @@
 - is_exchange(D7 有效投票): is_limit_up 且 low < 涨停价（含 T 字/换手板）
 - 涨停价用"分"整数半up舍入：(pre_cents*11+5)//10，与 utils/price.py 等价
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/indicators.rs (compute_derived)
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 import logging

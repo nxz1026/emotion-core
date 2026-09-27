@@ -36,6 +36,10 @@
 对账：tests/unit/test_exit.py 逐组合（涨停/断板/一字/退潮/缺行，不连库）；
 真实库差分见交付记录：同 trade_date 与 lkl.services.exit.suggestions 逐字段一致。
 """
+
+# ✅ 已有 Rust 实现：src/emotion_core/core/src/exit.rs
+# 本文件保留作为参考实现和对账基准，不删除。
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
