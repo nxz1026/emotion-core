@@ -1,12 +1,14 @@
-"""展示层 web 服务：单一端口 8098 + auth_basic。"""
+"""展示层 web 服务：单一端口 8098。
+
+basic auth 由 nginx 转发层处理（/etc/nginx/.htpasswd），
+本服务不再重复鉴权。
+"""
 from __future__ import annotations
 
 import http.server
-import base64
 import json
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
-from emotion_core.utils.config import CONFIG
 from emotion_core.presentation import loaders, translate
 
 ROUTES = {
@@ -18,14 +20,6 @@ ROUTES = {
 
 class Handler(http.server.BaseHTTPRequestHandler):
     """请求处理器。"""
-
-    def _auth_check(self) -> bool:
-        """auth_basic 鉴权检查。"""
-        auth = self.headers.get("Authorization")
-        expected = base64.b64encode(
-            f"{CONFIG.AUTH_USER}:{CONFIG.AUTH_PASSWORD}".encode()
-        ).decode()
-        return auth == f"Basic {expected}"
 
     def _send_json(self, data: dict, status: int = 200) -> None:
         """发送 JSON 响应。"""
@@ -42,12 +36,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(html.encode())
 
     def do_GET(self) -> None:
-        if not self._auth_check():
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", "Basic realm=emotion-core")
-            self.end_headers()
-            return
-
         parsed = urlparse(self.path)
         if parsed.path in ROUTES:
             self._send_html(f"<html><body><h1>{ROUTES[parsed.path]}</h1></body></html>")
