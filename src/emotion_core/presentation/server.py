@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from jinja2 import Environment, FileSystemLoader
 
-from emotion_core.presentation import loaders
+from emotion_core.presentation import loaders, strategy_view
 
 log = logging.getLogger("emotion_core.dash")
 
@@ -37,6 +37,7 @@ ROUTES = {
     "intuitive": "intuitive",
     "logic": "logic",
     "algorithm": "algorithm",
+    "strategy": "strategy",
 }
 
 
@@ -199,6 +200,10 @@ def render_dashboard(layer: str) -> str:
         data = _load_logic_data()
     elif layer == "algorithm":
         data = _load_algorithm_data()
+    elif layer == "strategy":
+        data = {
+            "dates_json": json.dumps(strategy_view.strategy_dates(), ensure_ascii=False),
+        }
     else:
         data = {}
 
@@ -226,6 +231,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         # API
+        if parsed.path == "/api/strategy":
+            from urllib.parse import parse_qs
+            q = parse_qs(parsed.query)
+            date = q.get("date", [""])[0]
+            self._send_json(strategy_view.to_api(date))
+            return
+        if parsed.path == "/api/strategy/dates":
+            self._send_json({"dates": strategy_view.strategy_dates()})
+            return
         if parsed.path.startswith("/api/"):
             self._handle_status()
             return

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}策略观察台{% endblock %}
+{% block content %}
+<div class="strategy-top-bar">
+    <h1>策略观察台</h1>
+    <div class="strategy-controls">
+        <label for="dateSelect">日期</label>
+        <select id="dateSelect"></select>
+        <select id="strategySelect"><option value="">全部策略</option></select>
+        <input id="strategyFilter" type="search" placeholder="筛选代码、名称、理由…" aria-label="筛选策略结果">
+        <label for="sortSelect">排序</label>
+        <select id="sortSelect" aria-label="选择排序字段">
+            <option value="score">评分</option>
+            <option value="confidence">置信</option>
+            <option value="code">代码</option>
+            <option value="stock_name">股票名称</option>
+            <option value="strategy">策略</option>
+            <option value="action">动作</option>
+        </select>
+        <button id="sortDirectionButton" class="btn-link" type="button">降序 ↓</button>
+        <a class="btn-link" href="{{ base_path }}/">← 返回三层 Dashboard</a>
+    </div>
+</div>
+
+<div class="notice">LLM 观察性推荐，非交易信号，与主链路隔离</div>
+
+<div class="card">
+    <h2>策略观察结果</h2>
+    <div class="table-tools">
+        <label for="strategyFilter">筛选结果</label>
+        <span>输入关键词过滤；点击表头切换排序</span>
+    </div>
+    <div id="note">加载中…</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th data-sort="strategy">策略</th>
+                <th data-sort="code">代码</th>
+                <th data-sort="stock_name">股票名称</th>
+                <th data-sort="name">策略名称</th>
+                <th data-sort="action">动作</th>
+                <th data-sort="score">评分</th>
+                <th data-sort="confidence">置信</th>
+                <th data-sort="reason">理由</th>
+                <th data-sort="model">模型</th>
+            </tr>
+        </thead>
+        <tbody id="strategyRows"></tbody>
+    </table>
+</div>
+<script>
+const dates = {{ dates_json | safe }};
+const dateSelect = document.getElementById('dateSelect');
+const strategySelect = document.getElementById('strategySelect');
+const filterInput = document.getElementById('strategyFilter');
+const sortSelect = document.getElementById('sortSelect');
+const sortDirectionButton = document.getElementById('sortDirectionButton');
+const tableBody = document.getElementById('strategyRows');
+const note = document.getElementById('note');
+let currentItems = [];
+let sortKey = 'score';
+let sortDirection = 'desc';
+const sortLabels = {strategy:'策略',code:'代码',stock_name:'股票名称',name:'策略名称',action:'动作',score:'评分',confidence:'置信',reason:'理由',model:'模型'};
+function esc(v){const e=document.createElement('span');e.textContent=v==null?'—':String(v);return e.innerHTML;}
+function actionClass(a){return ({BUY:'badge-buy',WATCH:'badge-watch',PASS:'badge-pass'})[a]||'badge-pass';}
+function evidenceText(ev){if(!ev||typeof ev!=='object')return'无';return Object.entries(ev).map(([k,v])=>`${esc(k)}：${esc(v)}`).join('<br>')||'无';}
+function renderRows(items){
+    const sel=strategySelect.value;const q=filterInput.value.trim().toLowerCase();
+    sortKey=sortSelect.value;
+    const rows=items.filter(it=>{
+        if(sel&&it.strategy!==sel)return false;
+        if(!q)return true;
+        return ['strategy','code','stock_name','name','action','reason','model'].some(k=>String(it[k]??'').toLowerCase().includes(q));
+    }).sort((a,b)=>{
+        const l=a[sortKey]??'',r=b[sortKey]??'';
+        const ln=Number(l),rn=Number(r);
+        const res=Number.isFinite(ln)&&Number.isFinite(rn)?ln-rn:String(l).localeCompare(String(r),'zh-CN',{numeric:true,sensitivity:'base'});
+        return sortDirection==='asc'?res:-res;
+    });
+    tableBody.innerHTML=rows.map((it,i)=>`
+        <tr class="data-row" data-index="${i}">
+            <td>${esc(it.strategy)}</td><td>${esc(it.code)}</td><td>${esc(it.stock_name||it.stockName||'—')}</td><td>${esc(it.name)}</td>
+            <td><span class="badge ${actionClass(it.action)}">${esc(it.action)}</span></td>
+            <td>${esc(it.score)}</td><td>${it.confidence==null?'—':esc((it.confidence*100).toFixed(1)+'%')}</td>
+            <td>${esc(it.reason)}</td><td>${esc(it.model)}</td>
+        </tr><tr class="evidence-row" data-index="${i}"><td colspan="9"><div>${evidenceText(it.evidence)}</div></td></tr>`).join('');
+    tableBody.querySelectorAll('.data-row').forEach(row=>row.onclick=()=>{
+        const det=tableBody.querySelector(`.evidence-row[data-index="${row.dataset.index}"]`);
+        det.classList.toggle('open');
+    });
+}
+async function load(){
+    const date=dateSelect.value;
+    if(!date){renderRows([]);note.textContent='当日无策略产出（开关未开或休市）';return;}
+    const resp=await fetch(`api/strategy?date=${encodeURIComponent(date)}`);
+    const data=await resp.json();
+    const names=[...new Set((data.items||[]).map(it=>it.strategy))].sort();
+    strategySelect.innerHTML='<option value="">全部策略</option>'+names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    currentItems=data.items||[];
+    note.textContent=data.note||`共 ${currentItems.length} 条观察结果`;
+    renderRows(currentItems);
+}
+function updateSortHeaders(){
+    sortSelect.value=sortKey;
+    sortDirectionButton.textContent=sortDirection==='asc'?'升序 ↑':'降序 ↓';
+    document.querySelectorAll('th[data-sort]').forEach(h=>{
+        const active=h.dataset.sort===sortKey;
+        h.textContent=`${sortLabels[h.dataset.sort]}${active?(sortDirection==='asc?' ↑':' ↓'):''}`;
+    });
+}
+function init(){
+    dateSelect.innerHTML=dates.map(d=>`<option>${esc(d)}</option>`).join('');
+    dateSelect.onchange=load;
+    strategySelect.onchange=()=>renderRows(currentItems);
+    filterInput.oninput=()=>renderRows(currentItems);
+    sortSelect.onchange=()=>{sortKey=sortSelect.value;updateSortHeaders();renderRows(currentItems);};
+    sortDirectionButton.onclick=()=>{sortDirection=sortDirection==='asc'?'desc':'asc';updateSortHeaders();renderRows(currentItems);};
+    document.querySelectorAll('th[data-sort]').forEach(h=>h.onclick=()=>{
+        if(sortKey===h.dataset.sort)sortDirection=sortDirection==='asc'?'desc':'asc';
+        else{sortKey=h.dataset.sort;sortDirection='desc';}
+        updateSortHeaders();renderRows(currentItems);
+    });
+    updateSortHeaders();
+    load();
+}
+init();
+</script>
+{% endblock %}

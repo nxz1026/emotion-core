@@ -61,6 +61,9 @@ class Config:
     TRADE_EXPORT_ENABLED: bool = False  # 交易桥默认不导出
     LLM_PROFILE: str | None = None  # None=关；'agnes'=启用
 
+    # ── 策略观察台 ─────────────────────────────
+    STRATEGY_REPORTS_DIR: str = "/home/ubuntu/DSH/longkonglong/reports"
+
 
 CONFIG = Config()
 

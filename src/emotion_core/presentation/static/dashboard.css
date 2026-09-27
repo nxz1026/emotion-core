@@ -277,3 +277,101 @@ pre code {
   body { background: #fff; color: #000; }
   .card { box-shadow: none; border: 1px solid #ddd; }
 }
+
+/* ── 策略观察台 ────────────────────────────── */
+.strategy-top-bar {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px 24px;
+  margin-bottom: 16px;
+  position: sticky;
+  top: 70px;
+  z-index: 50;
+  box-shadow: var(--card-shadow);
+}
+.strategy-top-bar h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.strategy-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.strategy-controls label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.strategy-controls select,
+.strategy-controls input {
+  padding: 6px 10px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+.strategy-controls input[type="search"] { min-width: 220px; }
+
+.btn-link {
+  display: inline-flex;
+  padding: 6px 12px;
+  color: var(--accent-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.btn-link:hover { background: var(--bg-tertiary); text-decoration: none; }
+
+.notice {
+  max-width: 1400px;
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  border-left: 3px solid var(--warning);
+  border-radius: 6px;
+}
+
+.table-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.table-tools label { font-weight: 600; color: var(--text-primary); }
+
+#note { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; }
+
+.data-table th { cursor: pointer; user-select: none; }
+.data-table th:hover { color: var(--accent-primary); }
+
+.data-row:hover { background: var(--bg-secondary); cursor: pointer; }
+
+.badge-buy { color: var(--danger); border: 1px solid var(--danger); background: var(--danger-bg); }
+.badge-watch { color: var(--warning); border: 1px solid var(--warning); background: var(--warning-bg); }
+.badge-pass { color: var(--text-muted); border: 1px solid var(--border-color); }
+
+.evidence-row { display: none; }
+.evidence-row.open { display: table-row; }
+.evidence-row td {
+  padding: 10px 16px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  background: var(--bg-secondary);
+}
+.evidence-row div {
+  border-left: 3px solid var(--warning);
+  padding-left: 10px;
+}
