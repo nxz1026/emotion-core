@@ -1,0 +1,11 @@
+[Unit]
+Description=Emotion Core strategy observer: weekdays 17:50 Shanghai (after daily pipeline)
+After=emotion-core-daily.timer
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 17:50:00 Asia/Shanghai
+Persistent=true
+Unit=emotion-core-strategy.service
+
+[Install]
+WantedBy=timers.target
