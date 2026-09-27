@@ -1,0 +1,11 @@
+[Unit]
+Description=Emotion Core Daily Timer
+Requires=emotion-core-daily.service
+
+[Timer]
+OnCalendar=Mon-Fri 17:20
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

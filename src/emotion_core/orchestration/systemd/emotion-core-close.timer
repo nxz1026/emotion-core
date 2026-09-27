@@ -1,0 +1,11 @@
+[Unit]
+Description=Emotion Core Market Close Timer
+Requires=emotion-core-close.service
+
+[Timer]
+OnCalendar=Mon-Fri 15:05
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

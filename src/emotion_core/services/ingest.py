@@ -436,6 +436,8 @@ def snapshot_daily(trade_date: date) -> int:
     V1（二轮审计）：守卫内移——此前只在 daily.sh 外部守卫，绕开脚本手动
     补数会把当前实时行情盖上任意传入日期（污染历史 + 派生交易日历）。
     """
+    from emotion_core.data.providers.eastmoney import em_data_date
+
     em_date = em_data_date()
     if em_date != trade_date:
         raise ValueError(
@@ -607,6 +609,8 @@ def fetch_hot_snapshot(trade_date: date) -> int:
     V1（二轮审计）：守卫内移，同 snapshot_daily——当前榜只对应最新交易日，
     不允许盖任意历史日期。
     """
+    from emotion_core.data.providers.eastmoney import em_data_date
+
     em_date = em_data_date()
     if em_date != trade_date:
         raise ValueError(
