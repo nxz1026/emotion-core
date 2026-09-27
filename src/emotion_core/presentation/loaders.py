@@ -44,3 +44,35 @@ def load_promotion(trade_date: date | None = None) -> list[dict]:
         (trade_date,),
     )
     return df.to_dict("records")
+
+
+def load_top_themes(trade_date: date | None = None, limit: int = 3) -> list[dict]:
+    """加载题材热度 TOP N。"""
+    if trade_date is None:
+        trade_date = date.today()
+    df = query_df(
+        "SELECT * FROM theme_group WHERE date = %s ORDER BY highest_board DESC, member_count DESC LIMIT %s",
+        (trade_date, limit),
+    )
+    return df.to_dict("records")
+
+
+def load_hot_rank(trade_date: date | None = None, limit: int = 10) -> list[dict]:
+    """加载人气榜 TOP N。"""
+    if trade_date is None:
+        trade_date = date.today()
+    df = query_df(
+        "SELECT * FROM hot_rank WHERE date = %s ORDER BY rank LIMIT %s",
+        (trade_date, limit),
+    )
+    return df.to_dict("records")
+
+
+def load_market_trend(days: int = 10) -> list[dict]:
+    """加载近 N 日市场趋势。"""
+    df = query_df(
+        "SELECT * FROM market_stat WHERE date >= CURRENT_DATE - INTERVAL '%s days'"
+        " ORDER BY date LIMIT %s",
+        (days, days),
+    )
+    return df.to_dict("records")

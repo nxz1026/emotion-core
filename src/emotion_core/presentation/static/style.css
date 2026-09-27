@@ -62,9 +62,36 @@ body {
 .nav { display: flex; gap: 16px; align-items: center; }
 .nav a { color: var(--text-secondary); text-decoration: none; padding: 4px 8px; border-radius: 6px; }
 .nav a:hover { color: var(--text-primary); background: var(--bg-tertiary); }
-#theme-toggle {
+.theme-toggle {
   background: none; border: 1px solid var(--border-color); border-radius: 6px;
   padding: 4px 8px; cursor: pointer; font-size: 16px;
+}
+
+/* === Stats Grid */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.stat {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+.stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.stat-value {
+  display: block;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 main { padding: 24px 0; min-height: calc(100vh - 200px); }

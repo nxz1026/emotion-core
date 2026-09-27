@@ -1,15 +1,247 @@
 {% extends "base.html" %}
 {% block title %}逻辑层{% endblock %}
+
+{# 上下文契约（渲染方须提供）:
+     stat       dict  market_stat 当日行
+     ladder     list  ladder_day 当日行（cont_days 降序）
+     promotion  list  promotion_day 当日行
+     themes     list  theme_group 当日行（按热度降序，取前 3）
+     hot_rank   list  hot_rank 当日行（按 rank 升序）
+     trend      list  market_stat 近 10 日行（date 升序）
+     trade_date str   展示用交易日
+   market_stat 无 bomb_count / oneword_count 列（只存 rate 与 ratio），
+   故两者的家数由渲染方从 derived_bar 聚合后传入，缺则显式显示「—」，不补 0。
+#}
+{% set s = stat or {} %}
+{% set eco_goods = s.dragon_env_reasons if s.dragon_env_reasons is not string else [] %}
+{% set eco_bads = s.dragon_env_risks if s.dragon_env_risks is not string else [] %}
+{% set trade_rows = hot_rank | selectattr('rank', 'ne', none) | sort(attribute='rank') %}
+
+{% macro num(v) %}{% set v = v | default(none) %}{% if v is none or v == '' %}—{% else %}{{ v }}{% endif %}{% endmacro %}
+{% macro pct(v) %}{% set v = v | default(none) %}{% if v is none or v == '' %}—{% else %}{{ '%.1f'|format(v * 100) }}%{% endif %}{% endmacro %}
+{% macro mark(v) %}{% set v = v | default(none) %}{% if v is none %}—{% elif v %}✓{% else %}✗{% endif %}{% endmacro %}
+
 {% block content %}
+
+{# ── 概览 ─────────────────────────────────────────────────────────── #}
 <div class="card">
     <h1>市场参数</h1>
+    <p class="lead">交易日 <strong>{{ trade_date or num(s.date) }}</strong>
+        · 阶段 <strong>{{ s.phase or '—' }}</strong>
+        · 买入窗口 <strong>{{ s.buy_window or '—' }}</strong>
+        {% if s.phase_inherited %}<span class="muted">（阶段继承自上一交易日）</span>{% endif %}
+    </p>
+    {% if s.force_liquidate %}
+    <p class="muted">⚠️ 退潮清仓标记生效</p>
+    {% endif %}
+    <div class="stats">
+        <div class="stat"><span class="stat-label">涨停家数</span><span class="stat-value">{{ num(s.limit_up_count) }}</span></div>
+        <div class="stat"><span class="stat-label">炸板数</span><span class="stat-value">{{ num(bomb_count) }}</span></div>
+        <div class="stat"><span class="stat-label">跌停数</span><span class="stat-value">{{ num(s.limit_down_count) }}</span></div>
+        <div class="stat"><span class="stat-label">名义最高板</span><span class="stat-value">{{ num(s.max_limit_days) }}</span></div>
+        <div class="stat"><span class="stat-label">换手最高板</span><span class="stat-value">{{ num(s.tradable_max_days) }}</span></div>
+        <div class="stat"><span class="stat-label">生态评级</span><span class="stat-value">{{ s.dragon_env or '—' }}</span></div>
+    </div>
+</div>
+
+{# ── 封板结构 ─────────────────────────────────────────────────────── #}
+<div class="card">
+    <h2>封板结构</h2>
     <table>
-        <thead><tr><th>指标</th><th>值</th></tr></thead>
+        <thead><tr><th>参数</th><th>值</th><th>说明</th></tr></thead>
         <tbody>
-            {% for key, value in stats.items() %}
-            <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
-            {% endfor %}
+            <tr><td>涨停家数</td><td>{{ num(s.limit_up_count) }}</td><td>当日涨停只数</td></tr>
+            <tr><td>炸板数</td><td>{{ num(bomb_count) }}</td><td>曾触板未封住</td></tr>
+            <tr><td>炸板率</td><td>{{ pct(s.bomb_rate) }}</td><td>炸板 ÷ 曾触板；分母为 0 时不补 0</td></tr>
+            <tr><td>跌停数</td><td>{{ num(s.limit_down_count) }}</td><td>跌停只数</td></tr>
+            <tr><td>一字板数量</td><td>{{ num(oneword_count) }}</td><td>开盘即涨停、全天未开</td></tr>
+            <tr><td>一字板占比</td><td>{{ pct(s.oneword_ratio) }}</td><td>一字板 ÷ 涨停家数</td></tr>
+            <tr><td>换手板数量</td><td>{{ ladder | selectattr('is_exchange') | list | length }}</td><td>梯队口径：涨停且盘中打开过</td></tr>
+            <tr><td>负反馈计数</td><td>{{ num(s.neg_feedback) }}</td><td>断板/高度降/炸板升/表现降/跌停升，0~5</td></tr>
         </tbody>
     </table>
 </div>
+
+{# ── 连板高度与梯队分布 ───────────────────────────────────────────── #}
+<div class="card">
+    <h2>连板高度与梯队分布</h2>
+    <p class="lead">名义最高板 <strong>{{ num(s.max_limit_days) }}</strong>
+        · 换手最高板 <strong>{{ num(s.tradable_max_days) }}</strong>
+        · 梯队共 <strong>{{ ladder | length }}</strong> 只</p>
+    {% set sole = ladder | selectattr('is_sole_top') | first %}
+    <p>唯一龙头：
+        {% if sole %}
+        <code>{{ sole.code }}</code> · 第 {{ sole.cont_days }} 板{% if sole.is_exchange %} · 换手{% else %} · 一字{% endif %}
+        {% else %}
+        <span class="muted">无（换手组非单只，或未达最低身位）</span>
+        {% endif %}
+    </p>
+    {% if ladder %}
+    <table>
+        <thead><tr><th>板数</th><th>只数</th><th>成员</th></tr></thead>
+        <tbody>
+        {% for height, members in ladder | groupby('cont_days') %}
+            <tr>
+                <td>{{ height }} 板</td>
+                <td>{{ members | length }}</td>
+                <td>{% for m in members %}<code>{{ m.code }}</code>{% if not loop.last %} {% endif %}{% endfor %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">当日无梯队数据</p>
+    {% endif %}
+</div>
+
+{# ── 晋级率与背离度 ───────────────────────────────────────────────── #}
+<div class="card">
+    <h2>晋级率（名义 / 换手）</h2>
+    <p class="muted">名义 = 含一字板的可得口径；换手 = 实际可买到的口径；背离度 = 名义 − 换手。</p>
+    {% if promotion %}
+    <table>
+        <thead><tr><th>层级</th><th>晋级基数</th><th>名义晋级</th><th>名义晋级率</th><th>换手晋级</th><th>换手晋级率</th><th>背离度</th><th>失败组表现</th></tr></thead>
+        <tbody>
+        {% for p in promotion %}
+            <tr>
+                <td>{{ p.layer }} 板</td>
+                <td>{{ num(p.promote_from) }}</td>
+                <td>{{ num(p.promote_nominal) }}</td>
+                <td>{{ pct(p.rate_nominal) }}</td>
+                <td>{{ num(p.promote_exchange) }}</td>
+                <td>{{ pct(p.rate_exchange) }}</td>
+                <td>{{ pct(p.divergence) }}</td>
+                <td>{{ pct(p.fail_perf) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">当日无晋级矩阵数据</p>
+    {% endif %}
+</div>
+
+{# ── 生态评级 G1-G4 / B1-B5 ───────────────────────────────────────── #}
+<div class="card">
+    <h2>生态评级</h2>
+    <p class="lead">评级：<strong>{{ s.dragon_env or '—' }}</strong>
+        {% if s.diverge %}<span class="muted">· 高度与机会背离</span>{% endif %}</p>
+    <h2 style="font-size:14px">有利条件 G1-G4</h2>
+    {% if eco_goods %}
+    <table>
+        <thead><tr><th>条件</th><th>成立</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for g in eco_goods %}
+            <tr><td>{{ g.cond }}</td><td>{{ mark(g.ok) }}</td><td>{{ g.note or '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">无有利条件明细</p>
+    {% endif %}
+    <h2 style="font-size:14px">不利条件 B1-B5</h2>
+    {% if eco_bads %}
+    <table>
+        <thead><tr><th>条件</th><th>成立</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for b in eco_bads %}
+            <tr><td>{{ b.cond }}</td><td>{{ mark(b.ok) }}</td><td>{{ b.note or '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">无不利条件明细</p>
+    {% endif %}
+</div>
+
+{# ── 加速事件 ─────────────────────────────────────────────────────── #}
+<div class="card">
+    <h2>加速事件</h2>
+    {% if s.accelerate %}
+    <p class="lead">⚠️ <strong>A1 命中</strong> — 高度背离，追高风险抬升。</p>
+    {% else %}
+    <p class="lead">未命中</p>
+    {% endif %}
+    {% if s.accel_reason %}<p><code>{{ s.accel_reason }}</code></p>{% endif %}
+</div>
+
+{# ── 题材热度 TOP3 ────────────────────────────────────────────────── #}
+<div class="card">
+    <h2>题材热度 TOP3</h2>
+    {% if themes %}
+    <table>
+        <thead><tr><th>题材</th><th>最高板</th><th>龙头</th><th>成员数</th><th>中位段</th><th>低位段</th><th>首板数</th><th>完整度</th><th>状态</th></tr></thead>
+        <tbody>
+        {% for t in themes[:3] %}
+            <tr>
+                <td><strong>{{ t.theme }}</strong></td>
+                <td>{{ num(t.highest_board) }}</td>
+                <td>{% if t.top_code %}<code>{{ t.top_code }}</code>{% else %}—{% endif %}</td>
+                <td>{{ num(t.member_count) }}</td>
+                <td>{{ num(t.mid_count) }}</td>
+                <td>{{ num(t.low_count) }}</td>
+                <td>{{ num(t.first_board_count) }}</td>
+                <td>{{ pct(t.completeness) }}</td>
+                <td>{{ t.status or '—' }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">当日无题材聚合数据</p>
+    {% endif %}
+</div>
+
+{# ── 人气榜 TOP10 ─────────────────────────────────────────────────── #}
+<div class="card">
+    <h2>人气榜 TOP10</h2>
+    {% if trade_rows %}
+    <table>
+        <thead><tr><th>排名</th><th>代码</th></tr></thead>
+        <tbody>
+        {% for h in trade_rows[:10] %}
+            <tr><td>{{ h.rank }}</td><td><code>{{ h.code }}</code></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">当日无人气榜数据</p>
+    {% endif %}
+</div>
+
+{# ── 市场情绪走势（近 10 日） ──────────────────────────────────────── #}
+<div class="card">
+    <h2>市场情绪走势（近 10 日）</h2>
+    {% if trend %}
+    {% set ns = namespace(top=0) %}
+    {% for r in trend %}
+        {% if r.limit_up_count and r.limit_up_count > ns.top %}{% set ns.top = r.limit_up_count %}{% endif %}
+    {% endfor %}
+    <table>
+        <thead><tr><th>日期</th><th>阶段</th><th>买入窗口</th><th>涨停家数</th><th>最高板</th><th>一字占比</th><th>生态</th><th>梯队</th></tr></thead>
+        <tbody>
+        {% for r in trend %}
+            <tr>
+                <td>{{ r.date }}</td>
+                <td>{{ r.phase or '—' }}</td>
+                <td>{{ r.buy_window or '—' }}</td>
+                <td>
+                    {{ num(r.limit_up_count) }}
+                    {% if ns.top and r.limit_up_count %}
+                    <span style="display:inline-block;height:8px;background:var(--text-muted);border-radius:4px;vertical-align:middle;width:{{ (r.limit_up_count / ns.top * 100)|round(1) }}%"></span>
+                    {% endif %}
+                </td>
+                <td>{{ num(r.max_limit_days) }}</td>
+                <td>{{ pct(r.oneword_ratio) }}</td>
+                <td>{{ r.dragon_env or '—' }}</td>
+                <td>{{ num(r.tradable_max_days) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">无历史走势数据</p>
+    {% endif %}
+</div>
+
 {% endblock %}

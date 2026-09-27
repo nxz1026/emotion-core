@@ -1,15 +1,491 @@
 {% extends "base.html" %}
+{#
+  算法层 dashboard：回答「为什么这个数字是 50 不是 48」。
+
+  静态口径区（计算公式 / 数据血缘 / 口径裁决 / 已知缺口）写死在本文件，
+  每行带 `文件:行号` 溯源，可与代码逐条对账；参数值不复制 CONFIG，
+  避免出现第二份阈值真相。
+
+  context 契约（全部可选，缺任一项只影响对应动态区块的空态）：
+    generated_at  str                     渲染时间
+    trade_date    date|str                目标交易日
+    config_hash   str                     utils/config.py:68 的 config_hash()，12 位
+    config_params list[{group,name,value,comment}]   取自 CONFIG 的阈值
+    quality       list[{name,value,threshold,status,note}]
+    sample_sizes  list[{metric,n,basis,ok,note}]
+    replay        list[{metric,value,n,note}]       取自 evaluate.forward_stats
+    market        dict                    market_stat 当日行
+#}
 {% block title %}算法层{% endblock %}
+
 {% block content %}
+
+{% set formulas_judgement = [
+  {"name": "涨停价", "sql": "limit_up_cents = (pre_close_cents * (1000 + pct) + 500) // 1000", "impl": "utils/price.py:44-54"},
+  {"name": "跌停价", "sql": "limit_down_cents = (pre_close_cents * (1000 - pct) + 500) // 1000", "impl": "utils/price.py:57-60"},
+  {"name": "涨跌幅档位 pct", "sql": "board_pct_milli(code): bj*/4*/8* = 300; 30*/68* = 200; 其余 = 100", "impl": "utils/price.py:30-41"},
+  {"name": "涨停 is_limit_up", "sql": "close_cents == limit_up_cents   -- 精确相等，不是 >= / <=", "impl": "utils/price.py:63-77"},
+  {"name": "跌停 is_limit_down", "sql": "close_cents == limit_down_cents", "impl": "utils/price.py:63-77"},
+  {"name": "触板 touched_limit", "sql": "high_cents >= limit_up_cents", "impl": "core/src/indicators.rs:186-193"},
+  {"name": "一字板 is_one_word", "sql": "low_cents >= limit_up_cents", "impl": "core/src/indicators.rs:186-193"},
+  {"name": "换手 is_exchange", "sql": "is_limit_up AND low_cents < limit_up_cents   -- 含 T 字回封", "impl": "core/src/indicators.rs:186-193"},
+  {"name": "炸板 is_bomb", "sql": "touched_limit AND NOT is_limit_up", "impl": "core/src/indicators.rs:186-193"},
+  {"name": "连板 cont_days", "sql": "cont + 1 if is_limit_up else 0   -- 只遍历实存在的行，停牌无行故不打断（C1）", "impl": "core/src/indicators.rs:169-222"},
+  {"name": "振幅 amplitude", "sql": "round((high_cents - low_cents) / pre_close_cents * 100, 4)", "impl": "core/src/indicators.rs:199-205"}
+] %}
+
+{% set formulas_mood = [
+  {"name": "涨停家数", "sql": "count(*) FILTER (WHERE is_limit_up)  -- 全市场口径 + 次新剔除，不限主板前缀", "impl": "algorithms/emotion.py:163-174"},
+  {"name": "跌停家数", "sql": "count(*) FILTER (WHERE is_limit_down)  -- 全市场口径 + 次新剔除", "impl": "algorithms/emotion.py:163-174"},
+  {"name": "炸板率", "sql": "count(is_bomb) / count(touched_limit)   -- 分母 0 返回 None，不补 0（F6）", "impl": "algorithms/emotion.py:310-315"},
+  {"name": "一字板占比", "sql": "count(is_one_word) / count(is_limit_up)  -- 限主板 7 前缀；涨停数 0 返回 None", "impl": "algorithms/accelerate.py:94-109"},
+  {"name": "昨涨停表现", "sql": "mean = avg(t.close / y.close - 1) * 100；median = percentile_cont(0.5) * 100；均值与中位数两列并存", "impl": "algorithms/emotion.py:177-199"},
+  {"name": "自适应炸板阈值", "sql": "前 30 交易日 bomb_rate 的 median + std(ddof=1)，不含当日；样本不足回退 0.42", "impl": "algorithms/emotion.py:245-265"},
+  {"name": "最高板振幅", "sql": "max(amplitude)  -- 限主板前缀 + 剔次新 + cont_days >= 1", "impl": "algorithms/emotion.py:202-218"},
+  {"name": "最高板断板", "sql": "昨日主板 cont_days = max 且 >= 2 的组，今日全部 is_limit_up = false（停牌视作未封）；昨日无高标则 None", "impl": "algorithms/emotion.py:221-242"}
+] %}
+
+{% set formulas_state = [
+  {"name": "退潮 ebb", "sql": "(今日 top_broke AND 昨日 top_broke) OR zt_perf < -2.0 OR (limit_down > 15 AND limit_down > 昨日 * 2.0)", "impl": "core/src/state.rs:120-155"},
+  {"name": "高潮 climax", "sql": "limit_up_count > 80 OR bomb_rate > bomb_threshold OR top_amplitude > 15.0", "impl": "core/src/state.rs:120-155"},
+  {"name": "发酵 ferment", "sql": "max_limit_days >= 4 AND 今日 zt_perf > 1.5 AND 昨日 zt_perf > 1.5 AND 涨停家数连升两日", "impl": "core/src/state.rs:120-155"},
+  {"name": "冰点 ice", "sql": "max_limit_days <= 3 AND limit_up_count < 40 AND (昨日 zt_perf < 0 且今日 > 0 OR 无唯一换手最高板候选)", "impl": "core/src/state.rs:120-155"},
+  {"name": "相位判定", "sql": "退潮 > 高潮 > 发酵 > 冰点，first match wins；全不命中则继承昨日 phase（phase_inherited = true），首日 seed 冰点", "impl": "core/src/state.rs:165-216"},
+  {"name": "买入窗口", "sql": "window_of: 发酵 -> STANDARD；高潮 -> ENHANCED；冰点 / 退潮 -> NONE；退潮额外 force_liquidate = true", "impl": "core/src/state.rs:157-163"},
+  {"name": "高位分歧降级", "sql": "负反馈 5 项投票 >= 3（不改相位，仅叠加标记）", "impl": "algorithms/emotion.py:328-341"}
+] %}
+
+{% set formulas_ladder = [
+  {"name": "梯队候选集", "sql": "主板 7 前缀(600/601/603/605/000/001/002) AND cont_days >= 2 AND NOT is_st AND 次新剔除(首根 bar 距目标日 >= 90 自然日)", "impl": "algorithms/ladder.py:48-99"},
+  {"name": "唯一龙头 sole_top", "sql": "H = max(cont_days) over {is_exchange}；top_group = {r : is_exchange AND cont_days == H}；sole_top = len(top_group) == 1 AND cont_days >= 4", "impl": "algorithms/ladder.py:48-61"},
+  {"name": "淘汰赛存活", "sql": "y_top_group_count = |昨日 top_group|；y_top_survivor_count = |昨日 top_group INTERSECT 今日 is_exchange 代码集|", "impl": "algorithms/ladder.py:93-110"},
+  {"name": "晋级率（双口径）", "sql": "rate_nominal = promote_nominal / promote_from；rate_exchange = promote_exchange / promote_from（同一分母）；5 层固定分层 1->2 / 2->3 / 3->4 / 4->5 / 5+->6+", "impl": "algorithms/promotion.py:95-132"},
+  {"name": "分母不足", "sql": "分母 < PROMOTION_MIN_DENOM(3) 时 rate 返回 None，不补 0；任一口径为 None 则 divergence 为 None", "impl": "algorithms/promotion.py:95-99"},
+  {"name": "背离 divergence", "sql": "rate_nominal - rate_exchange   -- 生态评级 B2 的前置", "impl": "algorithms/promotion.py:112"},
+  {"name": "梯队健康度", "sql": "只读 ladder_day：height_nominal / height_exchange / gaps = 无换手成员的空板层 / groups / sole_top；无当日行则全 None", "impl": "algorithms/dragon_env.py:377-410"},
+  {"name": "晋级强度", "sql": "只读 promotion_day 逐层透传，delta_exchange = rate_exchange - prior[layer]；不设阈值不出结论不写库", "impl": "algorithms/dragon_env.py:413-456"}
+] %}
+
+{% set formulas_signal = [
+  {"name": "加速 A1", "sql": "nominal_h - tradable_h >= 2   -- 名义高度靠一字造成", "impl": "algorithms/accelerate.py:178-209"},
+  {"name": "加速 A2", "sql": "top_streak >= 2   -- 名义最高板组内单票截至今日的最长连续一字天数", "impl": "algorithms/accelerate.py:112-151"},
+  {"name": "加速 A3", "sql": "oneword_ratio >= 0.35 AND oneword_ratio > 前 30 日中位数；预热期不足 -> None -> A3 不成立", "impl": "algorithms/accelerate.py:154-175"},
+  {"name": "加速命中", "sql": "A1 AND (A2 OR A3)   -- 禁买但不清仓，不改 phase（F2：加速是事件不是状态）", "impl": "algorithms/accelerate.py:178-209"},
+  {"name": "买入 c1 唯一性", "sql": "cand.code == sole_top.code", "impl": "algorithms/entry.py:93-96"},
+  {"name": "买入 c2 换手性", "sql": "cand.is_exchange（非一字板）", "impl": "algorithms/entry.py:99-101"},
+  {"name": "买入 c3 淘汰赛", "sql": "y_comp_group >= 2 AND y_survivor_count == 1 AND survivors 集合等值 == {cand.code}（卫冕晋级不算）", "impl": "algorithms/entry.py:104-121"},
+  {"name": "买入 c4 板数门槛", "sql": "cand.cont_days >= MIN_LEADER_DAYS(4)", "impl": "algorithms/entry.py:143-145"},
+  {"name": "买入 c5 强度补偿", "sql": "仅 ENHANCED 窗口适用；炸板回封 bomb_times >= 1 -> True；否则换手率 >= 5.0% -> True/False；池窗口外记 UNKNOWN", "impl": "algorithms/entry.py:148-172"},
+  {"name": "警告 W1", "sql": "同身位扎堆，恒 True，警告不否决", "impl": "algorithms/entry.py:197-212"},
+  {"name": "卖出（退潮清仓）", "sql": "force_liquidate = true -> 全部 OPEN 持仓无条件清仓，优先级最高，不读当日判据行", "impl": "algorithms/exit.py:130-149"},
+  {"name": "卖出（断板）", "sql": "当日 derived_bar 行存在且 is_limit_up = false -> 卖出；缺行按缺数处理，不当断板（F6）", "impl": "algorithms/exit.py:138-149"}
+] %}
+
+{% set formulas_dragon = [
+  {"name": "G1 高度扩张", "sql": "近 3 日换手口径 H 单调不降且至少一日上升", "impl": "algorithms/dragon_env.py:108-114"},
+  {"name": "G2 主线完整", "sql": "theme_group 存在 member_count >= 3 的主线题材；首板维度未实现 -> 恒记 UNKNOWN，不证伪", "impl": "algorithms/dragon_env.py:127-160"},
+  {"name": "G3 负反馈温和", "sql": "近 5 日最高层 fail_perf 均值 > -3.0；样本 < 2 -> UNKNOWN", "impl": "algorithms/dragon_env.py:163-174"},
+  {"name": "G4 上方有空间", "sql": "H <= 近 20 日最高 - 1", "impl": "algorithms/dragon_env.py:117-124"},
+  {"name": "B2 名义背离", "sql": "A3 命中 AND 当日 max(divergence) >= 0.3", "impl": "algorithms/dragon_env.py:182-192"},
+  {"name": "B3 高标核按钮", "sql": "近 5 日 sole_top 次日平均涨跌幅 < -7.0；live 模式无次日数据 -> UNKNOWN，复盘态放宽 3 自然日", "impl": "algorithms/dragon_env.py:244-264"},
+  {"name": "评级裁决", "sql": "任一不利成立 -> UNFAVORABLE；任一有利被证伪 -> NEUTRAL；核心 G1/G4 全 True 且无不利 -> FAVORABLE；否则 NEUTRAL", "impl": "algorithms/dragon_env.py:306-320"}
+] %}
+
+{% set lineage = [
+  {"stage": "① 行情源", "table": "东财 push2 clist（主源）", "note": "2026-09-24 实测本机出口高频 502，20 次仅 4 次成功", "impl": "data/providers/eastmoney.py:91-100"},
+  {"stage": "① 行情源", "table": "新浪 clist（回退）", "note": "EM 抛 FetchError 时按异常类型分流回退；新浪 volume 单位是股，需 /100 换算为手", "impl": "data/providers/eastmoney.py:160-243"},
+  {"stage": "① 行情源", "table": "腾讯 / pytdx（历史补源）", "note": "深历史回填用，均归一为成交量=手、换手率=百分数", "impl": "data/providers/tencent.py:16-23"},
+  {"stage": "② 原始日线", "table": "daily_bar", "note": "pre_close 存列，禁止 LAG(close) 重算（C4）；价格单位=分", "impl": "data/schema.py:30-43"},
+  {"stage": "③ 逐行判据", "table": "derived_bar", "note": "涨停/跌停/触板/一字/换手/炸板/连板/振幅，8 个布尔与数值列", "impl": "data/schema.py:44-57"},
+  {"stage": "④ 证券主数据", "table": "stock_basic", "note": "is_st / first_bar_date 供 C5 剔 ST 与次新剔除；market_service 未按 C7 过滤 bj 前缀", "impl": "data/schema.py:19-29"},
+  {"stage": "⑤ 日频结论", "table": "market_stat", "note": "每日一行，27 列；无任何样本量列（见「样本量」区块）", "impl": "data/schema.py:71-99"},
+  {"stage": "⑤ 日频结论", "table": "ladder_day / promotion_day", "note": "梯队与晋级矩阵按日 upsert；promote_from 是全库唯一落库的分母", "impl": "data/schema.py:100-124"},
+  {"stage": "⑥ 信号与结果", "table": "signal / signal_outcome", "note": "signal 无 source 列，live / replay 无法在库内区分", "impl": "data/schema.py:125-158"},
+  {"stage": "⑦ 展示", "table": "loaders.query_df（只读 SELECT）", "note": "展示层直连 DB，不经快照文件；与 docs/02 的「只读快照」表述冲突，见 C6", "impl": "presentation/loaders.py:8-46"}
+] %}
+
+{% set rulings = [
+  {"id": "C1", "title": "连板数停牌不打断", "decision": "cont_days 只遍历实际存在的行，不按交易日历补齐；停牌日无行自然连上，不重置计数。照 lkl 原样不改。", "basis": "改口径会动全部历史数字且无法验证改动对不对；影响面 0.103%（45/43,860 行），可接受。", "evidence": "docs/02-算法说明与接手决策规则.md:202", "impl": "algorithms/indicators.py:33；core/src/indicators.rs:153,167", "status": "已裁决"},
+  {"id": "C2", "title": "市场状态 4 相状态机", "decision": "照 lkl 4 相（退潮 > 高潮 > 发酵 > 冰点）为决策权威；3 档阈值降级为辅助指标并改名「涨停热度档」，不构成决策能力。", "basis": "3 档没有 buy_window 与退潮语义，两套「市场状态」会同时对外可见。", "evidence": "docs/02-算法说明与接手决策规则.md:203", "impl": "algorithms/emotion.py:7,125-126", "status": "已裁决"},
+  {"id": "C3", "title": "晋级率分层双口径", "decision": "照 lkl 分层的名义 / 换手双口径晋级率为权威；分母 < 3 出 None 不补零。缺口上下界作质量标注叠加，不替换。", "basis": "生态评级 B2 依赖 divergence（名义率 - 换手率）；双口径是 REPAIR 判据、加速背离判据、生态评级的共同前置。", "evidence": "docs/02-算法说明与接手决策规则.md:204", "impl": "algorithms/promotion.py:1,7-12,95-99", "status": "已裁决"},
+  {"id": "C4", "title": "单位统一 + pre_close 存列", "decision": "volume=手、turnover_rate=百分数、价格一律用分（整数）；pre_close 必须存列，禁止用 LAG(close) 重算。", "basis": "LAG(close) 在除权日实测错 339/192,593 行（最大偏差 15.36 元），会让涨停判定与次日开盘溢价一起算错；单位错静默差 100 倍。", "evidence": "docs/02-算法说明与接手决策规则.md:205", "impl": "domain/bar.py:16；core/src/indicators.rs:71-75", "status": "已裁决"},
+  {"id": "C5", "title": "ST 整体剔除", "decision": "照 lkl 整体剔除 ST，不做分档规则化；5%/20% ST 规则留作扩展，生产不启用。标的池同时剔次新。", "basis": "生产侧硬编码 variant='normal' 使 ST 规则空转，两侧 limit_up_count 不可比。", "evidence": "docs/02-算法说明与接手决策规则.md:206", "impl": "algorithms/derive.py:55；algorithms/ladder.py:9", "status": "已裁决"},
+  {"id": "C6", "title": "展示层数据源（唯一有争议）", "decision": "docs/02 写「用 asel 的只读快照」，docs/decisions/README.md 同一条标「待裁决」，docs/09 反过来推荐「直连 DB 只读」。实际代码走直连 DB。本页按实际代码展示，但该条未正式拍板。", "basis": "两份文档口径不一致且无 ADR 裁决文件；展示层设计文档成文晚于合并裁决，两者未对齐。", "evidence": "docs/02-算法说明与接手决策规则.md:207 vs docs/decisions/README.md:40", "impl": "presentation/loaders.py:8-46（全部 query_df 直连，无快照文件）", "status": "待裁决"},
+  {"id": "C7", "title": "北交所不参与判定", "decision": "北交所数据保留在数据层（展示、个股诊断、未来研究），但历史判定口径冻结为「不含北交所」，过滤须在进入状态机之前完成。", "basis": "若「全市场」含北交所，limit_up_count 会变 -> phase 可能翻转 -> 全部历史要重算且无法验证。原文标注「存疑，待有懂策略的人核对」。", "evidence": "docs/04-数据源层讨论.md:98,112-115", "impl": "domain/market.py:32；data/sync.py:56-57（算法层 market_service 未落实，见「已知缺口」）", "status": "存疑"}
+] %}
+
+{% set gaps = [
+  {"item": "覆盖率门槛未接线", "detail": "MIN_COVERAGE=0.90 仅为常量；无 coverage 字段、无 covered/in_market 比率、无 &lt;0.90 阻断、无退出码 76。", "impl": "utils/config.py:49；docs/15-实施追踪.md:230"},
+  {"item": "health 步骤是空实现", "detail": "每日编排第 10 步只打印 TODO，health.py 的三条断档检查未被调用。", "impl": "orchestration/daily.py:117-118"},
+  {"item": "tests/caliber/ 为空目录", "detail": "规划的 6 个口径守护测试一个未落地；页面不能声称 C1-C7 有专测。实际覆盖散在 tests/oracle 对账与 tests/unit。", "impl": "tests/caliber/；docs/13-架构评审与逐层代码框架设计.md:56-64"},
+  {"item": "展示层涨停价式与唯一实现不同源", "detail": "server.py 写死 (pre_close * 110 + 50) / 100（仅主板、无分单位），与 utils/price.py 的分整数式不是同一套实现，不可作为口径引用。", "impl": "presentation/server.py:113 vs utils/price.py:44-54"},
+  {"item": "C7 在算法层未落实", "detail": "market_service 的 _load_day_metrics 无 bj 前缀、无 is_st、无次新过滤，与 algorithms/emotion.py 的 _counts 口径不一致。", "impl": "services/market_service.py:19-54 vs algorithms/emotion.py:163-174"},
+  {"item": "晋级率落库双实现不一致", "detail": "loader 的 upsert_promotion_day 漏写 promote_from 列且 ON CONFLICT 不更新它，与 promotion.py 的 _INSERT_SQL 不一致；编排走的是前者。", "impl": "data/loader.py:177-201 vs algorithms/promotion.py:165-178"},
+  {"item": "config_hash() 无调用方", "detail": "函数声称写入 pipeline_state / signal / eval_result，但三张表均无该列，全仓只有定义处命中。", "impl": "utils/config.py:68-71"},
+  {"item": "eval_result 无写入方", "detail": "只有 DDL 与清理策略（保留最新 50 条），评估结果实际只落 reports/calib-&lt;date&gt;.md。", "impl": "data/schema.py:184-193；services/calibrate.py:127-131"},
+  {"item": "ecosystem.rs 是空壳", "detail": "全文仅 pub struct Ecosystem;，而 dragon_env.py 注释声称已有 Rust 实现；生态评级目前只有 Python 一份。", "impl": "core/src/ecosystem.rs:1 vs algorithms/dragon_env.py:56-57"},
+  {"item": "signal 表无 source 列", "detail": "entry._persist 写入 8 列不含 source，DDL 也无该列，回填信号无法在库内标记 live / replay。", "impl": "algorithms/entry.py:418-440；data/schema.py:125-140"},
+  {"item": "stock_basic 缺列", "detail": "diagnose_service 查询 industry / market_cap 两列，DDL 中不存在，该服务会抛列不存在错误。", "impl": "services/diagnose_service.py:48-50 vs data/schema.py:19-29"},
+  {"item": "每日编排 outcome 步骤接错服务", "detail": "outcome 步骤接到 replay_service.run（回填 signal），而非 algorithms.outcome.backfill（回填 signal_outcome）。", "impl": "orchestration/daily.py:113-116"},
+  {"item": "CONFIG 内有重复字段", "detail": "CLIMAX_AMPLITUDE 在 Config 中声明两次（第 33、35 行），值相同，dataclass 取后者；不影响运行但属冗余。", "impl": "utils/config.py:33,35"}
+] %}
+
+{% set disambig = [
+  {"series": "口径裁决 C1-C7", "meaning": "本页「口径裁决记录」区块，6 处历史口径冲突 + 1 条追加", "where": "docs/02-算法说明与接手决策规则.md:202-207；C7 见 docs/04-数据源层讨论.md:98"},
+  {"series": "买入五条件 c1-c5 + W1", "meaning": "entry.checklist 的条件代号，与口径裁决无关；小写 c", "where": "algorithms/entry.py:1-6,149-155,225-231"},
+  {"series": "oracle 测试里的 C1/C2/C5/W1-W5", "meaning": "指五条件代号与警告行，不是口径裁决 —— 读数时最易串号", "where": "tests/oracle/test_evaluate_rust_vs_python.py:257-264"},
+  {"series": "加速事件 A1/A2/A3", "meaning": "accelerate 的三条判据", "where": "algorithms/accelerate.py:8-11"},
+  {"series": "审计修复 A1-A8", "meaning": "外部审计修复项编号，与加速 A1-A3 撞名，accelerate.py:17-20 同段共存", "where": "algorithms/accelerate.py:17-20"},
+  {"series": "生态判据 G1-G4 / B1-B5", "meaning": "生态可用性评级，不是口径裁决", "where": "algorithms/dragon_env.py:9-15,26-33"},
+  {"series": "D1 的四重含义", "meaning": "lkl 策略 D1 / asel 工程 D1 / 合并决策 D1 / 迁移期自主决策 D1 是四件不同的事", "where": "docs/archive-lkl/docs/PLAN.md:14；docs/02:28,36；merge-analysis:870；docs/14-自主决策日志.md:9-65"}
+] %}
+
+<h1>算法口径</h1>
+<p class="lead">
+  本页回答「为什么这个数字是 50 不是 48」。静态口径写死在模板内并标注
+  <code>文件:行号</code> 溯源；动态数值由 context 注入，缺失时显示空态而不编造。
+</p>
+
 <div class="card">
-    <h1>算法口径</h1>
+    <h2>本页元信息</h2>
     <table>
-        <thead><tr><th>指标</th><th>计算方式</th></tr></thead>
+        <thead><tr><th>项</th><th>值</th></tr></thead>
         <tbody>
-            {% for key, value in formulas.items() %}
-            <tr><td>{{ key }}</td><td><code>{{ value }}</code></td></tr>
+            <tr><td>目标交易日</td><td>{{ trade_date | default('—', true) }}</td></tr>
+            <tr><td>渲染时间</td><td>{{ generated_at | default('—', true) }}</td></tr>
+            <tr><td>CONFIG 指纹</td><td><code>{{ config_hash | default('未注入', true) }}</code></td></tr>
+            <tr><td>阈值唯一住所</td><td><code>src/emotion_core/utils/config.py</code>（本页不复制阈值，避免第二份真相）</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>1 · 计算公式</h2>
+    <p class="muted">每条给 SQL / 伪代码与唯一实现位置。判据以「精确相等」而非容差比较，是涨停判定不重不漏的前提。</p>
+
+    <h3>价格与逐行判据</h3>
+    <table>
+        <thead><tr><th>参数</th><th>计算口径</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in formulas_judgement %}
+            <tr><td>{{ row.name }}</td><td><code>{{ row.sql }}</code></td><td><code>{{ row.impl }}</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>情绪计数</h3>
+    <table>
+        <thead><tr><th>参数</th><th>计算口径</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in formulas_mood %}
+            <tr><td>{{ row.name }}</td><td><code>{{ row.sql }}</code></td><td><code>{{ row.impl }}</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>状态机</h3>
+    <table>
+        <thead><tr><th>相位</th><th>判据</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in formulas_state %}
+            <tr><td>{{ row.name }}</td><td><code>{{ row.sql }}</code></td><td><code>{{ row.impl }}</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>梯队与晋级</h3>
+    <table>
+        <thead><tr><th>项</th><th>计算口径</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in formulas_ladder %}
+            <tr><td>{{ row.name }}</td><td><code>{{ row.sql }}</code></td><td><code>{{ row.impl }}</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>信号（加速 / 买入 / 卖出）</h3>
+    <table>
+        <thead><tr><th>项</th><th>计算口径</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in formulas_signal %}
+            <tr><td>{{ row.name }}</td><td><code>{{ row.sql }}</code></td><td><code>{{ row.impl }}</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>生态可用性评级</h3>
+    <table>
+        <thead><tr><th>判据</th><th>计算口径</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in formulas_dragon %}
+            <tr><td>{{ row.name }}</td><td><code>{{ row.sql }}</code></td><td><code>{{ row.impl }}</code></td></tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+
+<div class="card">
+    <h2>2 · 数据来源（血缘）</h2>
+    <p class="muted">从行情源到展示层共 7 级。展示层只读，不 import service，不写库。</p>
+    <table>
+        <thead><tr><th>层级</th><th>表 / 组件</th><th>说明</th><th>实现</th></tr></thead>
+        <tbody>
+            {% for row in lineage %}
+            <tr>
+                <td>{{ row.stage }}</td>
+                <td><code>{{ row.table }}</code></td>
+                <td>{{ row.note }}</td>
+                <td><code>{{ row.impl }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>3 · 样本量（N）</h2>
+    <p class="lead muted">
+        「42% 晋级率」和「42% 晋级率（N=150）」可信度不同。本区块逐项标注每个统计的样本量来源；
+        标为未落库的项表示展示层无法反查其分母，<strong>不是</strong>分母为零。
+    </p>
+    <table>
+        <thead><tr><th>统计量</th><th>N 来源</th><th>说明</th></tr></thead>
+        <tbody>
+            {% for row in sample_sizes | default([], true) %}
+            <tr>
+                <td>{{ row.metric }}</td>
+                <td>{% if row.ok %}<code>{{ row.n }}</code>{% else %}<code class="muted">未落库</code>{% endif %}</td>
+                <td>{{ row.note }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td>晋级率分母</td>
+                <td><code>promotion_day.promote_from</code></td>
+                <td>全库唯一落库的分母：昨日该层主板非次新连板股数（data/schema.py:104）</td>
+            </tr>
+            <tr>
+                <td>淘汰赛存活数</td>
+                <td><code>ladder_day.y_top_group_count / y_top_survivor_count</code></td>
+                <td>买入条件 c3 的 g 与 s（data/schema.py:121-122）</td>
+            </tr>
+            <tr>
+                <td>炸板率分母</td>
+                <td><code class="muted">未落库</code></td>
+                <td>touched_limit 计数只作局部变量存在于 SQL 聚合里，展示层无法反查（algorithms/emotion.py:163-174）</td>
+            </tr>
+            <tr>
+                <td>一字板占比分母</td>
+                <td><code class="muted">未落库</code></td>
+                <td>分母为主板涨停数，zt == 0 时返回 None，同样不落库（algorithms/accelerate.py:99-109）</td>
+            </tr>
+            <tr>
+                <td>market_stat 各指标</td>
+                <td><code class="muted">未落库</code></td>
+                <td>27 列中无任何 n / sample / denom 语义列（data/schema.py:71-99）</td>
+            </tr>
+            <tr>
+                <td>生态评级 G3 / B3 / B4 / B5</td>
+                <td><code class="muted">仅说明文本</code></td>
+                <td>样本数只写进 note 字符串与 UNKNOWN 门槛，不落为列（algorithms/dragon_env.py:171-172,293-294）</td>
+            </tr>
+            <tr>
+                <td>历史信号回放 N</td>
+                <td><code>len(forward_stats 结果行数)</code></td>
+                <td>逐信号粒度，调用方自行聚合（algorithms/evaluate.py:130-160）</td>
+            </tr>
+            <tr>
+                <td>domain 快照 sample_n</td>
+                <td><code class="muted">预留未写入</code></td>
+                <td>三个快照各留了一个 sample_n 字段但默认值 0 且无任何写入方（domain/snapshot.py:19,38,57）</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>4 · 数据质量</h2>
+    <table>
+        <thead><tr><th>检查项</th><th>当前值</th><th>门槛</th><th>状态</th><th>说明</th></tr></thead>
+        <tbody>
+            {% for row in quality | default([], true) %}
+            <tr>
+                <td>{{ row.name }}</td>
+                <td><code>{{ row.value }}</code></td>
+                <td><code>{{ row.threshold | default('—', true) }}</code></td>
+                <td>{{ row.status }}</td>
+                <td>{{ row.note | default('', true) }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td>覆盖率门槛</td>
+                <td><code class="muted">未接入</code></td>
+                <td><code>MIN_COVERAGE = 0.90</code></td>
+                <td>未实现</td>
+                <td>常量已定义但无 coverage 字段、无比率计算、无阻断与退出码 76（utils/config.py:49）</td>
+            </tr>
+            <tr>
+                <td>日报断档</td>
+                <td><code class="muted">未接入</code></td>
+                <td><code>REPORT_GAP_DAYS = 2</code></td>
+                <td>未实现</td>
+                <td>检查逻辑存在但编排第 10 步只打印 TODO（algorithms/health.py:52-55；orchestration/daily.py:117-118）</td>
+            </tr>
+            <tr>
+                <td>数据链断档</td>
+                <td><code class="muted">未接入</code></td>
+                <td><code>DATA_GAP_DAYS = 2</code></td>
+                <td>未实现</td>
+                <td>同上，按 derived_bar 的 max(date) 判断档（algorithms/health.py:74-124）</td>
+            </tr>
+            <tr>
+                <td>信号结果陈旧</td>
+                <td><code class="muted">未接入</code></td>
+                <td><code>OUTCOME_STALE_DAYS = 6</code></td>
+                <td>未实现</td>
+                <td>同上（algorithms/health.py:52-55）</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p class="muted">
+        注：以上四项在 <code>docs/01-功能层讨论.md:99</code> 的 A12 中定义为「低于 0.90 拒绝装配、退出码 76」，
+        该 gate 尚未落地，因此本页不展示任何覆盖率百分比。
+    </p>
+</div>
+
+<div class="card">
+    <h2>5 · 历史信号回放</h2>
+    <p class="lead muted">
+        <code>evaluate.forward_stats</code> 算的不是胜率，而是每个 BUY 信号的<strong>前瞻价格路径</strong>（E3 决策：不假设买入时点，只做信号质量评估）。
+    </p>
+    <table>
+        <thead><tr><th>项</th><th>口径</th></tr></thead>
+        <tbody>
+            <tr><td>粒度</td><td>逐信号（一行一票一确认日），要得到比率须自行 groupby 聚合</td></tr>
+            <tr><td>基准价</td><td><code>base = daily_bar.close @ 信号日</code>；取不到则整条跳过</td></tr>
+            <tr><td>次日前瞻</td><td><code>t1_gap = round(next_open / base - 1, 100, 2)</code>，T+1 相对<strong>信号日收盘</strong>的高开幅度 %</td></tr>
+            <tr><td>晋级标记</td><td><code>t1_promote = derived_bar.is_limit_up @ T+1</code>，布尔值非比率</td></tr>
+            <tr><td>窗口极值</td><td><code>max_up{h} / max_dd{h}</code>，h 取 3 与 5；窗口不足 h 根则置 None（右删失防护 A4），避免近期信号被截断极值系统性拉小</td></tr>
+            <tr><td>规则化收益</td><td><code>rule_ret</code>，优先级与实盘 exit 对齐：E 退潮清仓 &gt; A 断板开盘</td></tr>
+            <tr><td>出口族</td><td>A 断板开盘 / B 断板收盘 / C 两日收盘 / D 半仓 / E 退潮清仓，均为费后收益；费 = 佣金 0.0002 x 2 + 印花 0.0005</td></tr>
+            <tr><td>落库形态</td><td><code>signal_outcome</code> 只保留 T+1 与 T+5 两腿，无 T+3（data/schema.py:141-158）</td></tr>
+        </tbody>
+    </table>
+    <h3>回放结果</h3>
+    <table>
+        <thead><tr><th>指标</th><th>值</th><th>N</th><th>说明</th></tr></thead>
+        <tbody>
+            {% for row in replay | default([], true) %}
+            <tr>
+                <td>{{ row.metric }}</td>
+                <td><code>{{ row.value }}</code></td>
+                <td><code>{{ row.n | default('—', true) }}</code></td>
+                <td>{{ row.note | default('', true) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="muted">未注入回放结果（context 缺 <code>replay</code>）。回放需逐信号运行 evaluate.forward_stats 后聚合。</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>6 · 参数版本</h2>
+    <p class="lead muted">
+      阈值只有一个住所：<code>utils/config.py</code> 的 <code>CONFIG</code>。改任何值必须记 ADR。
+      <code>config_hash()</code> 为全部阈值的 SHA-256 前 12 位。
+    </p>
+    <table>
+        <thead><tr><th>分组</th><th>常量</th><th>值</th><th>含义</th></tr></thead>
+        <tbody>
+            {% for row in config_params | default([], true) %}
+            <tr>
+                <td>{{ row.group }}</td>
+                <td><code>{{ row.name }}</code></td>
+                <td><code>{{ row.value }}</code></td>
+                <td>{{ row.comment | default('', true) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="muted">未注入 CONFIG 参数（context 缺 <code>config_params</code>）。阈值清单请直接读 <code>src/emotion_core/utils/config.py:18-62</code>。</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>7 · 口径裁决记录（C1-C7）</h2>
+    <p class="lead muted">
+      6 处历史口径冲突（docs/02）+ 1 条追加（C7，见 docs/04）。裁决不是实现细节：换掉任一条，历史数字即不可比。
+    </p>
+    {% for r in rulings %}
+    <h3><code>{{ r.id }}</code> {{ r.title }} · {{ r.status }}</h3>
+    <table>
+        <tbody>
+            <tr><td>裁决</td><td>{{ r.decision }}</td></tr>
+            <tr><td>理由</td><td>{{ r.basis }}</td></tr>
+            <tr><td>出处</td><td><code>{{ r.evidence }}</code></td></tr>
+            <tr><td>落地</td><td><code>{{ r.impl }}</code></td></tr>
+        </tbody>
+    </table>
+    {% endfor %}
+</div>
+
+<div class="card">
+    <h2>8 · 编号消歧</h2>
+    <p class="lead muted">
+      本仓存在多套同字母编号。读本页数字时若看到 C1 / A1 / D1，先确认是哪一套 —— 串号会让口径核对得出错误结论。
+    </p>
+    <table>
+        <thead><tr><th>编号体系</th><th>含义</th><th>出处</th></tr></thead>
+        <tbody>
+            {% for row in disambig %}
+            <tr>
+                <td><code>{{ row.series }}</code></td>
+                <td>{{ row.meaning }}</td>
+                <td><code>{{ row.where }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>9 · 已知缺口</h2>
+    <p class="lead muted">
+      算法层当前<strong>不完整</strong>。以下缺口会直接削弱本页数字的可信度，按对结论的影响排序。
+    </p>
+    <table>
+        <thead><tr><th>缺口</th><th>影响</th><th>位置</th></tr></thead>
+        <tbody>
+            {% for row in gaps %}
+            <tr>
+                <td>{{ row.item }}</td>
+                <td>{{ row.detail | safe }}</td>
+                <td><code>{{ row.impl }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>10 · 当日市场结论（对照）</h2>
+    <table>
+        <thead><tr><th>参数</th><th>值</th></tr></thead>
+        <tbody>
+            <tr><td>阶段 phase</td><td>{{ market.phase | default('—', true) }}</td></tr>
+            <tr><td>涨停家数</td><td>{{ market.limit_up_count | default('—', true) }}</td></tr>
+            <tr><td>跌停家数</td><td>{{ market.limit_down_count | default('—', true) }}</td></tr>
+            <tr><td>炸板率</td><td>{{ market.bomb_rate | default('—', true) }}</td></tr>
+            <tr><td>一字板占比</td><td>{{ market.oneword_ratio | default('—', true) }}</td></tr>
+            <tr><td>最高板</td><td>{{ market.max_limit_days | default('—', true) }}</td></tr>
+            <tr><td>昨涨停表现</td><td>{{ market.zt_performance | default('—', true) }}</td></tr>
+            <tr><td>买入窗口</td><td>{{ market.buy_window | default('—', true) }}</td></tr>
+            <tr><td>生态评级</td><td>{{ market.dragon_env | default('—', true) }}</td></tr>
+        </tbody>
+    </table>
+    <p class="muted">以上为 <code>market_stat</code> 当日行，用于与本页公式逐条对账；各列均无样本量列，参见区块 3。</p>
+</div>
+
 {% endblock %}

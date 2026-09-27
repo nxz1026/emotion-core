@@ -4,17 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Emotion Core · {% block title %}{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="{{ base_path }}/static/dashboard.css">
 </head>
 <body>
     <header class="header">
         <div class="container">
-            <a href="/" class="brand">Emotion Core</a>
+            <a href="{{ base_path }}/" class="brand">Emotion Core</a>
             <nav class="nav">
-                <a href="/">直观</a>
-                <a href="/logic">逻辑</a>
-                <a href="/algorithm">算法</a>
-                <button id="theme-toggle" onclick="toggleTheme()">🌙</button>
+                <a href="{{ base_path }}/" {% if active_layer == "intuitive" %}class="active"{% endif %}>直观</a>
+                <a href="{{ base_path }}/logic" {% if active_layer == "logic" %}class="active"{% endif %}>逻辑</a>
+                <a href="{{ base_path }}/algorithm" {% if active_layer == "algorithm" %}class="active"{% endif %}>算法</a>
+                <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()">🌙</button>
             </nav>
         </div>
     </header>
@@ -23,9 +23,26 @@
     </main>
     <footer class="footer">
         <div class="container">
-            <small>统计参考，非投资建议</small>
+            <small>统计参考，非投资建议 · Powered by emotion-core</small>
         </div>
     </footer>
-    <script src="/static/app.js"></script>
+    <script>
+    function toggleTheme() {
+        const html = document.documentElement;
+        const current = html.getAttribute("data-theme");
+        const next = current === "dark" ? "light" : "dark";
+        html.setAttribute("data-theme", next);
+        localStorage.setItem("theme", next);
+        document.getElementById("theme-toggle").textContent = next === "dark" ? "☀️" : "🌙";
+    }
+    (function() {
+        const saved = localStorage.getItem("theme");
+        if (saved) {
+            document.documentElement.setAttribute("data-theme", saved);
+            const btn = document.getElementById("theme-toggle");
+            if (btn) btn.textContent = saved === "dark" ? "☀️" : "🌙";
+        }
+    })();
+    </script>
 </body>
 </html>
