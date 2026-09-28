@@ -308,6 +308,13 @@ DDL: dict[str, str] = {
             detail text,
             created_at timestamptz NOT NULL DEFAULT now()
         )""",
+    "trade_calendar": """
+        CREATE TABLE IF NOT EXISTS trade_calendar (
+            date date PRIMARY KEY,
+            is_open boolean NOT NULL,
+            source text NOT NULL,
+            updated_at timestamptz NOT NULL DEFAULT now()
+        )""",
 }
 
 _INDEXES: tuple[str, ...] = (

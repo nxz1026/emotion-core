@@ -12,8 +12,7 @@ from datetime import date
 
 from emotion_core.orchestration import pipeline
 from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocked
-from emotion_core.utils.config import CONFIG
-from emotion_core.utils.dates import trading_days
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger("emotion_core.daily")
 
@@ -35,27 +34,31 @@ STEPS = [
 
 
 def _trading_day_guard(trade_date: date) -> bool:
-    """交易日守卫：非交易日返回 False（两条独立判据）。
+    """交易日守卫：非交易日返回 False（判据来自**独立日历源**，不看库内数据）。
 
-    ① 工作日（周一~周五）；② 在 daily_bar 派生的交易日历里。
+    判据 = `data/trade_calendar.is_trading_day`（akshare 新浪交易日历，落
+    `trade_calendar` 表缓存）；未来日期另加一道「数据不可能存在」的拦截。
 
-    为什么必须有 ①：日历本身就是从 `daily_bar` 的 distinct date 派生的
-    （`utils/dates.py`「交易日历是 data 的事实」），**脏数据会把非交易日变成
-    「交易日」**。实测事故：库内 2026-09-27（周日）有 5221 行，且 OHLC/成交额
-    与 2026-09-24 逐行完全相同（旧版 snapshot 在 V1 守卫内移前把实时快照盖上了
-    传入日期）→ 守卫被骗过 → 目标日=周日 → sync 报「EM 最新数据日期 2026-09-24
-    ≠ 传入 2026-09-27」→ 日更链卡死在 sync（新 coverage/derive/emotion 步骤
-    永远跑不到）。工作日检查不依赖库内任何数据，挡的就是这一类。
+    为什么不用 `utils/dates.trading_days`：它从 `daily_bar` 的 distinct date 派生
+    （「日历是 data 的事实」），**脏数据会把非交易日变成交易日**——实测事故：
+    库内 2026-09-27（周日）有 5221 行、与 2026-09-24 逐行全等（旧版 snapshot 把
+    实时快照盖上传入日期），日历因此认为周日开市，守卫被骗过 → 目标日=周日 →
+    sync 报「EM 最新数据日期 2026-09-24 ≠ 传入 2026-09-27」→ 日更链卡死在 sync，
+    新增的 coverage/derive/emotion 步骤永远跑不到。独立日历源与库内数据无关，
+    从根上断掉这条自噬路径。
 
-    仍挡不住的：节假日（工作日但休市，如 2026-09-25 中秋）。那需要**独立**日历源
-    （交易所日历/akshare tool_trade_date_hist_sina）——已作为遗留项记录，不在本轮改。
+    语义边界（刻意选择）：**当日是交易日但行情还没发布 → 不跳过**，让它走到 sync
+    由 EM 日期守卫响亮报 FAILED（真数据延迟必须可见，不能静默 0 退出）。
+    历史上「非交易日无数据」与「交易日无数据」都被旧的日历判据静默跳过了。
     """
-    if trade_date.weekday() >= 5:
-        log.info("非交易日（周末）%s，跳过", trade_date)
+    from emotion_core.data import trade_calendar
+
+    today = today_sh()
+    if trade_date > today:
+        log.warning("目标日 %s 在未来（今天 %s），跳过", trade_date, today)
         return False
-    days = trading_days(CONFIG.DATA_START, date.today())
-    if trade_date not in days:
-        log.info("非交易日 %s，跳过", trade_date)
+    if not trade_calendar.is_trading_day(trade_date):
+        log.info("非交易日 %s（独立日历源），跳过", trade_date)
         return False
     return True
 
@@ -72,7 +75,7 @@ def run_daily(trade_date: date | None = None, *, from_step: str | None = None, d
         exit code（0=成功，非0=失败）。
     """
     if trade_date is None:
-        trade_date = date.today()
+        trade_date = today_sh()
 
     if not _trading_day_guard(trade_date):
         return 0
