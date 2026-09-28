@@ -71,6 +71,14 @@ class Config:
     TRADE_EXPORT_ENABLED: bool = False  # 交易桥默认不导出
     LLM_PROFILE: str | None = None  # None=关；'agnes'=启用
 
+    # ── 个股诊断（展示层只读功能，不在信号链上）────────
+    # 与 LLP_PROFILE 分开：信号链 LLM 仍默认关，个股页可单独开/关。
+    # 'off'/'' → 只出规则层结论（页面明示 LLM 未启用）。
+    STOCK_LLM_PROFILE: str = os.environ.get("EC_STOCK_LLM_PROFILE", "smart")
+    STOCK_STAT_CACHE_SEC: int = int(os.environ.get("EC_STOCK_STAT_CACHE_SEC", "60"))
+    STOCK_TREND_DAYS: int = int(os.environ.get("EC_STOCK_TREND_DAYS", "30"))
+    STOCK_LLM_MAX_TOKENS: int = int(os.environ.get("EC_STOCK_LLM_MAX_TOKENS", "800"))
+
     # ── 策略观察台 ─────────────────────────────
     STRATEGY_ENABLED: bool = os.environ.get("EC_STRATEGY_ENABLED", "").lower() in ("1", "true", "yes")
     STRATEGY_PROFILE: str = os.environ.get("EC_STRATEGY_PROFILE", "agnes")

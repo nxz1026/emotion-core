@@ -375,3 +375,46 @@ pre code {
   border-left: 3px solid var(--warning);
   padding-left: 10px;
 }
+
+/* ── 个股诊断页 ───────────────────────────────── */
+.stock-form { display: flex; gap: 8px; margin: 12px 0 6px; flex-wrap: wrap; }
+.stock-form input {
+  flex: 1 1 260px; min-width: 200px; padding: 8px 12px;
+  border: 1px solid var(--border-color); border-radius: 6px;
+  background: var(--bg-primary); color: var(--text-primary); font-size: 14px;
+}
+.stock-form input:focus { outline: 2px solid var(--accent-primary); border-color: var(--accent-primary); }
+.btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border-color);
+  background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; font-size: 14px; }
+.btn-primary { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+.btn-primary:hover { background: var(--accent-emphasis); }
+#stock-result > .card { margin-top: 16px; }
+.verdict-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.verdict-oneliner { font-size: 16px; font-weight: 600; margin: 10px 0 14px; }
+.verdict-oneliner::before { content: "▍"; color: var(--accent-primary); margin-right: 4px; }
+.stock-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 720px) { .stock-grid { grid-template-columns: 1fr; } }
+.stock-grid h3 { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;
+  text-transform: uppercase; letter-spacing: .04em; }
+.reason-list, .risk-list { list-style: none; }
+.reason-list li, .risk-list li { padding: 6px 0 6px 16px; position: relative;
+  border-bottom: 1px dashed var(--border-muted); line-height: 1.6; }
+.reason-list li::before { content: "✓"; position: absolute; left: 0; color: var(--success); }
+.risk-list li::before { content: "!"; position: absolute; left: 0; color: var(--warning); font-weight: 700; }
+.chip-row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-secondary); }
+.chip-high { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+.chip-mid { border-color: var(--warning); color: var(--warning); background: var(--warning-bg); }
+.chip-low { border-color: var(--success); color: var(--success); background: var(--success-bg); }
+.table-scroll { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+.table-scroll table { margin-top: 8px; }
+.data-table td.up, .stat-value.up { color: var(--danger); }
+.data-table td.down, .stat-value.down { color: var(--success); }
+.data-table tr.row-hit { background: var(--warning-bg); font-weight: 600; }
+.badge-watch { background: var(--bg-tertiary); color: var(--text-secondary); }
+.recommend-list { list-style: none; }
+.recommend-list li { display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--border-muted); }
+.recommend-list a { color: var(--accent-primary); text-decoration: none; font-weight: 600; }
+.recommend-list a:hover { text-decoration: underline; }

@@ -50,6 +50,16 @@ LLM_PROFILES: dict[str, dict] = {
 LLM_KEY_ENV = "LKL_LLM_API_KEY"
 LLM_KEY_FILES = ["~/.llmkey", ".secrets/llmkey"]
 
+# profile → 密钥环境变量名（本机密钥统一放 ~/.env，用平台名而非 LKL_LLM_API_KEY）。
+# 该层在「共享环境变量」之后、「密钥文件」之前生效，lkl 的既有优先级不受影响。
+LLM_PROFILE_KEY_ENV: dict[str, str] = {
+    "default": "SENSEN_API_KEY",
+    "fast": "SENSEN_API_KEY",
+    "smart": "SENSEN_API_KEY",
+    "agnes": "AGNES_API_KEY",
+}
+LLM_ENV_FILES = ["~/.env"]
+
 
 def _cfg(name: str, default):
     """读 CONFIG 项；emotion-core 尚未收录的键取 lkl config.py 原值。"""
@@ -100,19 +110,57 @@ def _read_file_key() -> str:
     return ""
 
 
+def _read_env_file_key(name: str) -> str:
+    """从 dotenv 文件按键名取值（本机密钥统一放 ~/.env）。
+
+    ~/.env 里是 `SENSEN_API_KEY=…` / `AGNES_API_KEY=…` 这种**平台名**键，
+    与 lkl 的 `LKL_LLM_API_KEY`、密钥文件的 `api_key=` 都不是一套命名，
+    故单列一个来源。解析全程不打印值；文件里的注释行/标题行（无 `=`）跳过。
+    """
+    for fname in _cfg("LLM_ENV_FILES", LLM_ENV_FILES):
+        path = Path(fname).expanduser()
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # 权限/IO 问题不该拦住日更与页面
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() == name:
+                value = value.strip().strip('"').strip("'")
+                if value:
+                    return value
+    return ""
+
+
 def resolve_key(profile: str) -> str:
-    """按 profile 专属环境变量、共享环境变量、密钥文件顺序取密钥。"""
+    """按 profile 专属环境变量、共享环境变量、~/.env、密钥文件顺序取密钥。"""
     specific = os.environ.get(f"LKL_LLM_API_KEY_{profile.upper()}", "").strip()
     if specific:
         return specific
     shared = os.environ.get(_cfg("LLM_KEY_ENV", LLM_KEY_ENV), "").strip()
     if shared:
         return shared
+    # profile → ~/.env 里的平台密钥变量名（例如 smart/fast/default 都走 sensenova）
+    env_name = _cfg("LLM_PROFILE_KEY_ENV", LLM_PROFILE_KEY_ENV).get(profile, "")
+    if env_name:
+        direct = os.environ.get(env_name, "").strip()
+        if direct:
+            return direct
+        from_env_file = _read_env_file_key(env_name)
+        if from_env_file:
+            return from_env_file
     key = _read_file_key()
     if key:
         return key
     raise LLMNotConfigured(
-        f"未找到密钥：设 {_cfg('LLM_KEY_ENV', LLM_KEY_ENV)} 或放置 "
+        f"未找到密钥：设 {_cfg('LLM_KEY_ENV', LLM_KEY_ENV)} 或 "
+        f"{_cfg('LLM_PROFILE_KEY_ENV', LLM_PROFILE_KEY_ENV).get(profile, '')}"
+        f"（可放 {_cfg('LLM_ENV_FILES', LLM_ENV_FILES)}）或放置密钥文件 "
         f"{_cfg('LLM_KEY_FILES', LLM_KEY_FILES)}")
 
 

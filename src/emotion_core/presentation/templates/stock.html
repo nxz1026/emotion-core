@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}个股诊断{% endblock %}
+{% block content %}
+<div class="card">
+    <h1>个股诊断</h1>
+    <p class="lead">输入股票代码或名称，用情绪周期体系给这只票做一次完整体检：连板结构、情绪环境、
+        同层级历史晋级率与样本收益，最后给一个直观的动作倾向。</p>
+    <form class="stock-form" id="stock-form" autocomplete="off">
+        <input type="text" id="stock-input" name="code" placeholder="例如 601811 或 新华文轩"
+               value="{{ prefill_code }}" aria-label="股票代码或名称">
+        <button type="submit" class="btn btn-primary" id="stock-submit">分析</button>
+    </form>
+    <p class="muted" id="stock-hint">数据口径：只用目标日及之前的历史样本（PIT），全市场历史统计实时计算。</p>
+</div>
+
+<div id="stock-error" class="warning-box" style="display:none"></div>
+
+<div id="stock-result" style="display:none">
+    <div class="card" id="verdict-card">
+        <div class="verdict-head">
+            <div>
+                <h2 id="verdict-title">—</h2>
+                <p class="muted" id="verdict-sub">—</p>
+            </div>
+            <span class="badge" id="verdict-badge">—</span>
+        </div>
+        <p class="verdict-oneliner" id="verdict-oneliner"></p>
+        <div class="stock-grid">
+            <div>
+                <h3>依据</h3>
+                <ul class="reason-list" id="verdict-reasons"></ul>
+            </div>
+            <div>
+                <h3>风险</h3>
+                <ul class="risk-list" id="verdict-risks"></ul>
+            </div>
+        </div>
+        <div class="chip-row" id="verdict-tags"></div>
+    </div>
+
+    <div class="card">
+        <h2>量价与连板结构</h2>
+        <div class="stats" id="trend-stats"></div>
+        <h3>近 {{ 30 }} 个交易日</h3>
+        <div class="table-scroll"><table class="data-table" id="series-table"></table></div>
+    </div>
+
+    <div class="card">
+        <h2>市场情绪环境 <span class="muted" id="env-date"></span></h2>
+        <div class="stats" id="env-stats"></div>
+        <h3>当日最高板梯队</h3>
+        <div class="table-scroll"><table class="data-table" id="top-table"></table></div>
+    </div>
+
+    <div class="card">
+        <h2>同层级历史统计（全市场样本）</h2>
+        <p class="muted">口径与算法层 <code>promotion_matrix</code> 逐项一致：主板池、剔次新、
+            次日 = 日历下一交易日、名义/换手双口径。</p>
+        <div class="table-scroll"><table class="data-table" id="promo-table"></table></div>
+        <p class="muted" id="promo-note"></p>
+    </div>
+
+    <div class="card" id="llm-card">
+        <h2>AI 解读 <span class="muted" id="llm-model"></span></h2>
+        <div id="llm-body" class="muted">按需生成中…</div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.STOCK_BASE_PATH = "{{ base_path }}";</script>
+<script src="{{ base_path }}/static/stock.js"></script>
+{% endblock %}

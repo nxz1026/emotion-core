@@ -3,8 +3,7 @@
 import httpx
 import pytest
 
-from emotion_core.services import llm
-from emotion_core.services import llm_backend
+from emotion_core.services import llm, llm_backend
 from emotion_core.services.llm_backend import resolve_chain, resolve_key
 
 
@@ -116,6 +115,9 @@ def test_profile_key_precedence_over_shared_and_file(monkeypatch, tmp_path):
     key_file = tmp_path / "llmkey"
     key_file.write_text("api_key=file-secret\n", encoding="utf-8")
     monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", [str(key_file)])
+    # 隔离 ~/.env 这一层（本机真文件里有平台密钥，否则会先命中）
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(tmp_path / "none")])
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
     monkeypatch.delenv("LKL_LLM_API_KEY_FAST", raising=False)
     assert resolve_key("fast") == "shared-secret"
 
@@ -125,6 +127,19 @@ def test_profile_key_precedence_over_shared_and_file(monkeypatch, tmp_path):
     assert resolve_key("fast") == "fast-secret"
     monkeypatch.delenv("LKL_LLM_API_KEY_FAST", raising=False)
     assert resolve_key("fast") == "file-secret"
+
+
+def test_dotenv_platform_key_beats_apikey_file(monkeypatch, tmp_path):
+    """新增来源的优先级：共享 env > profile env 名 > ~/.env > api_key= 文件。"""
+    monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
+    key_file = tmp_path / "llmkey"
+    key_file.write_text("api_key=file-secret\n", encoding="utf-8")
+    envf = tmp_path / ".env"
+    envf.write_text("SENSEN_API_KEY=dotenv-secret\n", encoding="utf-8")
+    monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", [str(key_file)])
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
+    assert resolve_key("fast") == "dotenv-secret"
 def test_agnes_profile_params_key_and_unknown_fallback(monkeypatch):
     params = llm.resolve_params("agnes")
     assert params.base_url == "https://apihub.agnes-ai.com/v1"
@@ -216,3 +231,74 @@ def test_same_client_concurrent_calls_do_not_mix_payloads(monkeypatch):
 
     assert not errors
     assert {call[1]["model"] for call in calls} == {"deepseek-v4-flash"}
+
+
+# ── 2026-09-28：本机密钥统一放 ~/.env（平台名键），新增解析来源 ─────────────
+
+def test_env_file_key_is_used_when_shared_env_missing(monkeypatch, tmp_path):
+    """共享环境变量没有时，按 profile 从 ~/.env 这类 dotenv 文件取平台密钥。"""
+    monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LKL_LLM_API_KEY_SMART", raising=False)
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
+    envf = tmp_path / ".env"
+    envf.write_text(
+        ".env 环境变量文件\n"
+        "警告：本文件包含真实密钥\n"
+        "# 注释行\n"
+        "SENSEN_API_KEY=sk-from-dotenv\n"
+        "AGNES_API_KEY=agnes-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
+
+    assert resolve_key("smart") == "sk-from-dotenv"
+    assert resolve_key("fast") == "sk-from-dotenv"
+    assert resolve_key("agnes") == "agnes-from-dotenv"
+
+
+def test_shared_env_still_beats_dotenv_file(monkeypatch, tmp_path):
+    """既有优先级不变：LKL_LLM_API_KEY（共享环境变量）优先于 ~/.env。"""
+    envf = tmp_path / ".env"
+    envf.write_text("SENSEN_API_KEY=sk-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
+    assert resolve_key("smart") == "shared-secret"      # autouse fixture 设的
+
+
+def test_profile_specific_env_beats_dotenv_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("SENSEN_API_KEY", "sk-from-environ")
+    envf = tmp_path / ".env"
+    envf.write_text("SENSEN_API_KEY=sk-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
+    assert resolve_key("smart") == "sk-from-environ"
+
+
+def test_env_file_without_key_falls_back_to_key_files(monkeypatch, tmp_path):
+    monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
+    envf = tmp_path / ".env"
+    envf.write_text("OPENROUTER_API_KEY=other\n", encoding="utf-8")
+    keyf = tmp_path / "llmkey"
+    keyf.write_text("api_key=sk-file\n", encoding="utf-8")
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
+    monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", [str(keyf)])
+    assert resolve_key("smart") == "sk-file"
+
+
+def test_missing_key_error_names_all_sources(monkeypatch, tmp_path):
+    monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(tmp_path / "none")])
+    monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", [str(tmp_path / "none2")])
+    with pytest.raises(llm_backend.LLMNotConfigured) as err:
+        resolve_key("smart")
+    assert "SENSEN_API_KEY" in str(err.value)
+
+
+def test_unreadable_env_file_does_not_raise(monkeypatch, tmp_path):
+    """密钥文件权限/IO 问题不得让页面或日更崩掉，退回到下个来源。"""
+    monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
+    keyf = tmp_path / "llmkey"
+    keyf.write_text("api_key=sk-file\n", encoding="utf-8")
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(tmp_path)])  # 目录不是文件
+    monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", [str(keyf)])
+    assert resolve_key("smart") == "sk-file"

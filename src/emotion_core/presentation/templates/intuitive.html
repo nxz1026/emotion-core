@@ -3,14 +3,43 @@
 {% block content %}
 <div class="card">
     <h1>今日结论</h1>
-    <p class="lead">市场处于 <strong>{{ phase }}</strong> 阶段</p>
-    {% if recommendation %}
-    <div class="recommendation">
-        <h2>推荐</h2>
-        <p><code>{{ recommendation.code }}</code> · {{ recommendation.cont_days }}板</p>
+    <p class="lead">市场处于 <strong>{{ phase }}</strong> 阶段 —— {{ phase_desc }}</p>
+    <div class="stats">
+        <div class="stat"><div class="stat-label">买入窗口</div>
+            <div class="stat-value">{{ buy_window }}</div></div>
+        <div class="stat"><div class="stat-label">涨停家数</div>
+            <div class="stat-value">{{ limit_up_count }}</div></div>
+        <div class="stat"><div class="stat-label">最高板</div>
+            <div class="stat-value">{{ max_limit_days }}</div></div>
+        <div class="stat"><div class="stat-label">跌停家数</div>
+            <div class="stat-value">{{ limit_down_count }}</div></div>
+        <div class="stat"><div class="stat-label">生态评级</div>
+            <div class="stat-value">{{ dragon_desc }}</div></div>
     </div>
+</div>
+
+<div class="card">
+    <h2>今日推荐</h2>
+    {% if recommendations %}
+    <ul class="recommend-list">
+        {% for s in recommendations %}
+        <li>
+            <a href="{{ base_path }}/stock?code={{ s.code }}">
+                <code>{{ s.code }}</code>{{ s.name or "" }}
+                {% if s.cont_days %}· {{ s.cont_days }}板{% endif %}
+            </a>
+            <span class="muted">点开看个股诊断</span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% elif signal_count %}
+    <p class="muted">今日 {{ signal_count }} 条信号，但无 BUY 级推荐。</p>
     {% else %}
-    <p class="muted">今日无推荐</p>
+    <p class="muted">今日无推荐（信号表 {{ signal_count }} 行）。可以直接查任意个股：</p>
+    <form class="stock-form" action="{{ base_path }}/stock" method="get">
+        <input type="text" name="code" placeholder="输入股票代码或名称，例如 601811">
+        <button type="submit" class="btn btn-primary">个股诊断</button>
+    </form>
     {% endif %}
 </div>
 {% endblock %}

@@ -82,9 +82,12 @@ def test_4xx_no_retry(monkeypatch):
     assert len(calls) == 1
 
 
-def test_missing_key_raises(monkeypatch):
+def test_missing_key_raises(monkeypatch, tmp_path):
     monkeypatch.delenv("LKL_LLM_API_KEY")
+    monkeypatch.delenv("SENSEN_API_KEY", raising=False)
     monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", ["~/.nonexistent-llmkey"])
+    # ~/.env 也是密钥来源（2026-09-28 接入），这里必须隔离，否则本机真密钥会命中
+    monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(tmp_path / "none")])
     with pytest.raises(llm.LLMNotConfigured):
         llm.resolve_api_key()
 

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, timedelta
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from datetime import date, datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -39,7 +39,18 @@ ROUTES = {
     "logic": "logic",
     "algorithm": "algorithm",
     "strategy": "strategy",
+    "stock": "stock",          # 个股诊断（输入代码 → 分析数据 + 直观建议）
 }
+
+
+def _json_default(obj):
+    """把 Decimal/date 等 psycopg 取值转成 JSON 友好的类型。"""
+    from decimal import Decimal
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    return str(obj)
 
 
 def get_static(path: str) -> tuple[bytes, str]:
@@ -49,6 +60,29 @@ def get_static(path: str) -> tuple[bytes, str]:
         return b"", ""
     content_type = "text/css" if path.endswith(".css") else "application/javascript"
     return file_path.read_bytes(), content_type
+
+
+def _recover_utf8(value: str) -> str:
+    """还原被 latin-1 展宽的 UTF-8 查询参数。
+
+    HTTP 请求行由 BaseHTTPRequestHandler 按 latin-1 解码：浏览器/`encodeURIComponent`
+    发的是百分号编码，取出来本来就是正常中文；但 `curl "...?code=新华文轩"` 这种
+    直接发原始 UTF-8 字节的请求会变成 "æ°åŽæ–‡è½©"。这里按"能否 latin-1 回编码 +
+    UTF-8 解码"判定并还原；正常中文无法 latin-1 编码，故不受影响。
+    """
+    if not value or value.isascii():
+        return value
+    try:
+        return value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
+def _query_arg(parsed, key: str, default: str = "") -> str:
+    """取查询参数（含上面的 UTF-8 还原）。"""
+    from urllib.parse import parse_qs
+    raw = parse_qs(parsed.query).get(key, [default])[0]
+    return _recover_utf8(raw)
 
 
 def _render_template(template_name: str, **context) -> str:
@@ -84,12 +118,9 @@ def _load_intuitive_data() -> dict:
         "UNFAVORABLE": "环境不利，建议观望",
     }.get(dragon_env, "暂无评级")
 
-    # 推荐股票
-    recommendation = None
-    for s in signals:
-        if s.get("action") == "BUY":
-            recommendation = s
-            break
+    # 推荐股票（全部 BUY，可点进个股诊断页）
+    recommendations = [s for s in signals if s.get("action") == "BUY"]
+    recommendation = recommendations[0] if recommendations else None
 
     return {
         "phase": phase,
@@ -102,6 +133,7 @@ def _load_intuitive_data() -> dict:
         "ladder_count": len(ladder),
         "signal_count": len(signals),
         "recommendation": recommendation,
+        "recommendations": recommendations,
         "dragon_env": dragon_env,
         "dragon_desc": dragon_desc,
         "accelerate": market.get("accelerate", False),
@@ -205,7 +237,7 @@ def _load_algorithm_data() -> dict:
     }
 
 
-def render_dashboard(layer: str) -> str:
+def render_dashboard(layer: str, **extra) -> str:
     """渲染 dashboard 页面。"""
     base_ctx = {
         "base_path": BASE_PATH,
@@ -222,6 +254,8 @@ def render_dashboard(layer: str) -> str:
         data = {
             "dates_json": json.dumps(strategy_view.strategy_dates(), ensure_ascii=False),
         }
+    elif layer == "stock":
+        data = {"prefill_code": extra.get("code", "")}
     else:
         data = {}
 
@@ -258,6 +292,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/strategy/dates":
             self._send_json({"dates": strategy_view.strategy_dates()})
             return
+        if parsed.path == "/api/stock":
+            from emotion_core.services import stock_service
+            code = _query_arg(parsed, "code")
+            payload = stock_service.analyze(code)
+            self._send_json(payload, 200 if payload.get("ok") else 404)
+            return
+        if parsed.path == "/api/stock/llm":
+            from emotion_core.services import stock_service
+            code = _query_arg(parsed, "code")
+            self._send_json(stock_service.llm_for(code))
+            return
         if parsed.path.startswith("/api/"):
             self._handle_status()
             return
@@ -276,7 +321,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if layer in ROUTES:
             try:
-                html = render_dashboard(ROUTES[layer])
+                extra = {"code": _query_arg(parsed, "code")}
+                html = render_dashboard(ROUTES[layer], **extra)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
@@ -319,7 +365,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        self.wfile.write(json.dumps(data, ensure_ascii=False,
+                                    default=_json_default).encode())
 
 
 def run_server(port: int = 8098) -> None:
