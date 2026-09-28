@@ -35,7 +35,24 @@ STEPS = [
 
 
 def _trading_day_guard(trade_date: date) -> bool:
-    """交易日守卫：非交易日返回 False。"""
+    """交易日守卫：非交易日返回 False（两条独立判据）。
+
+    ① 工作日（周一~周五）；② 在 daily_bar 派生的交易日历里。
+
+    为什么必须有 ①：日历本身就是从 `daily_bar` 的 distinct date 派生的
+    （`utils/dates.py`「交易日历是 data 的事实」），**脏数据会把非交易日变成
+    「交易日」**。实测事故：库内 2026-09-27（周日）有 5221 行，且 OHLC/成交额
+    与 2026-09-24 逐行完全相同（旧版 snapshot 在 V1 守卫内移前把实时快照盖上了
+    传入日期）→ 守卫被骗过 → 目标日=周日 → sync 报「EM 最新数据日期 2026-09-24
+    ≠ 传入 2026-09-27」→ 日更链卡死在 sync（新 coverage/derive/emotion 步骤
+    永远跑不到）。工作日检查不依赖库内任何数据，挡的就是这一类。
+
+    仍挡不住的：节假日（工作日但休市，如 2026-09-25 中秋）。那需要**独立**日历源
+    （交易所日历/akshare tool_trade_date_hist_sina）——已作为遗留项记录，不在本轮改。
+    """
+    if trade_date.weekday() >= 5:
+        log.info("非交易日（周末）%s，跳过", trade_date)
+        return False
     days = trading_days(CONFIG.DATA_START, date.today())
     if trade_date not in days:
         log.info("非交易日 %s，跳过", trade_date)

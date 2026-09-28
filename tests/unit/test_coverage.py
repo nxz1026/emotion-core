@@ -129,3 +129,33 @@ def test_run_daily_continues_past_a_passing_gate(monkeypatch):
     failed = [c for c in pipe.calls if c[0] == "failed"]
     assert failed and failed[0][:3] == ("failed", "derive", D)
     assert "boom" in failed[0][3]
+
+
+# ── 交易日守卫（weekday 判据，独立于库内数据）──────────────────
+def test_guard_rejects_weekend_even_if_calendar_is_polluted(monkeypatch):
+    """脏数据把周日写进 daily_bar 时，守卫仍必须拒绝。
+
+    实测事故：2026-09-27（周日）在 daily_bar 有 5221 行、与 09-24 逐行相同，
+    而交易日历从 daily_bar 派生 → 守卫被骗过 → sync 失败 → 日更链卡死。
+    """
+    monkeypatch.setattr(daily, "trading_days", lambda a, b: [date(2026, 9, 27)])
+    assert daily._trading_day_guard(date(2026, 9, 27)) is False   # 周日
+
+
+def test_guard_accepts_weekday_present_in_calendar(monkeypatch):
+    monkeypatch.setattr(daily, "trading_days", lambda a, b: [date(2026, 9, 24)])
+    assert daily._trading_day_guard(date(2026, 9, 24)) is True     # 周四
+
+
+def test_guard_rejects_weekday_absent_from_calendar(monkeypatch):
+    monkeypatch.setattr(daily, "trading_days", lambda a, b: [date(2026, 9, 24)])
+    assert daily._trading_day_guard(date(2026, 9, 25)) is False    # 周五中秋休市
+
+
+def test_guard_makes_weekend_run_a_noop(monkeypatch):
+    """周日跑 daily：直接 0 退出，不碰 pipeline_state、不进 sync。"""
+    monkeypatch.setattr(daily, "trading_days", lambda a, b: [date(2026, 9, 27)])
+    called: list[str] = []
+    monkeypatch.setattr(daily, "_run_step", lambda s, d: called.append(s))
+    assert daily.run_daily(date(2026, 9, 27)) == 0
+    assert called == []
