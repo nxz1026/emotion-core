@@ -50,6 +50,8 @@
 </div>
 <script>
 const dates = {{ dates_json | safe }};
+// 全局快照日（URL ?date=）：若报告列表里有同一天，就默认选中它
+const prefillDate = {{ (prefill_date or '') | tojson }};
 const dateSelect = document.getElementById('dateSelect');
 const strategySelect = document.getElementById('strategySelect');
 const filterInput = document.getElementById('strategyFilter');
@@ -110,6 +112,7 @@ function updateSortHeaders(){
 }
 function init(){
     dateSelect.innerHTML=dates.map(d=>`<option>${esc(d)}</option>`).join('');
+    if (prefillDate && dates.includes(prefillDate)) dateSelect.value = prefillDate;
     dateSelect.onchange=load;
     strategySelect.onchange=()=>renderRows(currentItems);
     filterInput.oninput=()=>renderRows(currentItems);

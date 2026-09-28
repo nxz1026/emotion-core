@@ -52,7 +52,8 @@ def test_stock_route_registered_and_page_renders_with_prefill():
 def test_nav_has_stock_entry_and_llm_card():
     html = server.render_dashboard("intuitive")
     for path in ("/logic", "/algorithm", "/strategy", "/stock"):
-        assert f'{server.BASE_PATH}{path}"' in html
+        # 导航链接现在会带上快照日期（?date=…），故只断言前缀
+        assert f'href="{server.BASE_PATH}{path}' in html
 
 
 def test_stock_page_states_data_sources_and_pit():
@@ -61,23 +62,27 @@ def test_stock_page_states_data_sources_and_pit():
 
 
 def test_intuitive_page_links_recommendations_to_stock(monkeypatch):
-    monkeypatch.setattr(server, "_load_intuitive_data", lambda: {
+    monkeypatch.setattr(server, "_load_intuitive_data", lambda trade_date=None: {
         "phase": "发酵", "phase_desc": "x", "buy_window": "STANDARD",
         "force_liquidate": False, "limit_up_count": 40, "max_limit_days": 4,
         "limit_down_count": 3, "ladder_count": 0, "signal_count": 1,
         "dragon_env": "NEUTRAL", "dragon_desc": "环境一般", "accelerate": False,
         "accel_reason": "", "recommendation": {"code": "601811", "cont_days": 2},
-        "recommendations": [{"code": "601811", "name": "新华文轩", "cont_days": 2}]})
+        "recommendations": [{"code": "601811", "name": "新华文轩", "cont_days": 2}],
+        "top_ladder": [], "signal_counts": {"day": 1, "total": 1, "ladder_day": 0,
+                                            "ladder_total": 0}})
     html = server.render_dashboard("intuitive")
     assert f'{server.BASE_PATH}/stock?code=601811' in html
 
 
 def test_intuitive_page_offers_input_when_no_signal(monkeypatch):
-    monkeypatch.setattr(server, "_load_intuitive_data", lambda: {
+    monkeypatch.setattr(server, "_load_intuitive_data", lambda trade_date=None: {
         "phase": "冰点", "phase_desc": "x", "buy_window": "NONE",
         "force_liquidate": False, "limit_up_count": 5, "max_limit_days": 1,
         "limit_down_count": 1, "ladder_count": 0, "signal_count": 0,
         "dragon_env": "", "dragon_desc": "暂无评级", "accelerate": False,
-        "accel_reason": "", "recommendation": None, "recommendations": []})
+        "accel_reason": "", "recommendation": None, "recommendations": [],
+        "top_ladder": [], "signal_counts": {"day": 0, "total": 0, "ladder_day": 0,
+                                            "ladder_total": 0}})
     html = server.render_dashboard("intuitive")
     assert f'action="{server.BASE_PATH}/stock"' in html

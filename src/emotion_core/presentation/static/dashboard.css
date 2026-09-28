@@ -418,3 +418,43 @@ pre code {
   gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--border-muted); }
 .recommend-list a { color: var(--accent-primary); text-decoration: none; font-weight: 600; }
 .recommend-list a:hover { text-decoration: underline; }
+
+/* ── 快照日期提示条 + 历史快照日历 ───────────────── */
+.snapshot-bar { background: var(--bg-primary); border-bottom: 1px solid var(--border-color); }
+.snapshot-inner { display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; flex-wrap: wrap; padding: 8px 0; }
+.snapshot-info, .snapshot-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.snapshot-label { color: var(--text-secondary); font-size: 12px; letter-spacing: .04em; }
+.snapshot-date { font-size: 15px; }
+.snapshot-nav .muted { font-size: 12px; }
+.btn-link { color: var(--accent-primary); text-decoration: none; font-size: 13px;
+  background: none; border: none; cursor: pointer; padding: 0; }
+.btn-link:hover { text-decoration: underline; }
+.btn-link.disabled { color: var(--text-muted); pointer-events: none; opacity: .5; }
+.snapshot-calendar { padding-bottom: 8px; }
+.snapshot-calendar > summary { cursor: pointer; padding: 4px 0; font-size: 13px; color: var(--text-secondary); }
+.calendar { margin: 8px 0 4px; max-width: 460px; }
+.cal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.cal-nav { color: var(--accent-primary); text-decoration: none; font-size: 12px; }
+.cal-nav.disabled { color: var(--text-muted); pointer-events: none; opacity: .5; }
+.cal-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.cal-grid th { font-size: 11px; color: var(--text-muted); font-weight: 500; padding: 2px 0; }
+.cal-day { display: block; text-align: center; padding: 4px 0; border-radius: 6px;
+  font-size: 12px; text-decoration: none; color: var(--text-muted); }
+.cal-day.has-data { color: var(--text-primary); background: var(--bg-secondary);
+  border: 1px solid var(--border-muted); font-weight: 600; }
+.cal-day.has-data:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+.cal-day.latest { border-color: var(--success); color: var(--success); }
+.cal-day.selected { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+.cal-day.out { opacity: .35; }
+.cal-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
+.cal-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  margin-right: 4px; vertical-align: middle; border: 1px solid var(--border-color); }
+.dot-latest { border-color: var(--success); background: var(--success-bg); }
+.dot-data { background: var(--bg-secondary); }
+.dot-selected { background: var(--accent-primary); border-color: var(--accent-primary); }
+.dot-none { background: transparent; opacity: .5; }
+.cal-jump { display: flex; align-items: center; gap: 4px; }
+.cal-jump input { padding: 2px 6px; border: 1px solid var(--border-color);
+  border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); font-size: 12px; }

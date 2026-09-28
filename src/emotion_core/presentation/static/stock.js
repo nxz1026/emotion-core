@@ -3,6 +3,7 @@
   "use strict";
 
   const BASE = window.STOCK_BASE_PATH || "";
+  const TRADE_DATE = window.STOCK_TRADE_DATE || "";
   const $ = (id) => document.getElementById(id);
 
   const STANCE_CLASS = {
@@ -162,7 +163,8 @@
     if (!code) return;
     $("stock-hint").textContent = "分析中…（首次需实时聚合全市场历史样本，约 1-2 秒）";
     try {
-      const res = await fetch(`${BASE}/api/stock?code=${encodeURIComponent(code)}`);
+      const res = await fetch(`${BASE}/api/stock?code=${encodeURIComponent(code)}`
+        + (TRADE_DATE ? `&date=${encodeURIComponent(TRADE_DATE)}` : ""));
       const data = await res.json();
       if (!data.ok) {
         showError(data.error || "分析失败");
@@ -180,9 +182,11 @@
       renderPromotion(data.promotion_table, data.verdict.layer);
       $("llm-card").style.display = "none";
       window.location.hash = "code=" + encodeURIComponent(data.basic.code);
-      history.replaceState(null, "", `${BASE}/stock?code=${encodeURIComponent(data.basic.code)}`);
+      history.replaceState(null, "", `${BASE}/stock?code=${encodeURIComponent(data.basic.code)}`
+        + (TRADE_DATE ? `&date=${encodeURIComponent(TRADE_DATE)}` : ""));
       // AI 解读按需异步取（4~6 秒，不阻塞上面全部数据）
-      const llmRes = await fetch(`${BASE}/api/stock/llm?code=${encodeURIComponent(data.basic.code)}`);
+      const llmRes = await fetch(`${BASE}/api/stock/llm?code=${encodeURIComponent(data.basic.code)}`
+        + (TRADE_DATE ? `&date=${encodeURIComponent(TRADE_DATE)}` : ""));
       renderLlm(await llmRes.json());
     } catch (err) {
       showError("请求失败：" + err);

@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from jinja2 import Environment, FileSystemLoader
 
-from emotion_core.presentation import loaders, strategy_view
+from emotion_core.presentation import loaders, snapshot, strategy_view
 from emotion_core.utils import price as price_util
 
 log = logging.getLogger("emotion_core.dash")
@@ -78,6 +78,11 @@ def _recover_utf8(value: str) -> str:
         return value
 
 
+def _query_date(parsed):
+    """URL 上的 ?date= → 合法快照日（无/非法 → 最新快照日）。"""
+    return snapshot.resolve_date(_query_arg(parsed, "date"))
+
+
 def _query_arg(parsed, key: str, default: str = "") -> str:
     """取查询参数（含上面的 UTF-8 还原）。"""
     from urllib.parse import parse_qs
@@ -91,14 +96,19 @@ def _render_template(template_name: str, **context) -> str:
     return template.render(**context)
 
 
-def _load_intuitive_data() -> dict:
-    """加载直观层数据。"""
+def _load_intuitive_data(trade_date=None) -> dict:
+    """加载直观层数据（指定快照日）。"""
     try:
-        market = loaders.load_market_snapshot()
-        ladder = loaders.load_ladder()
-        signals = loaders.load_signals()
+        market = loaders.load_market_snapshot(trade_date)
+        ladder = loaders.load_ladder(trade_date)
+        signals = loaders.load_signals(trade_date)
+        top_ladder = loaders.load_top_ladder(trade_date)
+        signal_counts = loaders.load_signal_counts(trade_date)
     except Exception as e:
-        market, ladder, signals = {}, [], []
+        market, ladder, signals, top_ladder = {}, [], [], []
+        # 键必须与 loaders.load_signal_counts() 完全一致：模板会读 ladder_total，
+        # 缺键会让"降级展示"变成 500（UndefinedError），正是这页要避免的。
+        signal_counts = {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0}
         log.error("加载数据失败: %s", e)
 
     # 市场情绪一句话
@@ -125,6 +135,9 @@ def _load_intuitive_data() -> dict:
     return {
         "phase": phase,
         "phase_desc": phase_desc,
+        "top_ladder": top_ladder,
+        "signal_counts": signal_counts,
+        "snapshot_date": market.get("date"),
         "buy_window": market.get("buy_window", "NONE"),
         "force_liquidate": market.get("force_liquidate", False),
         "limit_up_count": market.get("limit_up_count", "—"),
@@ -141,17 +154,17 @@ def _load_intuitive_data() -> dict:
     }
 
 
-def _load_logic_data() -> dict:
-    """加载逻辑层数据。"""
+def _load_logic_data(trade_date=None) -> dict:
+    """加载逻辑层数据（指定快照日）。"""
     try:
-        market = loaders.load_market_snapshot()
-        ladder = loaders.load_ladder()
+        market = loaders.load_market_snapshot(trade_date)
+        ladder = loaders.load_ladder(trade_date)
         # 获取晋级率数据
-        promotion = loaders.load_promotion() if hasattr(loaders, 'load_promotion') else []
+        promotion = loaders.load_promotion(trade_date) if hasattr(loaders, 'load_promotion') else []
         # 获取题材数据
-        themes = loaders.load_top_themes() if hasattr(loaders, 'load_top_themes') else []
+        themes = loaders.load_top_themes(trade_date) if hasattr(loaders, 'load_top_themes') else []
         # 获取人气榜
-        hot_rank = loaders.load_hot_rank() if hasattr(loaders, 'load_hot_rank') else []
+        hot_rank = loaders.load_hot_rank(trade_date) if hasattr(loaders, 'load_hot_rank') else []
         # 获取近10日趋势
         trend = loaders.load_market_trend() if hasattr(loaders, 'load_market_trend') else []
     except Exception as e:
@@ -174,8 +187,9 @@ def _load_logic_data() -> dict:
         "promotion": promotion,
         "themes": themes,
         "hot_rank": hot_rank,
+        "top_ladder": loaders.load_top_ladder(trade_date),
         "trend": trend,
-        "trade_date": market.get("date", ""),
+        "trade_date": str(market.get("date", "") or ""),
         "bomb_count": bomb_count,
         "oneword_count": oneword_count,
     }
@@ -196,13 +210,13 @@ def _limit_price_formula() -> str:
             f"{pcts}）")
 
 
-def _load_algorithm_data() -> dict:
-    """加载算法层数据。"""
+def _load_algorithm_data(trade_date=None) -> dict:
+    """加载算法层数据（指定快照日）。"""
     from emotion_core.utils.config import CONFIG
 
     # 获取市场数据
     try:
-        market = loaders.load_market_snapshot()
+        market = loaders.load_market_snapshot(trade_date)
     except Exception:
         market = {}
 
@@ -234,32 +248,72 @@ def _load_algorithm_data() -> dict:
         "formulas": formulas,
         "thresholds": thresholds,
         "market": market,
+        "trade_date": str(market.get("date", "") or ""),
     }
 
 
 def render_dashboard(layer: str, **extra) -> str:
-    """渲染 dashboard 页面。"""
+    """渲染 dashboard 页面。
+
+    所有页面共用同一个**快照日期**（URL `?date=YYYY-MM-DD`）：默认最新快照日，
+    非法或无快照的日期回落到最新日，并在顶部提示条如实显示当前用的是哪一天。
+    """
+    selected = snapshot.resolve_date(extra.get("date"))
+    banner = snapshot.banner_ctx(selected)
     base_ctx = {
         "base_path": BASE_PATH,
         "active_layer": layer,
+        "selected_date": selected,
+        "banner": banner,
+        "calendar": snapshot.calendar_ctx(selected, extra.get("month")),
+        "calendar_open": layer == "intuitive",   # 直观层默认展开日历
+        "date_query": snapshot.date_links(selected)["date_query"],
+        "request_path": _request_path(extra.get("path"), layer),
+        "dates_total": len(snapshot.available_dates()),
+        "dates_min": (snapshot.available_dates()[-1].isoformat()
+                      if snapshot.available_dates() else ""),
+        "dates_max": (snapshot.available_dates()[0].isoformat()
+                      if snapshot.available_dates() else ""),
     }
 
     if layer == "intuitive":
-        data = _load_intuitive_data()
+        data = _load_intuitive_data(selected)
     elif layer == "logic":
-        data = _load_logic_data()
+        data = _load_logic_data(selected)
     elif layer == "algorithm":
-        data = _load_algorithm_data()
+        data = _load_algorithm_data(selected)
     elif layer == "strategy":
         data = {
             "dates_json": json.dumps(strategy_view.strategy_dates(), ensure_ascii=False),
+            # 策略观察台有自己的日期下拉（数据源是报告文件），初始值跟随全局快照日
+            "prefill_date": selected.isoformat() if selected else "",
         }
     elif layer == "stock":
-        data = {"prefill_code": extra.get("code", "")}
+        data = {"prefill_code": extra.get("code", ""),
+                "prefill_date": selected.isoformat() if selected else ""}
     else:
         data = {}
 
     return _render_template(f"{layer}.html", **base_ctx, **data)
+
+
+def _default_path(layer: str) -> str:
+    """层级 → 该页路径（用于日历里的链接回到"当前页"）。"""
+    return f"{BASE_PATH}/" if layer == "intuitive" else f"{BASE_PATH}/{layer}"
+
+
+def _request_path(raw: str | None, layer: str) -> str:
+    """当前页路径，一律带 `BASE_PATH` 前缀。
+
+    nginx 用 `proxy_pass http://127.0.0.1:8098/`（带尾斜杠）把 `/emotion/` 前缀剥掉再转发，
+    所以服务端在线上看到的是 `/`（直观层）、`/logic`……直接拿它拼日历导航与"跳转"表单，
+    链接就会指到站点根（门户页）而不是当前层。这里补齐前缀，两个入口（直连 :8098、
+    经 nginx）都能生成正确地址。
+    """
+    path = raw or _default_path(layer)
+    if path.startswith(BASE_PATH):
+        return path
+    return f"{BASE_PATH}{path if path.startswith('/') else '/' + path}"
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -292,16 +346,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/strategy/dates":
             self._send_json({"dates": strategy_view.strategy_dates()})
             return
+        if parsed.path == "/api/dates":
+            dates = snapshot.available_dates()
+            self._send_json({
+                "dates": [d.isoformat() for d in dates],
+                "latest": dates[0].isoformat() if dates else None,
+                "selected": (snapshot.resolve_date(_query_arg(parsed, "date")) or
+                             (dates[0] if dates else None)),
+            })
+            return
         if parsed.path == "/api/stock":
             from emotion_core.services import stock_service
             code = _query_arg(parsed, "code")
-            payload = stock_service.analyze(code)
+            payload = stock_service.analyze(code, _query_date(parsed))
             self._send_json(payload, 200 if payload.get("ok") else 404)
             return
         if parsed.path == "/api/stock/llm":
             from emotion_core.services import stock_service
             code = _query_arg(parsed, "code")
-            self._send_json(stock_service.llm_for(code))
+            self._send_json(stock_service.llm_for(code, _query_date(parsed)))
             return
         if parsed.path.startswith("/api/"):
             self._handle_status()
@@ -321,7 +384,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if layer in ROUTES:
             try:
-                extra = {"code": _query_arg(parsed, "code")}
+                extra = {"code": _query_arg(parsed, "code"),
+                         "date": _query_arg(parsed, "date"),
+                         "month": _query_arg(parsed, "month"),
+                         "path": parsed.path}
                 html = render_dashboard(ROUTES[layer], **extra)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -347,11 +413,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"<html><body><h1>404 Not Found</h1></body></html>")
 
     def _handle_status(self) -> None:
-        """返回 emotion-core 状态数据。"""
+        """返回 emotion-core 状态数据（可带 ?date=）。"""
         try:
-            market = loaders.load_market_snapshot()
+            market = loaders.load_market_snapshot(snapshot.resolve_date(
+                _query_arg(urlparse(self.path), "date")))
             self._send_json({
                 "ok": True,
+                "date": str(market.get("date", "")),
                 "phase": market.get("phase", ""),
                 "limit_up_count": market.get("limit_up_count"),
                 "max_limit_days": market.get("max_limit_days"),

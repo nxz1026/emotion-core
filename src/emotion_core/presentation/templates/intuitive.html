@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% block title %}直观层{% endblock %}
+{% block title %}直观层 · {{ banner.selected_iso }}{% endblock %}
 {% block content %}
 <div class="card">
-    <h1>今日结论</h1>
-    <p class="lead">市场处于 <strong>{{ phase }}</strong> 阶段 —— {{ phase_desc }}</p>
+    <h1>市场结论 · {{ banner.selected_iso }}（周{{ banner.weekday }}）</h1>
+    <p class="lead">市场处于 <strong>{{ phase }}</strong> 阶段 —— {{ phase_desc }}
+        {% if banner.is_latest %}<span class="badge badge-success">最新快照</span>
+        {% else %}<span class="badge badge-warning">历史回看</span>{% endif %}</p>
     <div class="stats">
         <div class="stat"><div class="stat-label">买入窗口</div>
             <div class="stat-value">{{ buy_window }}</div></div>
@@ -19,12 +21,12 @@
 </div>
 
 <div class="card">
-    <h2>今日推荐</h2>
+    <h2>当日推荐 <span class="muted">{{ banner.selected_iso }}</span></h2>
     {% if recommendations %}
     <ul class="recommend-list">
         {% for s in recommendations %}
         <li>
-            <a href="{{ base_path }}/stock?code={{ s.code }}">
+            <a href="{{ base_path }}/stock?code={{ s.code }}&date={{ banner.selected_iso }}">
                 <code>{{ s.code }}</code>{{ s.name or "" }}
                 {% if s.cont_days %}· {{ s.cont_days }}板{% endif %}
             </a>
@@ -32,14 +34,49 @@
         </li>
         {% endfor %}
     </ul>
-    {% elif signal_count %}
-    <p class="muted">今日 {{ signal_count }} 条信号，但无 BUY 级推荐。</p>
     {% else %}
-    <p class="muted">今日无推荐（信号表 {{ signal_count }} 行）。可以直接查任意个股：</p>
+    <p class="muted">该快照日<strong>没有推荐信号</strong>：`signal` 表当日 {{ signal_counts.day }} 行、
+        全表 <strong>{{ signal_counts.total }} 行</strong>。
+        {% if signal_counts.total == 0 %}
+        说明日更链至今没有成功产出一轮信号（不是"昨天没运行"——库里快照本身只到
+        {{ banner.latest }}），所以任何日期的推荐都会是空的。市场结论、梯队、日历不受影响。
+        {% endif %}</p>
     <form class="stock-form" action="{{ base_path }}/stock" method="get">
+        <input type="hidden" name="date" value="{{ banner.selected_iso }}">
         <input type="text" name="code" placeholder="输入股票代码或名称，例如 601811">
         <button type="submit" class="btn btn-primary">个股诊断</button>
     </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>当日最高板梯队 <span class="muted">{{ banner.selected_iso }}</span></h2>
+    <p class="muted">数据视图（由 <code>derived_bar</code> 按当日现算），<strong>不是决策输出</strong>{% if signal_counts.ladder_total == 0 %}：
+        `ladder_day` 表当前 {{ signal_counts.ladder_total }} 行（未有产出），所以这里给的是"当日实际最强的票"{% endif %}，
+        供你按快照日回看与点进个股诊断。</p>
+    {% if top_ladder %}
+    <div class="table-scroll">
+        <table class="data-table">
+            <thead><tr><th>代码</th><th>名称</th><th>连板</th><th>一字</th><th>换手板</th>
+                <th>振幅</th><th></th></tr></thead>
+            <tbody>
+                {% for r in top_ladder %}
+                <tr>
+                    <td>{{ r.code }}</td>
+                    <td>{{ r.name }}</td>
+                    <td>{{ r.cont_days }}</td>
+                    <td>{% if r.is_one_word %}是{% else %}—{% endif %}</td>
+                    <td>{% if r.is_exchange %}是{% else %}—{% endif %}</td>
+                    <td>{% if r.amplitude is not none %}{{ '%.2f'|format(r.amplitude) }}{% else %}—{% endif %}</td>
+                    <td><a class="btn-link"
+                           href="{{ base_path }}/stock?code={{ r.code }}&date={{ banner.selected_iso }}">诊断 ›</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="muted">该快照日没有涨停数据（<code>derived_bar</code> 无行）。</p>
     {% endif %}
 </div>
 {% endblock %}

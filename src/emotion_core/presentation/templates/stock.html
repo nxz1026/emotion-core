@@ -10,7 +10,8 @@
                value="{{ prefill_code }}" aria-label="股票代码或名称">
         <button type="submit" class="btn btn-primary" id="stock-submit">分析</button>
     </form>
-    <p class="muted" id="stock-hint">数据口径：只用目标日及之前的历史样本（PIT），全市场历史统计实时计算。</p>
+    <p class="muted" id="stock-hint">数据口径：只用目标日及之前的历史样本（PIT），全市场历史统计实时计算。
+        当前按快照日 <strong>{{ prefill_date }}</strong> 诊断（可在上方日历切换）。</p>
 </div>
 
 <div id="stock-error" class="warning-box" style="display:none"></div>
@@ -67,6 +68,7 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script>window.STOCK_BASE_PATH = "{{ base_path }}";</script>
+<script>window.STOCK_BASE_PATH = "{{ base_path }}";
+  window.STOCK_TRADE_DATE = "{{ prefill_date }}";</script>
 <script src="{{ base_path }}/static/stock.js"></script>
 {% endblock %}

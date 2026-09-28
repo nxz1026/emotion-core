@@ -9,17 +9,101 @@
 <body>
     <header class="header">
         <div class="container">
-            <a href="{{ base_path }}/" class="brand">Emotion Core</a>
+            <a href="{{ base_path }}/{{ date_query }}" class="brand">Emotion Core</a>
             <nav class="nav">
-                <a href="{{ base_path }}/" {% if active_layer == "intuitive" %}class="active"{% endif %}>直观</a>
-                <a href="{{ base_path }}/logic" {% if active_layer == "logic" %}class="active"{% endif %}>逻辑</a>
-                <a href="{{ base_path }}/algorithm" {% if active_layer == "algorithm" %}class="active"{% endif %}>算法</a>
-                <a href="{{ base_path }}/strategy" {% if active_layer == "strategy" %}class="active"{% endif %}>策略</a>
-                <a href="{{ base_path }}/stock" {% if active_layer == "stock" %}class="active"{% endif %}>个股</a>
+                <a href="{{ base_path }}/{{ date_query }}" {% if active_layer == "intuitive" %}class="active"{% endif %}>直观</a>
+                <a href="{{ base_path }}/logic{{ date_query }}" {% if active_layer == "logic" %}class="active"{% endif %}>逻辑</a>
+                <a href="{{ base_path }}/algorithm{{ date_query }}" {% if active_layer == "algorithm" %}class="active"{% endif %}>算法</a>
+                <a href="{{ base_path }}/strategy{{ date_query }}" {% if active_layer == "strategy" %}class="active"{% endif %}>策略</a>
+                <a href="{{ base_path }}/stock{{ date_query }}" {% if active_layer == "stock" %}class="active"{% endif %}>个股</a>
                 <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()">🌙</button>
             </nav>
         </div>
     </header>
+
+    {# ── 快照日期提示条 + 历史快照日历：全站可见，所有页面共用同一天 ── #}
+    <div class="snapshot-bar">
+        <div class="container snapshot-inner">
+            <div class="snapshot-info">
+                <span class="snapshot-label">快照日期</span>
+                {% if banner.selected %}
+                <strong class="snapshot-date">{{ banner.selected_iso }}</strong>
+                <span class="muted">周{{ banner.weekday }}</span>
+                {% if banner.is_latest %}
+                <span class="badge badge-success">最新快照</span>
+                {% else %}
+                <span class="badge badge-warning">历史回看</span>
+                <span class="muted">最新快照 {{ banner.latest }}（落后 {{ banner.days_behind }} 天）</span>
+                <a class="btn-link" href="{{ request_path }}">回到最新</a>
+                {% endif %}
+                {% else %}
+                <strong class="snapshot-date">—</strong>
+                <span class="badge badge-danger">库内无快照</span>
+                {% endif %}
+            </div>
+            <div class="snapshot-nav">
+                <a class="btn-link {% if not banner.prev %}disabled{% endif %}"
+                   href="{{ request_path }}?date={{ banner.prev }}"
+                   {% if not banner.prev %}aria-disabled="true" tabindex="-1"{% endif %}>‹ 上一交易日</a>
+                <a class="btn-link {% if not banner.next %}disabled{% endif %}"
+                   href="{{ request_path }}?date={{ banner.next }}"
+                   {% if not banner.next %}aria-disabled="true" tabindex="-1"{% endif %}>下一交易日 ›</a>
+                <span class="muted">共 {{ dates_total }} 个快照日</span>
+            </div>
+        </div>
+        <div class="container">
+            <details class="snapshot-calendar" {% if calendar_open %}open{% endif %}>
+                <summary>
+                    <span id="cal-summary">选择快照日期</span>
+                    <span class="muted">（{{ calendar.month_label }} · 本月 {{ calendar.month_days }} 个快照日；只有高亮的日期有快照）</span>
+                </summary>
+                <div class="calendar">
+                    <div class="cal-head">
+                        <a class="cal-nav {% if not calendar.prev_has_data %}disabled{% endif %}"
+                           href="{{ request_path }}?month={{ calendar.prev_month }}&date={{ banner.selected }}">‹ {{ calendar.prev_month }}</a>
+                        <strong>{{ calendar.month_label }}</strong>
+                        <a class="cal-nav {% if not calendar.next_has_data %}disabled{% endif %}"
+                           href="{{ request_path }}?month={{ calendar.next_month }}&date={{ banner.selected }}">{{ calendar.next_month }} ›</a>
+                    </div>
+                    <table class="cal-grid">
+                        <thead>
+                            <tr>{% for w in calendar.weekday_labels %}<th>{{ w }}</th>{% endfor %}</tr>
+                        </thead>
+                        <tbody>
+                            {% for week in calendar.weeks %}
+                            <tr>
+                                {% for c in week %}
+                                <td class="cal-cell">
+                                    {% if c.has_data %}
+                                    <a class="cal-day has-data {% if c.is_selected %}selected{% endif %} {% if c.is_latest %}latest{% endif %} {% if not c.in_month %}out{% endif %}"
+                                       href="{{ request_path }}?date={{ c.iso }}"
+                                       title="{{ c.iso }}{% if c.is_latest %}（最新快照）{% endif %}">{{ c.day }}</a>
+                                    {% else %}
+                                    <span class="cal-day no-data {% if not c.in_month %}out{% endif %}"
+                                          title="{{ c.iso }} 无快照（非交易日或当日未跑）">{{ c.day }}</span>
+                                    {% endif %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    <div class="cal-legend">
+                        <span><i class="dot dot-latest"></i>最新快照</span>
+                        <span><i class="dot dot-data"></i>有快照</span>
+                        <span><i class="dot dot-selected"></i>当前选中</span>
+                        <span><i class="dot dot-none"></i>无快照（非交易日/未跑）</span>
+                        <form class="cal-jump" method="get" action="{{ request_path }}">
+                            <input type="date" name="date" value="{{ banner.selected_iso or '' }}"
+                                   min="{{ dates_min }}" max="{{ dates_max }}" aria-label="直接指定快照日期">
+                            <button type="submit" class="btn-link">跳转</button>
+                        </form>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+
     <main class="container">
         {% block content %}{% endblock %}
     </main>
@@ -43,6 +127,22 @@
             document.documentElement.setAttribute("data-theme", saved);
             const btn = document.getElementById("theme-toggle");
             if (btn) btn.textContent = saved === "dark" ? "☀️" : "🌙";
+        }
+    })();
+    // 记住用户选的快照日期：从别的入口裸访问某页时，把 ?date= 补上（服务端已带则不动）
+    (function() {
+        const params = new URLSearchParams(location.search);
+        if (params.has("date")) {
+            localStorage.setItem("snapshot-date", params.get("date"));
+            return;
+        }
+        const remembered = localStorage.getItem("snapshot-date");
+        if (!remembered) return;
+        const page = document.querySelector(".snapshot-calendar");
+        const current = document.querySelector(".snapshot-date");
+        if (page && current && current.textContent.trim() !== remembered) {
+            params.set("date", remembered);
+            location.replace(location.pathname + "?" + params.toString());
         }
     })();
     </script>
