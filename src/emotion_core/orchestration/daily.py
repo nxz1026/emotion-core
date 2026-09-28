@@ -165,6 +165,11 @@ def main() -> None:
     parser.add_argument("--from-step", type=str, default=None, help="从指定步骤开始")
     parser.add_argument("--dry-run", action="store_true", help="只打印步骤不执行")
     args = parser.parse_args()
+    # 必须显式配置：没有 handler 时只有 WARNING+ 会被 logging.lastResort 打到 stderr，
+    # 于是 systemd journal 里看不到步骤进度与「非交易日跳过」，只有告警——
+    # 运维无法判断跑过哪些步骤（实测 09-27 那次补跑日志只剩一行 sync 失败）。
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
     sys.exit(run_daily(args.date, from_step=args.from_step, dry_run=args.dry_run))
 
 
