@@ -84,6 +84,13 @@ class Config:
     STRATEGY_PROFILE: str = os.environ.get("EC_STRATEGY_PROFILE", "agnes")
     STRATEGY_MAX_TOKENS: int = int(os.environ.get("EC_STRATEGY_MAX_TOKENS", "8192"))
     STRATEGY_MAX_LLM: int = int(os.environ.get("EC_STRATEGY_MAX_LLM", "50"))
+    # 定速与退避：agnes 单后端时 llm_backend 不重试 429（allow_status_retry 需链长>1），
+    # 故限流防护落在调用侧。
+    STRATEGY_CALL_INTERVAL: float = float(os.environ.get("EC_STRATEGY_CALL_INTERVAL", "1.5"))
+    STRATEGY_MAX_ATTEMPTS: int = int(os.environ.get("EC_STRATEGY_MAX_ATTEMPTS", "3"))
+    STRATEGY_RETRY_BASE_DELAY: float = float(os.environ.get("EC_STRATEGY_RETRY_BASE_DELAY", "2.0"))
+    STRATEGY_MAX_CONSECUTIVE_FAILURES: int = int(
+        os.environ.get("EC_STRATEGY_MAX_CONSECUTIVE_FAILURES", "8"))
     STRATEGY_MAX_UNIVERSE: int = int(os.environ.get("EC_STRATEGY_MAX_UNIVERSE", "80"))
     STRATEGY_HOT_N: int = int(os.environ.get("EC_STRATEGY_HOT_N", "20"))
     STRATEGY_VERSION: str = os.environ.get("EC_STRATEGY_VERSION", "emotion-core-dev")

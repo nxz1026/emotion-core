@@ -7,8 +7,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
@@ -32,6 +34,41 @@ def _existing(trade_date: date, code: str, strategy: str, prompt_hash: str) -> b
         "AND strategy=%s AND prompt_hash=%s LIMIT 1",
         (trade_date, code, strategy, prompt_hash))
     return not frame.empty
+
+
+def _retryable(exc: Exception) -> bool:
+    """限流与瞬时故障可退避重试；鉴权失败与输出契约错误不重试。"""
+    import httpx
+
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    return False
+
+
+def _chat_with_retry(client: Any, messages: list[dict]) -> Any:
+    """调用 LLM，对 429 与 5xx 做指数退避。
+
+    agnes 单后端时 `llm_backend._chat_locked` 传入的
+    `allow_status_retry=len(chain) > 1` 为假，客户端自带的 max_retry 对
+    429 不生效，故限流防护落在调用侧。
+    """
+    attempts = max(1, CONFIG.STRATEGY_MAX_ATTEMPTS)
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return client.chat(messages, purpose="strategy", json_mode=True)
+        except Exception as exc:
+            last = exc
+            if attempt + 1 >= attempts or not _retryable(exc):
+                raise
+            delay = CONFIG.STRATEGY_RETRY_BASE_DELAY * (2 ** attempt)
+            log.warning("策略 LLM 限流，%.1fs 后重试（%d/%d）：%s",
+                        delay, attempt + 1, attempts, exc)
+            time.sleep(delay)
+    assert last is not None
+    raise last
 
 
 def _parse(text: str) -> dict | None:
@@ -111,66 +148,82 @@ def run_for_date(trade_date: date) -> int:
     client = LLMClient(CONFIG.STRATEGY_PROFILE,
                        max_tokens=CONFIG.STRATEGY_MAX_TOKENS)
 
-    items, skipped, calls = [], [], 0
-    for skill in skills:
-        for code in codes:
-            if calls >= CONFIG.STRATEGY_MAX_LLM:
-                skipped.append({"strategy": skill.name, "code": code,
-                                "reason": "达到LLM调用上限"})
-                continue
-            try:
-                context = build_stock_context(trade_date, code)
-            except Exception as exc:
-                skipped.append({"strategy": skill.name, "code": code,
-                                "reason": f"上下文构建失败:{str(exc)[:80]}"})
-                continue
-            messages, prompt = _prompt(skill, code, context)
-            prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-            if _existing(trade_date, code, skill.name, prompt_hash):
-                continue
-            calls += 1
-            try:
-                reply = client.chat(messages, purpose="strategy", json_mode=True)
-            except Exception as exc:
-                reason = f"LLM调用失败:{str(exc)[:100]}"
-                log.warning("策略 LLM 调用失败：%s/%s：%s", skill.name, code, exc)
-                skipped.append({"strategy": skill.name, "code": code, "reason": reason})
-                continue
-            parsed = _parse(reply.text)
-            if parsed is None:
-                reason = "返回不符合输出契约"
-                log.warning("策略解析失败：%s/%s", skill.name, code)
-                skipped.append({"strategy": skill.name, "code": code, "reason": reason})
-                continue
-            items.append({
-                "strategy": skill.name, "code": code,
-                "stock_name": _stock_name(code),
-                "name": skill.display_name, **parsed, "model": reply.model})
+    items, skipped, calls, failed = [], [], 0, 0
+    consecutive_failures = 0
+    # 交错遍历（代码优先、策略轮转）：原 `for skill: for code:` 会让首个策略
+    # 独吞 STRATEGY_MAX_LLM 配额，其余策略一次都轮不到。
+    pairs = [(skill, code) for code in codes for skill in skills]
+    for skill, code in pairs:
+        if calls >= CONFIG.STRATEGY_MAX_LLM:
+            skipped.append({"strategy": skill.name, "code": code,
+                            "reason": "达到LLM调用上限"})
+            continue
+        if consecutive_failures >= CONFIG.STRATEGY_MAX_CONSECUTIVE_FAILURES:
+            skipped.append({"strategy": skill.name, "code": code,
+                            "reason": "连续调用失败熔断"})
+            continue
+        try:
+            context = build_stock_context(trade_date, code)
+        except Exception as exc:
+            skipped.append({"strategy": skill.name, "code": code,
+                            "reason": f"上下文构建失败:{str(exc)[:80]}"})
+            continue
+        messages, prompt = _prompt(skill, code, context)
+        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if _existing(trade_date, code, skill.name, prompt_hash):
+            continue
+        if calls or failed:  # 调用间定速，避免触发上游限流
+            time.sleep(CONFIG.STRATEGY_CALL_INTERVAL)
+        try:
+            reply = _chat_with_retry(client, messages)
+        except Exception as exc:
+            failed += 1
+            consecutive_failures += 1
+            reason = f"LLM调用失败:{str(exc)[:100]}"
+            log.warning("策略 LLM 调用失败：%s/%s：%s", skill.name, code, exc)
+            skipped.append({"strategy": skill.name, "code": code, "reason": reason})
+            continue  # 失败不占用 STRATEGY_MAX_LLM 配额
+        calls += 1  # 只有成功的调用才计入配额
+        consecutive_failures = 0
+        parsed = _parse(reply.text)
+        if parsed is None:
+            reason = "返回不符合输出契约"
+            log.warning("策略解析失败：%s/%s", skill.name, code)
+            skipped.append({"strategy": skill.name, "code": code, "reason": reason})
+            continue
+        items.append({
+            "strategy": skill.name, "code": code,
+            "stock_name": _stock_name(code),
+            "name": skill.display_name, **parsed, "model": reply.model,
+            "prompt_hash": prompt_hash})
 
     # Upsert to strategy_signal
     if items:
         _save_batch(trade_date, items)
 
     snap_path = _snapshot(trade_date, items, skipped)
-    log.info("策略观察 %s: 调用 %d, 入库 %d, 跳过 %d, 快照 %s",
-             trade_date, calls, len(items), len(skipped), snap_path)
+    log.info("策略观察 %s: 调用 %d, 入库 %d, 失败 %d, 跳过 %d, 快照 %s",
+             trade_date, calls, len(items), failed, len(skipped), snap_path)
     return len(items)
+
+
+def _signal_row(trade_date: date, it: dict) -> tuple:
+    """构造 strategy_signal 一行。
+
+    prompt_hash 直接取自调用侧（sha256(prompt 文本)），与 `_existing` 去重
+    同源；入库另算一套 sha256(strategy:code:date) 会让去重恒不命中。
+    """
+    return (trade_date, it["code"], it["strategy"], it["prompt_hash"],
+            it.get("name", ""), it["action"], it["score"],
+            it["confidence"], it.get("reason", ""),
+            json.dumps(it.get("evidence", {}), ensure_ascii=False),
+            it.get("model", ""))
 
 
 def _save_batch(trade_date: date, items: list[dict]) -> int:
     """批量 UPSERT 策略信号到 strategy_signal。"""
     import psycopg
-    rows = []
-    for it in items:
-        evidence = json.dumps(it.get("evidence", {}), ensure_ascii=False)
-        prompt_hash = hashlib.sha256(
-            f"{it['strategy']}:{it['code']}:{trade_date.isoformat()}".encode()
-        ).hexdigest()
-        rows.append(
-            (trade_date, it["code"], it["strategy"], prompt_hash,
-             it.get("name", ""), it["action"], it["score"],
-             it["confidence"], it.get("reason", ""),
-             evidence, it.get("model", "")))
+    rows = [_signal_row(trade_date, it) for it in items]
     # Use individual upserts via execute
     sql = ("INSERT INTO strategy_signal (trade_date,code,strategy,prompt_hash,name,"
            "action,score,confidence,reason,evidence,model) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "

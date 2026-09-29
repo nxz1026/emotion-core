@@ -224,7 +224,7 @@ class AgnesClient:
 src/emotion_core/services/strategy/
 ├── context.py    67 行   组装个股上下文（行情/涨停/情绪）注入 prompt
 ├── loader.py    125 行   纯 stdlib YAML 子集加载器 → Skill 数据类
-├── runner.py    184 行   主流程：门控 → 加载技能 → 建票池 → 调 LLM → 落库
+├── runner.py    237 行   主流程：门控 → 加载技能 → 建票池 → 调 LLM → 落库
 └── universe.py   37 行   当日票池
 
 src/emotion_core/llm/strategies/*.yaml    15 个策略
@@ -256,7 +256,27 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 解析到不存在的 `src/llm/strategies`；而 `load_strategies()` 对不存在的目录
 `glob("*.yaml")` **返回空列表且不抛异常**，于是直接掉进第 2 道门的「跳过」分支 ——
 15 个策略一个不跑、不落库、无告警，是典型的静默失败。
-回归锁在 `tests/unit/test_strategy_runner.py`（11 项断言）。
+回归锁在 `tests/unit/test_strategy_runner.py`（21 项断言）。
+
+**配额、限流与去重**（`runner.py`，2026-09-30 修复）：
+
+| 事项 | 旧行为 | 现行为 |
+|---|---|---|
+| 配额分配 | `for skill: for code:`，上限判在内层 → 首个策略独吞 `STRATEGY_MAX_LLM` 全部名额（实测 15 策略 × 68 只 = 1020 组合里只有 `bottom_volume` 跑过，落库 18 行全是它） | 交错遍历（代码优先、策略轮转），每个策略都能轮到 |
+| 429 限流 | agnes 单后端时 `llm_backend._chat_locked` 传入的 `allow_status_retry=len(chain) > 1` 为假，客户端自带 `max_retry` 对 429 不生效；且失败照样扣配额（实测 50 次里 32 次 429） | 调用侧定速 + 429/5xx 指数退避；**失败不占配额**；连续失败超阈值熔断 |
+| 去重 | 查询用 `sha256(prompt 文本)`、入库用 `sha256(strategy:code:date)`，两者永不相等 → `_existing()` 恒 False，每次重跑全量重打 LLM | 两侧同源，均取 prompt 文本摘要（`_signal_row` 直接用调用侧算好的值） |
+
+新增配置（`utils/config.py`）：
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `EC_STRATEGY_CALL_INTERVAL` | `1.5` | 相邻两次 LLM 调用的最小间隔（秒） |
+| `EC_STRATEGY_MAX_ATTEMPTS` | `3` | 单个组合的最大尝试次数（含首次） |
+| `EC_STRATEGY_RETRY_BASE_DELAY` | `2.0` | 退避基数，第 n 次重试等待 `base × 2^(n-1)` 秒 |
+| `EC_STRATEGY_MAX_CONSECUTIVE_FAILURES` | `8` | 连续失败达此数即熔断，其余组合记 `连续调用失败熔断` |
+
+汇总日志形如 `策略观察 2026-09-29: 调用 50, 入库 18, 失败 3, 跳过 1002, 快照 ...`。
+`skipped` 里可区分 `达到LLM调用上限` / `连续调用失败熔断` / `LLM调用失败:<原因>`。
 
 **调度**：`deploy/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
