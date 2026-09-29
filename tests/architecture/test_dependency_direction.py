@@ -51,15 +51,18 @@ _LAZY_LLM_ALLOWLIST = {
 # ── 历史欠账：登记的是「现状违规」的精确位置，只许减少。────────────────────
 # 格式：(src_layer, dst_layer, src_file) -> 原因
 _DEBT: dict[tuple[str, str, str], str] = {
-    # A 类 algorithms → data：算法外壳直接取数/落库（2026-09-29 验收，待偿还）
-    ("algorithms", "data", "algorithms/dragon_env.py"): (
-        "update_market_stat_ecosystem 直接调 data.loader；应改走 services.ecosystem_service"
-    ),
-    ("algorithms", "data", "algorithms/ladder.py"): (
-        "load_ladder_candidates/count_derived_rows/replace_ladder_day 直接调 data.loader；应改走 services"
-    ),
+    # A 类 algorithms → data（已偿还：改为走 services 胶水层，见 services/ladder_service.py / ecosystem_service.py）
+    # ("algorithms", "data", "algorithms/dragon_env.py"): 已修
+    # ("algorithms", "data", "algorithms/ladder.py"): 已修
     ("algorithms", "data", "algorithms/doctor.py"): (
         "自检脚本直接 import data.providers.* 做离线诊断；生产路径走 services"
+    ),
+    # 转移债务：A 类改走 services 后，变为 C 类（2026-09-29 偿还 A 类）
+    ("algorithms", "services", "algorithms/dragon_env.py"): (
+        "经 services.ecosystem_service 取数；最终方案应由 orchestration 注入"
+    ),
+    ("algorithms", "services", "algorithms/ladder.py"): (
+        "经 services.ladder_service 取数；最终方案应由 orchestration 注入"
     ),
     # C 类 algorithms → services：review 包静态引用 services（2026-09-29 验收，待偿还）
     ("algorithms", "services", "algorithms/review/__init__.py"): (

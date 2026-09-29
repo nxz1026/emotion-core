@@ -30,7 +30,7 @@ import logging
 from dataclasses import replace
 from datetime import date
 
-from emotion_core.data.loader import (
+from emotion_core.services.ladder_service import (
     count_derived_rows,
     load_exchange_codes,
     load_ladder_candidates,

@@ -70,7 +70,7 @@ from typing import Any
 import pandas as pd
 
 from emotion_core.algorithms import accelerate
-from emotion_core.data.loader import update_market_stat_ecosystem
+from emotion_core.services.ecosystem_service import update_market_stat_ecosystem
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
 
