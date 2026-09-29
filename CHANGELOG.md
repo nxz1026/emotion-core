@@ -4,6 +4,26 @@
 
 ---
 
+## [Unreleased] — 2026-10-01
+
+### 新增
+
+- **services/ref_dividend.py**: 分红除权表 `ref_dividend` + `backfill_dividend()` 服务，Wind 回填除权除息日（不复权体系下供分析参考）
+- **services/ref_rs.py**: 相对强弱表 `ref_rs` + `calculate_rs()` 服务，计算个股相对基准指数（默认沪深300）的 20日/60日强度排名
+- **tests/unit/test_ref_dividend.py**: ref_dividend 测试 13/13（mock WindClient + db）
+- **tests/unit/test_ref_rs.py**: ref_rs 测试 8/13（period_return + get_prices + get_top_rs）
+
+### 数据
+
+- **schema.py**: 新增 2 张表 — `ref_dividend`（分红除权历史）, `ref_rs`（相对强弱排名）；索引 2 条；总表数 27→29
+
+### 文档
+
+- **docs/06**: P2 T13/T15 标记完成
+- **docs/15**: 测试数量 1165→1372，总表数 27→29
+
+---
+
 ## [Unreleased] — 2026-09-30
 
 ### 新增

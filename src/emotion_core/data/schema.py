@@ -15,6 +15,8 @@
 - 日历：trade_calendar
 - 制度规则：ref_limit_rule（涨跌幅限制等交易所制度）
 - 安全状态：ref_security_status（ST/*ST 历史）
+- 分红除权：ref_dividend（除权除息日，不复权体系下供分析参考）
+- 相对强弱：ref_rs（个股相对市场指数的强度排名）
 - 原始留存：ops_raw_manifest（Wind 原始响应 JSON）
 - 配额台账：ops_quota_ledger（Wind 调用记账）
 """
@@ -368,6 +370,29 @@ DDL: dict[str, str] = {
             elapsed_ms   integer,
             cost_units   integer NOT NULL DEFAULT 1
         )""",
+    "ref_dividend": """
+        CREATE TABLE IF NOT EXISTS ref_dividend(
+            id           bigserial PRIMARY KEY,
+            code         text NOT NULL,
+            record_date  date NOT NULL,
+            ex_date      date,
+            dividend     numeric(10,4),
+            bonus_shares numeric(10,4),
+            rights_issue numeric(10,4),
+            source       text NOT NULL DEFAULT 'wind',
+            UNIQUE (code, record_date)
+        )""",
+    "ref_rs": """
+        CREATE TABLE IF NOT EXISTS ref_rs(
+            id           bigserial PRIMARY KEY,
+            code         text NOT NULL,
+            as_of_date   date NOT NULL,
+            rs_20d       double precision,
+            rs_60d       double precision,
+            rs_rank      integer,
+            benchmark    text NOT NULL DEFAULT '000300',
+            UNIQUE (code, as_of_date, benchmark)
+        )""",
 }
 
 _INDEXES: tuple[str, ...] = (
@@ -385,6 +410,8 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_ref_security_status_code ON ref_security_status (code)",
     "CREATE INDEX IF NOT EXISTS idx_ops_raw_manifest_ts ON ops_raw_manifest (ts)",
     "CREATE INDEX IF NOT EXISTS idx_ops_quota_ledger_ts ON ops_quota_ledger (ts)",
+    "CREATE INDEX IF NOT EXISTS idx_ref_dividend_code ON ref_dividend (code)",
+    "CREATE INDEX IF NOT EXISTS idx_ref_rs_code_date ON ref_rs (code, as_of_date)",
 )
 
 

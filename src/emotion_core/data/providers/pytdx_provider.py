@@ -44,7 +44,7 @@ def _parse_tdx_hosts() -> list:
 
 _TDX_HOSTS = _parse_tdx_hosts()
 
-_TLS = threading.local()
+_tls = threading.local()
 
 
 def _tdx():
