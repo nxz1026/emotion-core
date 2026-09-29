@@ -78,15 +78,28 @@ class AlertsStub:
         self.raise_webhook = raise_webhook
         self.pending_limits: list[int] = []
         self.recorded: list[tuple[str, str, str]] = []
+        self.pending_details: set[tuple[str, str]] = set()   # 已未确认的 (source, detail)
+        self.preacked: list[dict] = []        # 预置的未确认告警（record_dedup 之外的在库证据）
         self.webhooks = 0
 
     def pending(self, limit: int = 100) -> list[dict]:
         self.pending_limits.append(limit)
-        return [{"source": s} for s in self.pending_sources]
+        out = [{"source": s, "detail": ""} for s in self.pending_sources]
+        return out + list(self.preacked)
 
     def record(self, level: str, source: str, detail: str) -> int:
         if self.raise_record:
             raise RuntimeError("alert db down")
+        self.recorded.append((level, source, detail))
+        return 1
+
+    def record_dedup(self, level: str, source: str, detail: str) -> int | None:
+        """同 (source, detail) 已在 recorded 里未确认 → None，否则 record（镜像真实现）。"""
+        if self.raise_record:
+            raise RuntimeError("alert db down")
+        if (source, detail) in self.pending_details:
+            return None
+        self.pending_details.add((source, detail))
         self.recorded.append((level, source, detail))
         return 1
 
@@ -122,9 +135,11 @@ def alerts_stub(monkeypatch) -> AlertsStub:
 def test_thresholds_and_checks_order_locked():
     assert (health.REPORT_GAP_DAYS, health.DATA_GAP_DAYS,
             health.OUTCOME_STALE_DAYS) == (2, 2, 6)
-    assert [name for name, _ in health.CHECKS] == ["report", "data", "outcome"]
+    assert [name for name, _ in health.CHECKS] == ["report", "data", "outcome",
+                                                  "pipeline"]
     assert [fn for _, fn in health.CHECKS] == [
-        health.check_report_gap, health.check_data_gap, health.check_outcome_stale]
+        health.check_report_gap, health.check_data_gap,
+        health.check_outcome_stale, health.check_pipeline_failed]
 
 
 # ────────────────────────── _trading_gap ──────────────────────────
@@ -297,17 +312,69 @@ class TestRun:
 # ────────────────────────── record_once ──────────────────────────
 
 class TestRecordOnce:
-    def test_pending_health_source_skips_enqueue(self, alerts_stub):
-        alerts_stub.pending_sources = ["health"]
+    def test_distinct_details_all_enqueued(self, alerts_stub):
+        """★2026-09-29 起按 (source, detail) 去重：不同问题互不静默。
+
+        旧实现按 source 去重，而 src 恒为 "health" —— 任意一条未确认 health 告警
+        就会把此后**所有**断档吞掉。本仓恰好锁死：review_report 从未产出，那条
+        「从未产出报告」永久未 ack → health 整体失明。
+        """
+        assert health.record_once(["a", "b"]) == 2
+        assert alerts_stub.recorded == [("WARN", "health", "a"),
+                                       ("WARN", "health", "b")]
+
+    def test_same_detail_deduped_across_rounds(self, alerts_stub):
+        """同一 detail 跨轮不重复轰炸（真 dedup 语义，非 source 锁死）。"""
+        assert health.record_once(["a", "b"]) == 2
         assert health.record_once(["a", "b"]) == 0
+        assert health.record_once(["b", "c"]) == 1       # 只 c 是新的
+        assert alerts_stub.recorded[-1] == ("WARN", "health", "c")
+
+    def test_no_pending_scan_anymore(self, alerts_stub):
+        """去重要读在库未确认告警（跨日判重靠它），故 pending 仍会被调一次。"""
+        health.record_once(["a"])
         assert alerts_stub.pending_limits == [200]
+
+    def test_cross_day_same_problem_deduped(self, alerts_stub):
+        """★核心：文案只差日期的同一问题，不得每天长出一条新告警。
+
+        实测 2026-09-29 18:05 部署首轮：id=8「截至 2026-09-28 无 review_report」
+        未确认，09-29 又落 id=9「截至 2026-09-29 ...」——record_dedup 精确比对
+        完全失效，告警表每天 +1 条同义垃圾。
+        """
+        alerts_stub.preacked = [{"source": "health",
+                                 "detail": "从未产出报告（截至 2026-09-28 无 review_report 落盘）"}]
+        assert health.record_once(
+            ["从未产出报告（截至 2026-09-29 无 review_report 落盘）"]) == 0
         assert alerts_stub.recorded == []
 
-    def test_first_detail_enqueued_then_health_dedup_same_round(self, alerts_stub):
-        assert health.record_once(["a", "b"]) == 1
-        assert alerts_stub.pending_limits == [200]
-        # lkl 逐字行为：首条入队后 "health" 进入 pending 集合，同轮后续 detail 跳过
-        assert alerts_stub.recorded == [("WARN", "health", "a")]
+    def test_first_day_of_new_problem_still_enqueued(self, alerts_stub):
+        """抹日期只用于判重，不影响「不同问题照样入队」。"""
+        alerts_stub.preacked = [{"source": "health",
+                                 "detail": "从未产出报告（截至 2026-09-28 无 review_report 落盘）"}]
+        assert health.record_once(
+            ["derived_bar 最近数据日 2026-09-29 距今 3 个交易日（阈值 2），疑似采集停摆"]) == 1
+
+    def test_other_source_alerts_ignored(self, alerts_stub):
+        """只有 health source 参与判重——pipeline 的告警不该压制 health。"""
+        alerts_stub.preacked = [{"source": "pipeline", "detail": "x"}]
+        assert health.record_once(["x"]) == 1
+
+    def test_pending_read_failure_degrades_to_in_round_dedup(self, alerts_stub, caplog):
+        """读不到在库告警时不能崩，退化为本轮内去重。"""
+        def boom(limit=100):
+            raise RuntimeError("db down")
+        alerts_stub.pending = boom
+        with caplog.at_level(logging.WARNING, logger="emotion_core.health"):
+            assert health.record_once(["a", "a", "b"]) == 2
+        assert "退化为仅本轮内去重" in caplog.text
+
+    def test_dedup_key_strips_dates_only(self):
+        """只抹日期，不动其余文案——避免把不同问题误判成同一个。"""
+        assert health._dedup_key("报告断档：最近成功报告 2026-09-20 距今 3 个交易日") == \
+            "报告断档：最近成功报告 <date> 距今 3 个交易日"
+        assert health._dedup_key("a 2026-09-01 b 2026-10-02") == "a <date> b <date>"
+        assert health._dedup_key("无日期文案") == "无日期文案"
 
     def test_record_failure_warns_and_not_counted(self, alerts_stub, caplog):
         alerts_stub.raise_record = True
@@ -337,3 +404,47 @@ class TestPush:
         with caplog.at_level(logging.WARNING, logger="emotion_core.health"):
             assert health.push() == 3
         assert "health webhook 推送失败（不影响告警入队）" in caplog.text
+
+
+# ────────────────────── check_pipeline_failed（2026-09-29 新增）──────────────────────
+
+class TestCheckPipelineFailed:
+    def test_no_failed_step_returns_none(self, monkeypatch):
+        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [])
+        assert health.check_pipeline_failed(D0) is None
+
+    def test_failed_step_reports_step_and_date(self, monkeypatch):
+        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
+            {"step": "ladder", "status": "FAILED", "for_date": "2026-09-28",
+             "detail": "步骤 ladder 失败：'Connection' object has no attribute "
+                       "'executemany'"}])
+        out = health.check_pipeline_failed(D0)
+        assert "1 个步骤停在 FAILED" in out
+        assert "ladder(2026-09-28)" in out
+        assert "executemany" in out
+
+    def test_missing_detail_and_date_tolerated(self, monkeypatch):
+        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
+            {"step": "sync", "status": "FAILED", "for_date": None, "detail": ""}])
+        # 无日期→"无日期"，无 detail→不接冒号（names 段以右括号收尾）
+        assert health.check_pipeline_failed(D0).endswith("sync(无日期)")
+
+    def test_detail_truncated_to_120(self, monkeypatch):
+        long = "x" * 500
+        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
+            {"step": "theme", "status": "FAILED", "for_date": "2026-09-28",
+             "detail": long}])
+        out = health.check_pipeline_failed(D0)
+        assert long not in out and ("x" * 120) in out
+
+    def test_caps_listing_at_five(self, monkeypatch):
+        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
+            {"step": f"s{i}", "status": "FAILED", "for_date": "2026-09-28",
+             "detail": ""} for i in range(9)])
+        out = health.check_pipeline_failed(D0)
+        assert "9 个步骤" in out
+        assert "s4" in out and "s5" not in out
+
+    def test_included_in_run(self, monkeypatch):
+        """必须真进 CHECKS：否则 watchdog 跑起来照样看不见主链已死。"""
+        assert ("pipeline", health.check_pipeline_failed) in health.CHECKS

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from emotion_core.utils.config import CONFIG
@@ -19,8 +20,20 @@ _POS_RE = re.compile(r"\*\*当前持仓\*\*：.*(?=\n|$)")
 
 
 def _cfg(name: str, default: str) -> str:
-    """读 CONFIG 项；emotion-core 尚未收录的键取 lkl config.py 原值。"""
-    return getattr(CONFIG, name, default)
+    """读配置：环境变量优先，其次 CONFIG 项，都没有才用 default。
+
+    ★2026-09-29 修：原实现只有 `getattr(CONFIG, name, default)`，而 CONFIG 是
+    frozen dataclass 且**从不收录** `LKL_WEBHOOK_URL` → 恒返回空串 → webhook 推送
+    恒被跳过。这条通路自 V9 写下起就没通过一次，2026-09-27~09-28 连续 4 次 daily
+    失败因此一条都没推出去。
+
+    为什么读环境变量而**不**给 CONFIG 加这个字段：CONFIG 的字段集合参与
+    `config_hash()` 计算，加字段会让 pipeline_state / signal / eval_result 里
+    已落库的策略指纹整体换代，跨版本不可比。webhook 地址属于部署期密配置
+    （本机 systemd EnvironmentFile），本就应当走环境变量，与策略配置正交。
+    """
+    env_key = f"EMOTION_{name}"
+    return os.environ.get(env_key) or os.environ.get(name) or getattr(CONFIG, name, default)
 
 
 def _guess_channel(url: str) -> str:

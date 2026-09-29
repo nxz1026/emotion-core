@@ -270,8 +270,25 @@ class TestPushPendingWebhook:
         assert len(seen) == 1
 
     def test_notify_missing_is_silent(self, monkeypatch, caplog):
-        """notify 未搬运（第 10 层默认关）时 _push 返回 False，不抛。"""
-        monkeypatch.setitem(sys.modules, "emotion_core.algorithms.notify", None)
+        """services/ 与 algorithms/ 两条路都缺 notify 时 _push 返回 False，不抛。
+
+        ★2026-09-29：原实现只 `from emotion_core.algorithms import notify`，而 notify
+        实际在 services/ —— 该 ImportError 恒成立，2026-09-27~09-28 四次 daily 失败
+        因此一条 webhook 都没发出去。现按 services 优先、algorithms 兜底两路试。
+        """
+        for mod in ("emotion_core.services.notify", "emotion_core.algorithms.notify"):
+            monkeypatch.setitem(sys.modules, mod, None)
         with caplog.at_level("WARNING", logger="emotion_core.alerts"):
             assert alerts._push("## ⓪ 速览\n\nx\n", None) is False
-        assert "notify 未就位" in caplog.text
+        assert "均未找到" in caplog.text
+
+    def test_notify_resolved_from_services_first(self, monkeypatch):
+        """真实模块路径：notify 落在 services/，_push 必须能解析到它。"""
+        import types
+        seen: list[str] = []
+        stub = types.ModuleType("emotion_core.services.notify")
+        stub.push = lambda md, trade_date=None: seen.append(md) or True
+        monkeypatch.setitem(sys.modules, "emotion_core.services.notify", stub)
+        monkeypatch.setitem(sys.modules, "emotion_core.algorithms.notify", None)
+        assert alerts._push("## ⓪ 速览\n\nx\n", None) is True
+        assert seen == ["## ⓪ 速览\n\nx\n"]

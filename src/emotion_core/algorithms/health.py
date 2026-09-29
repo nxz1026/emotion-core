@@ -41,11 +41,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 
 from emotion_core.algorithms import alerts
+from emotion_core.algorithms import pipeline as _pipeline_mod
 from emotion_core.utils import dates
 from emotion_core.utils.db import query_df
+
+_DATE_IN_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 log = logging.getLogger("emotion_core.health")
 
@@ -120,8 +124,29 @@ def check_outcome_stale(trade_date: date) -> str | None:
             f" outcome（L3 未回填）：{names}")
 
 
+def check_pipeline_failed(trade_date: date) -> str | None:
+    """日更链有步骤停在 FAILED（未恢复）→ 断档。
+
+    ★2026-09-29 新增。原 CHECKS 三条全是**数据侧**断档（报告/derived_bar/signal_outcome），
+    没有任何一条能发现「daily 自己挂了」：2026-09-27~09-28 连续 4 次 daily 在 sync/ladder
+    崩掉时，health 因为排在 STEPS 末位**根本没机会执行**（主链 fail-fast 即退出），
+    于是只剩 mark_failed 写的那条 alert，而它推不出去（见 alerts._push 的 import 错路径）。
+    本条读 `pipeline_state` 的 latest-state 打点，让**独立于日更链**的 watchdog 能看见主链死没死。
+
+    pipeline_state 是 UPSERT 覆盖（step 为主键，非历史），因此这里报的是"当前仍处于
+    FAILED 的步骤"，不是"哪天的哪步失败过"——历史失败只由 alert 表承载。
+    """
+    bad = [s for s in _pipeline_mod.failures()]
+    if not bad:
+        return None
+    names = "、".join(f"{s['step']}({s['for_date'] or '无日期'})"
+                      f"{'：' + s['detail'][:120] if s['detail'] else ''}"
+                      for s in bad[:5])
+    return (f"日更链有 {len(bad)} 个步骤停在 FAILED（未恢复）：{names}")
+
+
 CHECKS = (("report", check_report_gap), ("data", check_data_gap),
-          ("outcome", check_outcome_stale))
+          ("outcome", check_outcome_stale), ("pipeline", check_pipeline_failed))
 
 
 def run(trade_date: date | None = None) -> list[str]:
@@ -131,22 +156,50 @@ def run(trade_date: date | None = None) -> list[str]:
             for detail in [fn(td)] if detail]
 
 
+def _dedup_key(detail: str) -> str:
+    """把 detail 里的日期抹成 <date>，得到跨日稳定的去重键。
+
+    ★2026-09-29 新增。断档文案天然嵌日期：「从未产出报告（截至 2026-09-29 无
+    review_report 落盘）」。而 `alerts.record_dedup` 按 (source, detail) 精确比对，
+    于是**同一个未修复的问题每天都会长出一条新告警**（09-28 落 id=8、09-29 落
+    id=9，文案只差日期）。实测 18:05 部署后首轮就复现：去重形同虚设，告警表
+    每天 +1 条无人认领的同义告警。抹掉日期后，「同一类断档」才真正只占一行，
+    告警表也不会被日期刷屏——这正是 lkl 2026-09-18 P2-7 引入 record_dedup 的原意。
+    """
+    return _DATE_IN_TEXT.sub("<date>", detail)
+
+
 def record_once(details: list[str], trade_date: date | None = None) -> int:
-    """断档入 alert 队列（去重：同 source 已有未确认告警则跳过）。
+    """断档入 alert 队列（去重：同 source 已有**同类**未确认告警则跳过）。
 
     返回新入队条数；webhook 推送由调用方（push_pending_webhook）统一做。
+
+    ★2026-09-29 两处修：
+    ① 原实现按 **source** 去重，而 `src` 恒为字面量 "health"——只要有**任意一条**
+       未确认 health 告警，`pending` 就恒含 "health"，此后所有断档全被 `continue`
+       吞掉。本仓恰好落进这个死锁：review_report 从未产出（0 行），2026-09-29
+       00:34 那条「从未产出报告」永久未 ack → health 自此**整体失明**，data_gap /
+       outcome_stale 再怎么坏都不会再入队。现按归一化 detail 去重：同一问题不
+       重复轰炸，不同问题不再互相静默。
+    ② 改用 `alerts.record_dedup` 做最后一道精确比对（防并发下重复写入），
+       但**跨日**判重必须先在 Python 侧抹掉日期，见 `_dedup_key`。
     """
-    pending = {a["source"] for a in alerts.pending(200)}
+    try:
+        seen = {_dedup_key(a["detail"]) for a in alerts.pending(200)
+                if a["source"] == "health"}
+    except Exception:                            # noqa: BLE001
+        log.warning("health 未确认告警读取失败（退化为仅本轮内去重）")
+        seen = set()
     n = 0
     for detail in details:
-        src = "health"
-        if src in pending:
-            continue                        # 未确认断档仍在，不重复轰炸
+        key = _dedup_key(detail)
+        if key in seen:
+            continue
+        seen.add(key)
         try:
-            alerts.record("WARN", src, detail)
-            n += 1
-            pending.add(src)
-        except Exception:                    # noqa: BLE001
+            if alerts.record_dedup("WARN", "health", detail) is not None:
+                n += 1
+        except Exception:                        # noqa: BLE001
             log.warning("health 告警入队失败：%s", detail)
     return n
 

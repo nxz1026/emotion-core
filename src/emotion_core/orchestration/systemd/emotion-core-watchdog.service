@@ -1,0 +1,27 @@
+[Unit]
+Description=Emotion Core Link Watchdog
+# 刻意**不** Requires/After=emotion-core-daily.service：看门狗必须在主链死亡时
+# 照常运行，否则就是自己监控自己（2026-09-27~09-28 四次 daily 崩溃的根因）。
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/DSH/emotion-core
+ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.orchestration.watchdog
+Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+Environment=DB_CONFIG=/home/ubuntu/.dbconfig
+# webhook 地址走环境变量（notify._cfg），可在 drop-in 里补：
+#   /etc/systemd/system/emotion-core-watchdog.service.d/webhook.conf
+#   [Service]
+#   Environment=EMOTION_LKL_WEBHOOK_URL=https://qyapi.weixin.qq.com/...
+# 不放仓库：它是部署期密配置，与策略配置正交（改 CONFIG 会改 config_hash()）。
+StandardOutput=journal
+StandardError=journal
+# 退出码 1 = 检出断档，保持为失败态，使 `systemctl --failed` 立刻可见。
+# 这是"监控自己也要可被监控"的前提，不要加 SuccessExitStatus=1。
+
+[Install]
+WantedBy=multi-user.target

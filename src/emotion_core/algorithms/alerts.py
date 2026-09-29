@@ -25,6 +25,7 @@ acked_at 置位（未 ack = 待处理队列）；去重按 **同 source 同 deta
 """
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
@@ -87,15 +88,21 @@ def ack(ids: list[int]) -> int:
 def _push(md: str, trade_date: Any = None) -> bool:
     """webhook 触达接缝（唯一知道 notify 的地方）：延迟导入，notify 未就位则静默跳过。
 
-    notify（第 10 层，默认关）尚未搬运：此处 catch ImportError 返回 False 并记 warning，
-    不把「可选触达缺层」升级成 pipeline 崩溃（lkl notify.push 的失败也是不抛的）。
+    ★2026-09-29 修：原写 `from emotion_core.algorithms import notify`，而 notify 实际
+    落在 `emotion_core.services`（本仓第 10 层已搬运）——该 ImportError 恒成立，于是每次
+    推送都走 except 分支记「notify 未就位」。**告警因此从未真正离开过本机**：2026-09-27
+    ~09-28 连续 4 次 daily 失败全部只落了 alert 表，webhook 一条没发出去。现按 services
+    优先、algorithms 兜底两路试，任一缺失仍降级为 False（lkl notify.push 的失败也是不抛的）。
     """
-    try:
-        from emotion_core.algorithms import notify
-    except ImportError:
-        log.warning("notify 未就位（第 10 层，默认关），webhook 推送跳过")
-        return False
-    return notify.push(md, trade_date)
+    for modpath in ("emotion_core.services.notify",
+                    "emotion_core.algorithms.notify"):
+        try:
+            notify = importlib.import_module(modpath)
+        except ImportError:
+            continue
+        return notify.push(md, trade_date)
+    log.warning("notify 模块在 services/ 与 algorithms/ 均未找到，webhook 推送跳过")
+    return False
 
 
 def push_pending_webhook() -> None:

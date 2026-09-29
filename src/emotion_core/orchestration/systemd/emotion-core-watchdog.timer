@@ -1,0 +1,14 @@
+[Unit]
+Description=Emotion Core Link Watchdog Timer
+Requires=emotion-core-watchdog.service
+
+[Timer]
+# 两拍：① 18:05 主链（17:20）跑完后当晚即知；② 08:50 盘前再确认一次，
+# 兜住周末/节假日 Persistent 补跑与前夜宕机。与 daily 的 17:20 刻意错开。
+OnCalendar=Mon-Fri 18:05
+OnCalendar=Mon-Fri 08:50
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
