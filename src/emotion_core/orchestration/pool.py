@@ -68,10 +68,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         from emotion_core.services import ingest
+        from emotion_core.utils.fetch import retry_fetch
         for d in days:
             for ptype, (fn, _m) in ingest._POOLS.items():
                 try:
-                    df = ingest._retry(fn, date=d.strftime("%Y%m%d"))
+                    df = retry_fetch(fn, date=d.strftime("%Y%m%d"))
                     print(f"{d} {ptype}: {len(df)} 行")
                 except Exception as exc:  # noqa: BLE001
                     print(f"{d} {ptype}: FAIL {type(exc).__name__}: {exc}")
