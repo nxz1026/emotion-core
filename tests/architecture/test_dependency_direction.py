@@ -62,17 +62,12 @@ _DEBT: dict[tuple[str, str, str], str] = {
     ("algorithms", "services", "algorithms/ladder.py"): (
         "经 services.ladder_service 取数；最终方案应由 orchestration 注入"
     ),
-    ("algorithms", "services", "algorithms/doctor.py"): (
-        "自检脚本经 services.provider_service 取数做离线诊断；最终方案应由 orchestration 注入"
-    ),
+    # algorithms/doctor.py 已偿还（2026-09-29）：provider 函数改为参数注入
     # C 类 algorithms → services：review 包静态引用 services（2026-09-29 验收，待偿还）
     ("algorithms", "services", "algorithms/review/__init__.py"): (
         "review 子包静态 import services.* 做报告生成；应改走 orchestration 注入"
     ),
-    # 旁支 llm → services：agnes 客户端反向引用 services 的 llm_backend（2026-09-29 发现）
-    ("llm", "services", "llm/agnes.py"): (
-        "agnes 客户端 import services/llm_backend 复用后端配置；应将共享逻辑下沉到 llm/base 或 domain"
-    ),
+    # llm/agnes.py 已偿还（2026-09-29）：自持密钥解析，无 services 依赖
 }
 
 

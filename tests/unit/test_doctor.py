@@ -3,10 +3,10 @@
 语义来源 lkl/services/doctor.py（无同名 lkl 测试，用例按源文件分支重写）；
 差异仅限 IO 适配（见 doctor.py 模块文档）：读库走 utils.db.query_df、now_sh 用
 ZoneInfo 等价式、TRADE_DIR 未收录时取仓库根/trade、LLM/webhook 经 _cfg、
-providers 延迟 import 落到既有降级分支。
+providers 经参数注入（无模块级 import）。
 
 IO 全部桩掉（query_df / CONFIG / cwd / trade 目录探针 / halt 停机开关 /
-providers 包与 ProviderError），真实库对账另跑（编排者阶段）。
+providers 函数），真实库对账另跑（编排者阶段）。
 """
 from __future__ import annotations
 
@@ -216,34 +216,33 @@ class TestCheckOptional:
 # ────────────────────────── _check_provider_consistency ──────────────────────────
 
 class ProviderError(Exception):
-    """lkl providers.base.ProviderError 的同形替身（类身份跨 install 复用）。"""
+    """Provider 错误同形替身。"""
 
 
-def install_providers(monkeypatch, *, main: dict | Exception, backup: dict | Exception):
-    """桩 providers 包：eastmoney（主源）/ pytdx / sina（备源）与 ProviderError。"""
+def make_providers(monkeypatch, *, main: dict | Exception, backup: dict | Exception):
+    """构造 provider 函数并注入到 doctor 调用。
 
+    fetch_daily_bars_fn(provider_name, code, start, end) — 4 参数
+    provider.fetch_daily_bars(code, start, end) — 3 参数
+    返回 (fetch_daily_bars_fn, get_provider_fn, provider_error_fn)。
+    """
     def fetch(code, start, end):
         if isinstance(backup, Exception):
             raise backup
         return pd.DataFrame({"close": [backup[code]]})
 
-    def fetch_main(code, start, end):
+    def fetch_main(provider_name, code, start, end):
         if isinstance(main, Exception):
             raise main
         return pd.DataFrame({"close": [main[code]]})
 
-    base = types.ModuleType("emotion_core.data.providers.base")
-    base.ProviderError = ProviderError
-    eastmoney = types.ModuleType("emotion_core.data.providers.eastmoney")
-    eastmoney.PROVIDER = SimpleNamespace(fetch_daily_bars=fetch_main)
-    pytdx = types.ModuleType("emotion_core.data.providers.pytdx_provider")
-    pytdx.PROVIDER = SimpleNamespace(fetch_daily_bars=fetch)
-    sina = types.ModuleType("emotion_core.data.providers.sina")
-    sina.PROVIDER = SimpleNamespace(fetch_daily_bars=fetch)
-    pkg = types.ModuleType("emotion_core.data.providers")
-    pkg.base, pkg.eastmoney, pkg.pytdx_provider, pkg.sina = base, eastmoney, pytdx, sina
-    for mod in (pkg, base, eastmoney, pytdx, sina):
-        monkeypatch.setitem(sys.modules, mod.__name__, mod)
+    def get_provider(name):
+        return SimpleNamespace(fetch_daily_bars=fetch)
+
+    def provider_error_fn():
+        return ProviderError
+
+    return fetch_main, get_provider, provider_error_fn
 
 
 class TestCheckProviderConsistency:
@@ -257,68 +256,83 @@ class TestCheckProviderConsistency:
         stub_config(monkeypatch)                                       # CONFIG 无该键
         assert doctor._check_provider_consistency() == (True, "日线备源链关闭")
 
-    def test_providers_absent_warns_and_skips(self, monkeypatch, caplog):
-        """第 8 层 providers 未搬 → 延迟 import 失败，落既有降级分支（不新增分支）。"""
+    def test_providers_absent_skips(self, monkeypatch):
+        """无注入 → 静默跳过（离线诊断不强制依赖 services）。"""
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
-        for name in ("base", "eastmoney", "pytdx_provider", "sina"):
-            monkeypatch.setitem(sys.modules, f"emotion_core.data.providers.{name}", None)
-        with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
-            assert doctor._check_provider_consistency() == (
-                True, "日线双源不可用，静默跳过")
-        msgs = [r.getMessage() for r in caplog.records]
-        assert len(msgs) == 1
-        assert msgs[0].startswith("日线双源体检跳过：")
+        assert doctor._check_provider_consistency() == (
+            True, "日线双源未注入，跳过备源体检")
 
     def test_no_sample(self, monkeypatch):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=7)
-        install_providers(monkeypatch, main={}, backup={})
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch, main={}, backup={})
         seen = stub_query(monkeypatch, lambda sql, p: pd.DataFrame(columns=["code", "date"]))
-        assert doctor._check_provider_consistency() == (True, "无日线样本，跳过备源体检")
-        assert seen == [(SAMPLE_SQL, (7,))]                            # SQL + 抽样数经 _cfg
+        assert doctor._check_provider_consistency(
+            fetch_daily_bars_fn=fetch_fn,
+            get_provider_fn=get_prov_fn,
+            provider_error_fn=err_fn,
+        ) == (True, "无日线样本，跳过备源体检")
+        assert seen == [(SAMPLE_SQL, (7,))]
 
     def test_deviation_alert_threshold(self, monkeypatch, caplog):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
-        install_providers(monkeypatch,
-                          main={"000001": 10.0, "600000": 10.0, "000002": 10.0},
-                          backup={"000001": 10.0, "600000": 10.04, "000002": 10.06})
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch,
+            main={"000001": 10.0, "600000": 10.0, "000002": 10.0},
+            backup={"000001": 10.0, "600000": 10.04, "000002": 10.06})
         sample = pd.DataFrame({"code": ["000001", "600000", "000002"],
                                "date": [date(2026, 9, 25)] * 3})
         seen = stub_query(monkeypatch, lambda sql, p: sample)
         with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
-            assert doctor._check_provider_consistency() == (
-                True, "抽样 3 只，比较 3 组，告警 1 组")                # >0.005 才告警
+            assert doctor._check_provider_consistency(
+                fetch_daily_bars_fn=fetch_fn,
+                get_provider_fn=get_prov_fn,
+                provider_error_fn=err_fn,
+            ) == (True, "抽样 3 只，比较 3 组，告警 1 组")
         assert seen == [(SAMPLE_SQL, (5,))]
         assert [r.getMessage() for r in caplog.records] == [
             "日线双源偏差告警：000002 pytdx偏差0.60%"]
 
     def test_backup_provider_error_skips_code(self, monkeypatch, caplog):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
-        install_providers(monkeypatch, main={"000001": 10.0}, backup=ProviderError("503"))
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch, main={"000001": 10.0}, backup=ProviderError("503"))
         sample = pd.DataFrame({"code": ["000001"], "date": [date(2026, 9, 25)]})
         stub_query(monkeypatch, lambda sql, p: sample)
         with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
-            assert doctor._check_provider_consistency() == (
-                True, "抽样 1 只，比较 0 组，告警 0 组")
+            assert doctor._check_provider_consistency(
+                fetch_daily_bars_fn=fetch_fn,
+                get_provider_fn=get_prov_fn,
+                provider_error_fn=err_fn,
+            ) == (True, "抽样 1 只，比较 0 组，告警 0 组")
         assert caplog.records == []
 
     def test_main_provider_error_skips_row(self, monkeypatch, caplog):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
-        install_providers(monkeypatch, main=ProviderError("boom"), backup={"000001": 10.0})
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch, main=ProviderError("boom"), backup={"000001": 10.0})
         sample = pd.DataFrame({"code": ["000001"], "date": [date(2026, 9, 25)]})
         stub_query(monkeypatch, lambda sql, p: sample)
         with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
-            assert doctor._check_provider_consistency() == (
-                True, "抽样 1 只，比较 0 组，告警 0 组")
+            assert doctor._check_provider_consistency(
+                fetch_daily_bars_fn=fetch_fn,
+                get_provider_fn=get_prov_fn,
+                provider_error_fn=err_fn,
+            ) == (True, "抽样 1 只，比较 0 组，告警 0 组")
         assert caplog.records == []
 
     def test_unknown_fallback_name_skipped(self, monkeypatch):
         """备源链含未注册名字 → providers.get 为 None 跳过（不报错）。"""
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["nosuch"], INGEST_DOCTOR_SAMPLE=5)
-        install_providers(monkeypatch, main={"000001": 10.0}, backup={})
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch, main={"000001": 10.0}, backup={})
         sample = pd.DataFrame({"code": ["000001"], "date": [date(2026, 9, 25)]})
         stub_query(monkeypatch, lambda sql, p: sample)
-        assert doctor._check_provider_consistency() == (
-            True, "抽样 1 只，比较 0 组，告警 0 组")
+        assert doctor._check_provider_consistency(
+            fetch_daily_bars_fn=fetch_fn,
+            get_provider_fn=get_prov_fn,
+            provider_error_fn=err_fn,
+        ) == (True, "抽样 1 只，比较 0 组，告警 0 组")
 
 
 # ────────────────────────── CHECKS / run ──────────────────────────

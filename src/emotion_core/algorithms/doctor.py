@@ -121,20 +121,25 @@ def _check_optional() -> tuple[bool, str]:
     return (True, f"LLM={llm}；webhook={hook}（均默认不参与主链）")
 
 
-def _check_provider_consistency() -> tuple[bool, str]:
-    """抽样比较 EM 与配置备源收盘价；不可用时仅 warning，不阻断 doctor。"""
+def _check_provider_consistency(
+    fetch_daily_bars_fn=None,
+    get_provider_fn=None,
+    provider_error_fn=None,
+) -> tuple[bool, str]:
+    """抽样比较 EM 与配置备源收盘价；不可用时仅 warning，不阻断 doctor。
+
+    参数全部可选：由调用方注入 provider 函数；不注入时走既有降级分支。
+    """
     if not _cfg("INGEST_FALLBACK_CHAIN", []):
         return (True, "日线备源链关闭")
+    # 无注入 → 静默跳过（自检脚本离线诊断，不强制依赖 services）
+    if fetch_daily_bars_fn is None or get_provider_fn is None:
+        return (True, "日线双源未注入，跳过备源体检")
     try:
-        from emotion_core.services.provider_service import (
-            fetch_daily_bars,
-            get_provider,
-            get_provider_error,
-        )
-        ProviderError = get_provider_error()
+        ProviderError = provider_error_fn() if provider_error_fn else Exception
         providers = {
-            "pytdx": get_provider("pytdx"),
-            "sina": get_provider("sina"),
+            "pytdx": get_provider_fn("pytdx"),
+            "sina": get_provider_fn("sina"),
         }
         sample = query_df("SELECT code, max(date) AS date FROM daily_bar GROUP BY code"
                           " ORDER BY code LIMIT %s",
@@ -144,7 +149,7 @@ def _check_provider_consistency() -> tuple[bool, str]:
         alerts, checked = [], 0
         for row in sample.itertuples(index=False):
             try:
-                main = fetch_daily_bars("eastmoney", row.code, row.date, row.date)
+                main = fetch_daily_bars_fn("eastmoney", row.code, row.date, row.date)
                 if main.empty:
                     continue
                 for name in _cfg("INGEST_FALLBACK_CHAIN", []):
