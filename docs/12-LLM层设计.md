@@ -208,9 +208,66 @@ class AgnesClient:
 | **推荐解释** | `recommendation.md` | 直观层 | 关 |
 | **报告生成** | `report.md` | 直观层 | 关 |
 | **个股诊断** | `stock.md` | `/stock/<code>` | 关 |
-| **策略观察** | `strategy.md` | 逻辑层 | 关 |
+| **策略观察** | `llm/strategies/*.yaml`（15 个） | 编排层 | 关 |
 
-**所有场景默认关闭**。启用方式：设置环境变量 `LLM_PROFILE=agnes`。
+**所有场景默认关闭**。前 4 个场景的启用方式：设置环境变量 `LLM_PROFILE=agnes`。
+
+**策略观察例外**：它多一道独立门 `EC_STRATEGY_ENABLED`（见 §6.1），
+`LLM_PROFILE` 只决定用哪个后端，不决定开关。
+
+### 6.1 策略观察子系统（DSA 移植）
+
+移植自 `daily_stock_analysis`（MIT，见 `docs/archive-lkl/adr/0003-m9-dsa-integration.md`），
+只搬模块思想、不合并仓库，因此**无运行时依赖**。
+
+```
+src/emotion_core/services/strategy/
+├── context.py    67 行   组装个股上下文（行情/涨停/情绪）注入 prompt
+├── loader.py    125 行   纯 stdlib YAML 子集加载器 → Skill 数据类
+├── runner.py    184 行   主流程：门控 → 加载技能 → 建票池 → 调 LLM → 落库
+└── universe.py   37 行   当日票池
+
+src/emotion_core/llm/strategies/*.yaml    15 个策略
+```
+
+15 个策略：`bottom_volume` `box_oscillation` `bull_trend` `chan_theory` `dragon_head`
+`emotion_cycle` `event_driven` `expectation_repricing` `growth_quality` `hot_theme`
+`ma_golden_cross` `one_yang_three_yin` `shrink_pullback` `volume_breakout` `wave_theory`
+
+> ⚠️ 每个 YAML 首行是 MIT 出处署名，**不得删除**（删掉即违反 DSA 的 MIT 许可）：
+> `# Ported from daily_stock_analysis (MIT, Copyright (c) 2026 ZhuLinsen), adapted to lkl data context`
+
+**两道门，缺一不可**（`runner.py:run_for_date`）：
+
+| 次序 | 位置 | 条件 | 关闭时行为 |
+|---|---|---|---|
+| 1 | `runner.py:98` | `CONFIG.STRATEGY_ENABLED` ← `EC_STRATEGY_ENABLED` | 打一条 `策略观察已关闭` 后返回 0 |
+| 2 | `runner.py:105` | `STRATEGY_DIR` 解析出的技能非空 **且** 票池非空 | 打一条 `skills=N codes=M, 跳过` 后返回 0 |
+
+**`STRATEGY_DIR` 锚点契约**（`runner.py:22`）：
+
+```python
+STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
+#                                        ^^^^^^^^^^ 必须是包根 emotion_core
+```
+
+`runner.py` 位于 `emotion_core/services/strategy/`，往上数三层（`strategy` → `services`
+→ `emotion_core`）才是包根，故用 `parents[2]`。历史上误写成 `parents[3]`（旧 LKL 布局的层级），
+解析到不存在的 `src/llm/strategies`；而 `load_strategies()` 对不存在的目录
+`glob("*.yaml")` **返回空列表且不抛异常**，于是直接掉进第 2 道门的「跳过」分支 ——
+15 个策略一个不跑、不落库、无告警，是典型的静默失败。
+回归锁在 `tests/unit/test_strategy_runner.py`（11 项断言）。
+
+**调度**：`deploy/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
+（`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
+
+```bash
+sudo systemctl start emotion-core-strategy.service
+# 或
+PYTHONPATH=src .venv/bin/python -m emotion_core.orchestration.strategy --date 2026-09-29
+```
+
+**输出**：只写 `strategy_signal` 表，主链不读它 —— 策略观察是旁路观察，不参与信号生成。
 
 ---
 

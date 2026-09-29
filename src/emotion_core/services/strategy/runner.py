@@ -19,7 +19,7 @@ from .universe import build_universe
 
 log = logging.getLogger(__name__)
 
-STRATEGY_DIR = Path(__file__).resolve().parents[3] / "llm" / "strategies"
+STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 _CONTRACT = ('只输出 JSON：{"action":"BUY|WATCH|PASS","score":0-100,'
              '"confidence":0-1,"reason":"≤80字中文","evidence":{"k1":"v1"}}。')
 _COLS = ["trade_date", "code", "strategy", "prompt_hash", "name", "action",
