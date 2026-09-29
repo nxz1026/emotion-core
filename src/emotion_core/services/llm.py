@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import httpx
 
 from emotion_core.services.llm_backend import (
+    LLM_PROFILES,
     LLMNotConfigured,
     LLMChainExhausted,
     resolve_chain,
@@ -33,32 +34,6 @@ def _cfg(name, default):
     return getattr(CONFIG, name, default)
 
 
-LLM_PROFILES = _cfg("LLM_PROFILES", {
-    "default": {
-        "base_url": "https://token.sensenova.cn/v1",
-        "model": "glm-5.2",
-        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
-        "timeout": 120, "max_retry": 2,
-    },
-    "fast": {
-        "base_url": "https://token.sensenova.cn/v1",
-        "model": "deepseek-v4-flash",
-        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
-        "timeout": 30, "max_retry": 2,
-    },
-    "smart": {
-        "base_url": "https://token.sensenova.cn/v1",
-        "model": "sensenova-6.8-flash-lite",
-        "temperature": 0.3, "max_tokens": 4096, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
-    },
-    "agnes": {
-        "base_url": "https://apihub.agnes-ai.com/v1",
-        "model": "agnes-3.0-flash",
-        "temperature": 0.2, "max_tokens": 8192, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
-    },
-})
 LLM_ENABLED = _cfg("LLM_ENABLED", os.environ.get(
     "LKL_LLM_ENABLED", "").lower() in ("1", "true", "yes"))
 
