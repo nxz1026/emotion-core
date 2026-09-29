@@ -126,10 +126,16 @@ def _check_provider_consistency() -> tuple[bool, str]:
     if not _cfg("INGEST_FALLBACK_CHAIN", []):
         return (True, "日线备源链关闭")
     try:
-        from emotion_core.data.providers.base import ProviderError
-        from emotion_core.data.providers.eastmoney import PROVIDER as eastmoney
-        from emotion_core.data.providers import pytdx_provider, sina
-        providers = {"pytdx": pytdx_provider.PROVIDER, "sina": sina.PROVIDER}
+        from emotion_core.services.provider_service import (
+            fetch_daily_bars,
+            get_provider,
+            get_provider_error,
+        )
+        ProviderError = get_provider_error()
+        providers = {
+            "pytdx": get_provider("pytdx"),
+            "sina": get_provider("sina"),
+        }
         sample = query_df("SELECT code, max(date) AS date FROM daily_bar GROUP BY code"
                           " ORDER BY code LIMIT %s",
                           (_cfg("INGEST_DOCTOR_SAMPLE", 5),))
@@ -138,7 +144,7 @@ def _check_provider_consistency() -> tuple[bool, str]:
         alerts, checked = [], 0
         for row in sample.itertuples(index=False):
             try:
-                main = eastmoney.fetch_daily_bars(row.code, row.date, row.date)
+                main = fetch_daily_bars("eastmoney", row.code, row.date, row.date)
                 if main.empty:
                     continue
                 for name in _cfg("INGEST_FALLBACK_CHAIN", []):
