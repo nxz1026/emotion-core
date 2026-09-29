@@ -340,6 +340,28 @@ def checklist_secondary(cand: Cand, window: str, as_of: date | None = None) -> C
     return cl
 
 
+def rows(cand: Cand, window: str, min_days: int | None = None,
+         as_of: date | None = None, secondary: bool = False) -> list[Row]:
+    """五条件 + W- 警告的**带说明**行（落库/报告用），顺序同 `entry._persist`。
+
+    `checklist()` 只回布尔投影，把 `_evaluate` 已经算好的 note 丢掉了。复盘报告
+    §⑦「空仓理由」要逐条显示「卡在哪一档、为什么」，只有布尔无从下笔。判定
+    仍以 `passed_of()` 为唯一聚合器——报告展示与实盘口径同源，不另立规则。
+
+    secondary=True 走次级阈值与次级 c3（`checklist_secondary` 的同一组参数）。
+    """
+    if secondary:
+        _, out = _evaluate(cand, window, min_days=SECONDARY_MIN_LEADER_DAYS,
+                           diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
+                           as_of=as_of, conditions=_SECONDARY_CONDITIONS,
+                           include_peer=True)
+        return out
+    md = MIN_LEADER_DAYS if min_days is None else min_days
+    _, out = _evaluate(cand, window, min_days=md,
+                       diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of)
+    return out
+
+
 def passed_of(cl: Checklist) -> bool:
     """P1-1：唯一聚合器——实盘/回测/报告共用同一通过规则。
 

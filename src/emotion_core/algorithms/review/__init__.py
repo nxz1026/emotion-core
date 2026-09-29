@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from emotion_core.algorithms.review.utils import (
 from emotion_core.services import notify, position
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import prev_trading_day
-from emotion_core.utils.db import execute, query_df
+from emotion_core.utils.db import connect_ro, execute, query_df
 
 log = logging.getLogger("emotion_core.review")
 
@@ -79,12 +80,103 @@ def _signal_of_day_secondary(trade_date: date) -> dict | None:
     return row
 
 
+# W- 警告行在 entry._WARNINGS 里的标签前缀（"W1 同身位扎堆"）；条件行是 c1..c5。
+_WARN_PREFIX = "W"
+
+
+def _split_rows(rows: list) -> tuple[list, list]:
+    """(标签, ok, 说明) 行 → (条件行, W- 警告行)。按标签前缀拆，不看位置。
+
+    不复用 `entry.split_checklist`：那是对 `Checklist` **布尔投影**做的结构化
+    分离（返回 Checklist + WarningOnly），而报告拿到的已经是落库的说明行三元组
+    ——`entry._persist` 存的就是它，JSON 读回来是 list 而非 dataclass。
+    """
+    return ([r for r in rows if not r[0].startswith(_WARN_PREFIX)],
+            [r for r in rows if r[0].startswith(_WARN_PREFIX)])
+
+
+def _passed_of_rows(rows: list) -> bool:
+    """行版的 `Checklist.passed`：只看条件行，filter UNKNOWN 后全 True 才算过。
+
+    与 `domain.signal.Checklist.passed` 逐条等价（`entry.passed_of` 转发同一
+    实现）——报告不另立通过规则，避免与实盘口径漂移。
+    """
+    conds, _ = _split_rows(rows)
+    return all(ok is True for _, ok, _ in conds if ok is not None)
+
+
+@dataclass(frozen=True)
+class LadderRow:
+    """梯队行 + 质量列（报告展示用）。
+
+    `ladder_day` 表只存梯队判定，故 emotion-core 的 `LadderDay` 不带 lkl
+    `LadderRow` 自带的 name/turnover_rate/bomb_times——而 `_ladder_tag`、
+    `_seal_notes`、§①唯一高标、§⑦无信号理由都要读这三列。口径与
+    `entry._VIEW_SQL` 一致（换手率 daily_bar 兜底、炸板次数取东财 ZT 池）。
+
+    刻意做成**扁平** dataclass 而非「包装 + __getattr__ 透传」：JSON 出口走
+    `utils._jsonable` → `dataclasses.asdict`，包装对象只会吐出包装层字段、
+    把 code/cont_days 整个丢掉。
+    """
+
+    date: date
+    code: str
+    cont_days: int
+    is_exchange: bool
+    is_top: bool
+    is_sole_top: bool
+    y_top_group_count: int
+    y_top_survivor_count: int
+    name: str
+    turnover_rate: float | None
+    bomb_times: int | None
+
+
+_VIEW_SQL = """
+SELECT s.code, s.name,
+       COALESCE(p.turnover_rate, b.turnover_rate) AS turnover_rate,
+       p.bomb_times
+FROM stock_basic s
+LEFT JOIN daily_bar b ON b.code = s.code AND b.date = %(d)s
+LEFT JOIN limit_pool_em p ON p.code = s.code AND p.date = %(d)s
+     AND p.pool_type = 'ZT'
+WHERE s.code = ANY(%(codes)s)
+"""
+
+
+def ladder_view(trade_date: date, rows: list) -> list[LadderRow]:
+    """给梯队行补齐质量列。缺失即 None，不补零（与 `entry._candidate_view` 同口径）。
+
+    一次 SQL 取齐当日全部候选：`_ladder_tag` 是逐行调用的，按行查库会退化成
+    N+1（09-28 有 7 行梯队，回放 20 个交易日就是上百次往返）。
+    """
+    if not rows:
+        return []
+    with connect_ro() as conn:
+        got = conn.execute(_VIEW_SQL, {"d": trade_date,
+                                      "codes": [r.code for r in rows]}).fetchall()
+    q = {r[0]: (r[1] or "", r[2], r[3]) for r in got}
+    out = []
+    for r in rows:
+        nm, turn, bomb = q.get(r.code, ("", None, None))
+        out.append(LadderRow(
+            date=r.date, code=r.code, cont_days=r.cont_days,
+            is_exchange=r.is_exchange, is_top=r.is_top,
+            is_sole_top=r.is_sole_top,
+            y_top_group_count=r.y_top_group_count,
+            y_top_survivor_count=r.y_top_survivor_count,
+            name=nm,
+            turnover_rate=None if turn is None else float(turn),
+            bomb_times=None if bomb is None else int(bomb)))
+    return out
+
+
 def elimination_rows(trade_date: date) -> list[dict]:
     """昨日最高板组 → 今日各自结果（晋级/炸板未封/断板/停牌）。"""
     prev = prev_trading_day(trade_date)
     if prev is None:
         return []
-    y_tg = ladder.top_group(ladder.build(prev))
+    y_tg = ladder_view(prev, ladder.top_group(ladder.build(prev)))
     if not y_tg:
         return []
     df = query_df(
@@ -157,7 +249,9 @@ def _seal_map(trade_date: date) -> dict[str, tuple[str, str]]:
 
 def collect(trade_date: date) -> dict:
     """聚合报告所需全部数据（一次取齐，渲染函数纯格式化）。"""
-    rows = ladder.build(trade_date)
+    # 补质量列：ladder.build 给的是 LadderDay（无 name/bomb_times），
+    # 下面 sole / ladder_rows 直接进渲染段，缺列会 AttributeError。
+    rows = ladder_view(trade_date, ladder.build(trade_date))
     d = {
         "date": trade_date,
         "stat": _market_stat_row(trade_date),
@@ -538,8 +632,8 @@ def _sec_advice(d: dict) -> str:
         lines.append("")
     if d["signal"]:
         sig = d["signal"]
-        conds, warns = entry.split_checklist(sig["checklist"])
-        passed = entry.passed_of(sig["checklist"])
+        conds, warns = _split_rows(sig["checklist"])
+        passed = _passed_of_rows(sig["checklist"])
         verdict = "✅ 通过（ALL GREEN）" if passed else "❌ 未通过（有否决项）"
         lines.append(f"**买入信号**：{sig['reason']}（窗口 {sig['buy_window']}）")
         lines.append("")
@@ -577,8 +671,8 @@ def _sec_secondary_block(sec: dict | None) -> list[str]:
     """
     if not sec:
         return []
-    conds, warns = entry.split_checklist(sec["checklist"])
-    passed = entry.passed_of(sec["checklist"])
+    conds, warns = _split_rows(sec["checklist"])
+    passed = _passed_of_rows(sec["checklist"])
     verdict = "✅ 通过（ALL GREEN）" if passed else "❌ 未通过（有否决项）"
     lines = ["", f"**次级推荐**：{sec['reason']}（窗口 {sec['buy_window']}"
              "，放宽阈值 c3/c4/c5）"]
@@ -632,8 +726,9 @@ def _no_signal_reason(d: dict) -> str:
     cand = d["sole"]
     if cand is None:
         return "**空仓理由**：无唯一换手高标候选（梯队断层或一字垄断）"
-    cl = entry.checklist(cand, d["window"])
-    conds, warns_raw = entry.split_checklist(cl)
+    # 用 rows 而非 checklist()：这里要的是带说明的行（逐条讲清卡在哪），
+    # checklist() 只回布尔投影。判定聚合仍走同一套阈值，见 entry.rows 文档。
+    conds, warns_raw = _split_rows(entry.rows(cand, d["window"]))
     fails = [f"{n}: {note}" for n, ok, note in conds if not ok]
     warns = [note for _, _, note in warns_raw if "⚠" in note]
     head = "**候选通过，未成全信号**" if not fails else \

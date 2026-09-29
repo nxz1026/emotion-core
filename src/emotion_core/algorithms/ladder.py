@@ -110,6 +110,20 @@ def y_survivors(trade_date: date) -> set[str]:
     return y_codes & load_exchange_codes(trade_date)
 
 
+def y_competition(trade_date: date) -> tuple[int, int]:
+    """R2 淘汰赛况 (g, s) = (昨日最高换手组只数, 今日幸存只数)。
+
+    g 是竞争面、s 是幸存面；`entry.c3_elimination` 要求 g>=2 且 s==1。
+    仓内原先只有 `entry._ctx` 内联算这一对数，复盘报告 §①/§⑦ 要展示同一口径，
+    故提为 ladder 域函数。语义不变：昨日组取 `top_group`（换手板口径，一字板
+    不参与竞争），幸存取 `y_survivors`（昨日组成员中今日仍换手者）。
+    """
+    prev = prev_trading_day(trade_date)
+    if prev is None:
+        return (0, 0)
+    return (len(top_group(build(prev))), len(y_survivors(trade_date)))
+
+
 def _guard_no_data(trade_date: date) -> None:
     """上游完整性凭证（lkl P2）：derived_bar 当日 0 行 = 缺数日，禁止当「合法零」。
 
