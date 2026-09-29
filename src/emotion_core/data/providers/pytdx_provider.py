@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import threading
-import time
+import threading
 from datetime import date
 
 import pandas as pd
@@ -23,6 +23,7 @@ from emotion_core.data.providers.base import (
     ProviderError,
     normalize_frame,
 )
+from emotion_core.utils.fetch import retry_fetch
 
 # TDX 服务器列表（可通过环境变量 TDX_HOSTS 覆盖，格式 "host:port,host:port"）
 import os as _os
@@ -43,29 +44,7 @@ def _parse_tdx_hosts() -> list:
 
 _TDX_HOSTS = _parse_tdx_hosts()
 
-
-# 重试参数（值同 lkl config.py: FETCH_RETRY=3, TIME_SLEEP=0.5）
-_FETCH_RETRY = 3
-_TIME_SLEEP = 0.5
-
-_tls = threading.local()
-
-
-def _retry(fn, *args, **kw):
-    """带重试调用：_FETCH_RETRY 次，指数退避；末次异常上抛。"""
-    last: Exception | None = None
-    for i in range(_FETCH_RETRY):
-        try:
-            time.sleep(_TIME_SLEEP)
-            return fn(*args, **kw)
-        except DataError:
-            raise                             # 协议变化，重试无意义
-        except Exception as exc:  # noqa: BLE001 —— 网络源异常类型不定
-            last = exc
-            if "只能获取最近" in str(exc):  # EM 池历史硬限，重试无意义
-                raise
-            time.sleep(2 ** i)
-    raise last  # type: ignore[misc]
+_TLS = threading.local()
 
 
 def _tdx():
@@ -101,7 +80,7 @@ def _tdx_all_bars(market: int, code: str, until: date) -> list:
     out: list = []
     offset = 0
     while True:
-        page = _retry(_tdx_bars, market, code, offset)
+        page = retry_fetch(_tdx_bars, market, code, offset, fetch_retry=3, time_sleep=0.5)
         if not page:
             break
         out.extend(page)

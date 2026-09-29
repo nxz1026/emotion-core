@@ -24,6 +24,7 @@ from emotion_core.data.providers.base import (
     BAR_COLS, DataError, FetchError, ProviderError, valid_frame,
 )
 from emotion_core.services import ingest
+from emotion_core.utils.fetch import fetch_json, retry_fetch
 
 
 # ── helpers ───────────────────────────────────────────────────────────
@@ -249,13 +250,10 @@ class TestFallbackRows:
 # ── 4. _retry 语义 ────────────────────────────────────────────────────
 
 class TestRetry:
-    """_retry 的重试与异常传播语义。"""
+    """retry_fetch 的重试与异常传播语义。"""
 
-    def test_fetch_error_retries_then_raises(self, monkeypatch):
-        """FetchError 应重试 FETCH_RETRY 次后上抛。"""
-        monkeypatch.setattr(ingest, "_FETCH_RETRY", 3)
-        monkeypatch.setattr(ingest, "_TIME_SLEEP", 0)
-
+    def test_fetch_error_retries_then_raises(self):
+        """FetchError 应重试 fetch_retry 次后上抛。"""
         call_count = 0
 
         def failing_fn(*a, **kw):
@@ -264,15 +262,12 @@ class TestRetry:
             raise FetchError("HTTP 请求失败", Exception("mock 502"))
 
         with pytest.raises(FetchError):
-            ingest._retry(failing_fn)
+            retry_fetch(failing_fn, fetch_retry=3, time_sleep=0)
 
         assert call_count == 3, f"应重试 3 次，实际 {call_count}"
 
-    def test_data_error_no_retry(self, monkeypatch):
+    def test_data_error_no_retry(self):
         """DataError 应立即上抛，不重试。"""
-        monkeypatch.setattr(ingest, "_FETCH_RETRY", 3)
-        monkeypatch.setattr(ingest, "_TIME_SLEEP", 0)
-
         call_count = 0
 
         def data_err_fn(*a, **kw):
@@ -281,19 +276,16 @@ class TestRetry:
             raise DataError("协议变化 mock")
 
         with pytest.raises(DataError):
-            ingest._retry(data_err_fn)
+            retry_fetch(data_err_fn, fetch_retry=3, time_sleep=0)
 
         assert call_count == 1, "DataError 不应重试"
 
-    def test_successful_call_returns(self, monkeypatch):
+    def test_successful_call_returns(self):
         """正常返回时应立即返回，不重试。"""
-        monkeypatch.setattr(ingest, "_FETCH_RETRY", 3)
-        monkeypatch.setattr(ingest, "_TIME_SLEEP", 0)
-
         def good_fn(*a, **kw):
             return {"ok": True}
 
-        result = ingest._retry(good_fn)
+        result = retry_fetch(good_fn, fetch_retry=3, time_sleep=0)
         assert result == {"ok": True}
 
 
@@ -309,7 +301,7 @@ class TestFetchLimitPoolGuard:
         def raise_runtime(*a, **kw):
             raise RuntimeError("东财接口 mock 502")
 
-        monkeypatch.setattr(ingest, "_retry", raise_runtime)
+        monkeypatch.setattr("emotion_core.services.ingest.retry_fetch", raise_runtime)
 
         with pytest.raises(RuntimeError):
             ingest.fetch_limit_pool(date(2026, 9, 29))
@@ -321,7 +313,7 @@ class TestFetchLimitPoolGuard:
         def return_empty(*a, **kw):
             return pd.DataFrame()
 
-        monkeypatch.setattr(ingest, "_retry", return_empty)
+        monkeypatch.setattr("emotion_core.services.ingest.retry_fetch", return_empty)
 
         with pytest.raises(RuntimeError):
             ingest.fetch_limit_pool(date(2026, 9, 29))
@@ -330,14 +322,14 @@ class TestFetchLimitPoolGuard:
 # ── 6. _get_json 异常分层 ─────────────────────────────────────────────
 
 class TestGetJsonErrorSplit:
-    """_get_json 的 FetchError / DataError 分层语义。"""
+    """fetch_json 的 FetchError / DataError 分层语义。"""
 
     def test_http_error_raises_fetch_error(self, monkeypatch):
         """HTTP 5xx 应包装为 FetchError。"""
-        monkeypatch.setattr(ingest.requests, "get", _make_502_get)
+        monkeypatch.setattr("emotion_core.utils.fetch._do_request", _make_502_get)
 
         with pytest.raises(FetchError):
-            ingest._get_json("https://example.com", {})
+            fetch_json("https://example.com", {})
 
     def test_invalid_json_raises_data_error(self, monkeypatch):
         """非 JSON 响应应包装为 DataError。"""
@@ -345,10 +337,10 @@ class TestGetJsonErrorSplit:
         def bad_json_get(url, *args, **kwargs):
             return _FakeResp(text="not json")
 
-        monkeypatch.setattr(ingest.requests, "get", bad_json_get)
+        monkeypatch.setattr("emotion_core.utils.fetch._do_request", bad_json_get)
 
         with pytest.raises(DataError, match="非 JSON"):
-            ingest._get_json("https://example.com", {})
+            fetch_json("https://example.com", {})
 
     def test_non_dict_response_raises_data_error(self, monkeypatch):
         """dict 以外的 JSON（如 list）应包装为 DataError。"""
@@ -356,10 +348,10 @@ class TestGetJsonErrorSplit:
         def list_json_get(url, *args, **kwargs):
             return _FakeResp(json_data=[1, 2, 3])
 
-        monkeypatch.setattr(ingest.requests, "get", list_json_get)
+        monkeypatch.setattr("emotion_core.utils.fetch._do_request", list_json_get)
 
         with pytest.raises(DataError, match="响应非 dict"):
-            ingest._get_json("https://example.com", {})
+            fetch_json("https://example.com", {})
 
     def test_successful_response(self, monkeypatch):
         """正常 dict 响应应返回。"""
@@ -367,7 +359,7 @@ class TestGetJsonErrorSplit:
         def good_get(url, *args, **kwargs):
             return _FakeResp(json_data={"data": {"total": 100}})
 
-        monkeypatch.setattr(ingest.requests, "get", good_get)
+        monkeypatch.setattr("emotion_core.utils.fetch._do_request", good_get)
 
-        result = ingest._get_json("https://example.com", {})
+        result = fetch_json("https://example.com", {})
         assert result == {"data": {"total": 100}}

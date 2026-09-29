@@ -30,9 +30,10 @@ import akshare as ak
 import pandas as pd
 import requests
 
-from emotion_core.data.providers.base import DataError, FetchError
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import execute, query_df, transaction
+from emotion_core.utils.errors import DataError, FetchError
+from emotion_core.utils.fetch import fetch_json, fetch_json_list, is_positive, retry_fetch
 
 log = logging.getLogger("emotion_core.ingest")
 
@@ -111,22 +112,7 @@ _SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
 # 异常对象与 `data.providers.*` 抛出的那份是同一个类。
 
 
-def _get_json(url: str, params: dict) -> dict:
-    """GET+JSON 解析。P3-4：边界分层——网络故障→FetchError（可重试），
-    协议变化→DataError（不重试直接上抛），调用层可按类型决策。"""
-    try:
-        resp = requests.get(url, params=params, timeout=15,
-                            headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise FetchError("HTTP 请求失败", exc) from exc
-    try:
-        j = resp.json()
-    except ValueError as exc:
-        raise DataError(f"非 JSON 响应: {str(exc)[:60]}") from exc
-    if not isinstance(j, dict):
-        raise DataError(f"响应非 dict: {type(j).__name__}")
-    return j
+
 
 
 # ── 新浪全市场源：EM clist 高频 502 时的回退 ────────────────────────────
@@ -155,28 +141,7 @@ _SINA_TO_EM = {"code": "f12", "name": "f14", "open": "f17", "high": "f15",
                "volume": "f5", "amount": "f6", "turnoverratio": "f8"}
 
 
-def _get_json_list(url: str, params: dict) -> list:
-    """GET+JSON 解析，收数组响应（新浪 Market_Center 返回 list，EM 的 _get_json 只收 dict）。"""
-    try:
-        resp = requests.get(url, params=params, timeout=20, headers=_SINA_HEADERS)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        raise FetchError("新浪请求失败", exc) from exc
-    try:
-        j = resp.json()
-    except ValueError as exc:
-        raise DataError(f"非 JSON 响应: {str(exc)[:60]}") from exc
-    if not isinstance(j, list):
-        raise DataError(f"响应非 list: {type(j).__name__}")
-    return j
 
-
-def _positive(v) -> bool:
-    """数值可转且 > 0。新浪 JSON 里数字是字符串（"1685.000"）。"""
-    try:
-        return float(v) > 0
-    except (TypeError, ValueError):
-        return False
 
 
 def _reject_zero_prices(rows: list[dict]) -> None:
@@ -191,7 +156,7 @@ def _reject_zero_prices(rows: list[dict]) -> None:
     """
     if not rows:
         return
-    priced = sum(1 for r in rows if _positive(r.get("f2")))
+    priced = sum(1 for r in rows if is_positive(r.get("f2")))
     if priced * 2 < len(rows):
         raise DataError(
             f"新浪全市场快照价格异常：{len(rows) - priced}/{len(rows)} 行收盘价为空或 0"
@@ -218,7 +183,7 @@ def _sina_clist(fields: list[str], page: int = 100,
     pn = 1
     while True:
         params = {"page": pn, "num": page, "sort": "symbol", "asc": 1, "node": "hs_a"}
-        rows = _retry(_get_json_list, _SINA_CLIST, params)
+        rows = retry_fetch(fetch_json_list, _SINA_CLIST, params)
         if not rows:
             break
         for r in rows:
@@ -256,7 +221,7 @@ def _em_clist_paged(fs: str, fields: list[str], page: int = 100,
     while True:
         params = {"pn": pn, "pz": page, "po": 1, "np": 1, "fltt": 2, "invt": 2,
                   "fid": "f12", "fs": fs, "fields": ",".join(fields)}
-        data = _retry(_get_json, _EM_CLIST, params).get("data") or {}
+        data = retry_fetch(fetch_json, _EM_CLIST, params).get("data") or {}
         diff = data.get("diff") or []
         out.extend(diff)
         total = data.get("total") or 0
@@ -293,7 +258,7 @@ def _em_data_date_em() -> date:
     """
     params = {"pn": 1, "pz": 100, "po": 1, "np": 1, "fltt": 2, "invt": 2,
               "fid": "f12", "fs": _EM_FS_ALL_A, "fields": "f12,f124"}
-    diff = (_retry(_get_json, _EM_CLIST, params).get("data")
+    diff = (retry_fetch(fetch_json, _EM_CLIST, params).get("data")
             or {}).get("diff") or []
     if not diff:
         raise RuntimeError("EM clist 守卫请求返回空")
@@ -314,21 +279,7 @@ def _em_data_date_em() -> date:
     return winners[-1]
 
 
-def _retry(fn, *args, **kw):
-    """带重试调用：FETCH_RETRY 次，指数退避；末次异常上抛。"""
-    last: Exception | None = None
-    for i in range(_FETCH_RETRY):
-        try:
-            time.sleep(_TIME_SLEEP)
-            return fn(*args, **kw)
-        except DataError:
-            raise                             # P3-4：协议变化，重试无意义
-        except Exception as exc:  # noqa: BLE001 —— 网络源异常类型不定
-            last = exc
-            if "只能获取最近" in str(exc):  # EM 池历史硬限，重试无意义
-                raise
-            time.sleep(2 ** i)
-    raise last  # type: ignore[misc]
+
 
 
 def _upsert_rows(table: str, columns: Sequence[str], rows: list[tuple],
@@ -502,7 +453,7 @@ def fetch_limit_pool(trade_date: date) -> int:
     total, fails, empties = 0, [], []
     for ptype, (fn, mapping) in _POOLS.items():
         try:
-            df = _retry(fn, date=ds)
+            df = retry_fetch(fn, date=ds, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP)
         except Exception as exc:  # noqa: BLE001
             log.warning("pool %s %s 拉取失败: %s", ptype, ds, exc)
             fails.append(ptype)
@@ -642,7 +593,7 @@ def fetch_hot_snapshot(trade_date: date) -> int:
             f"hot 守卫：EM 最新数据日期 {em_date} ≠ 传入 {trade_date}，"
             "人气榜为实时榜单，拒绝写历史日期")
     rows = [(trade_date, d["sc"][2:].zfill(6), int(d["rk"]))
-            for d in _retry(_hot_current) if len(d.get("sc", "")) >= 8]
+            for d in retry_fetch(_hot_current, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP) if len(d.get("sc", "")) >= 8]
     n = _upsert_rows("hot_rank", _HOT_COLS, rows, ["date", "code"])
     log.info("hot snapshot %s：%d 行", trade_date, n)
     return n
