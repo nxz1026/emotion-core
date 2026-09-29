@@ -4,7 +4,21 @@
 
 ---
 
-## [Unreleased] — 2026-10-01
+## [Unreleased] — 2026-10-01 (P2 批次续)
+
+### 新增
+
+- **tests/unit/test_strategy_context.py**: strategy.context 测试 11/11（_value/_daily_text/build_stock_context + 最大长度断言）
+- **tests/unit/test_strategy_universe.py**: strategy.universe 测试 11/11（_codes/build_universe + 去重/主板过滤/上限）
+
+### 文档
+
+- **docs/06**: T16 标记完成
+- **docs/15**: 测试数量 1372→1394
+
+---
+
+## [Unreleased] — 2026-10-01 (P2 批次)
 
 ### 新增
 
