@@ -57,42 +57,64 @@
                     <span id="cal-summary">选择快照日期</span>
                     <span class="muted">（{{ calendar.month_label }} · 本月 {{ calendar.month_days }} 个快照日；只有高亮的日期有快照）</span>
                 </summary>
-                <div class="calendar">
-                    <div class="cal-head">
-                        <a class="cal-nav {% if not calendar.prev_has_data %}disabled{% endif %}"
-                           href="{{ request_path }}?month={{ calendar.prev_month }}&date={{ banner.selected }}">‹ {{ calendar.prev_month }}</a>
-                        <strong>{{ calendar.month_label }}</strong>
-                        <a class="cal-nav {% if not calendar.next_has_data %}disabled{% endif %}"
-                           href="{{ request_path }}?month={{ calendar.next_month }}&date={{ banner.selected }}">{{ calendar.next_month }} ›</a>
-                    </div>
-                    <table class="cal-grid">
-                        <thead>
-                            <tr>{% for w in calendar.weekday_labels %}<th>{{ w }}</th>{% endfor %}</tr>
-                        </thead>
-                        <tbody>
-                            {% for week in calendar.weeks %}
-                            <tr>
-                                {% for c in week %}
-                                <td class="cal-cell">
-                                    {% if c.has_data %}
-                                    <a class="cal-day has-data {% if c.is_selected %}selected{% endif %} {% if c.is_latest %}latest{% endif %} {% if not c.in_month %}out{% endif %}"
-                                       href="{{ request_path }}?date={{ c.iso }}"
-                                       title="{{ c.iso }}{% if c.is_latest %}（最新快照）{% endif %}">{{ c.day }}</a>
-                                    {% else %}
-                                    <span class="cal-day no-data {% if not c.in_month %}out{% endif %}"
-                                          title="{{ c.iso }} 无快照（非交易日或当日未跑）">{{ c.day }}</span>
-                                    {% endif %}
-                                </td>
+                <div class="cal-row">
+                    <div class="calendar">
+                        <div class="cal-head">
+                            <a class="cal-nav {% if not calendar.prev_has_data %}disabled{% endif %}"
+                               href="{{ request_path }}?month={{ calendar.prev_month }}&date={{ banner.selected }}">‹ {{ calendar.prev_month }}</a>
+                            <strong>{{ calendar.month_label }}</strong>
+                            <a class="cal-nav {% if not calendar.next_has_data %}disabled{% endif %}"
+                               href="{{ request_path }}?month={{ calendar.next_month }}&date={{ banner.selected }}">{{ calendar.next_month }} ›</a>
+                        </div>
+                        <table class="cal-grid">
+                            <thead>
+                                <tr>{% for w in calendar.weekday_labels %}<th>{{ w }}</th>{% endfor %}</tr>
+                            </thead>
+                            <tbody>
+                                {% for week in calendar.weeks %}
+                                <tr>
+                                    {% for c in week %}
+                                    <td class="cal-cell">
+                                        {% if c.has_data %}
+                                        <a class="cal-day has-data {% if c.is_selected %}selected{% endif %} {% if c.is_latest %}latest{% endif %} {% if not c.in_month %}out{% endif %}"
+                                           href="{{ request_path }}?date={{ c.iso }}"
+                                           title="{{ c.iso }}{% if c.is_latest %}（最新快照）{% endif %}">{{ c.day }}</a>
+                                        {% else %}
+                                        <span class="cal-day no-data {% if not c.in_month %}out{% endif %}"
+                                              title="{{ c.iso }} 无快照（非交易日或当日未跑）">{{ c.day }}</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
                                 {% endfor %}
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                    <div class="cal-legend">
-                        <span><i class="dot dot-latest"></i>最新快照</span>
-                        <span><i class="dot dot-data"></i>有快照</span>
-                        <span><i class="dot dot-selected"></i>当前选中</span>
-                        <span><i class="dot dot-none"></i>无快照（非交易日/未跑）</span>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="cal-sidebar">
+                        <section class="panel">
+                            <h4>最近快照</h4>
+                            <ul class="recent-list">
+                                {% for d in recent_dates %}
+                                <li>
+                                    <a class="recent-link {% if d.is_latest %}is-latest{% endif %} {% if d.is_selected %}is-selected{% endif %}"
+                                       href="{{ request_path }}?date={{ d.iso }}">
+                                        <span class="recent-iso">{{ d.iso }}</span>
+                                        <span class="recent-meta">
+                                            {{ d.weekday }}
+                                            {% if d.is_latest %}<span class="badge badge-success">最新</span>{% endif %}
+                                            {% if d.is_selected %}<span class="badge badge-warning">当前</span>{% endif %}
+                                        </span>
+                                    </a>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </section>
+                        <div class="cal-legend">
+                            <span><i class="dot dot-latest"></i>最新快照</span>
+                            <span><i class="dot dot-data"></i>有快照</span>
+                            <span><i class="dot dot-selected"></i>当前选中</span>
+                            <span><i class="dot dot-none"></i>无快照（非交易日/未跑）</span>
+                        </div>
                         <form class="cal-jump" method="get" action="{{ request_path }}">
                             <input type="date" name="date" value="{{ banner.selected_iso or '' }}"
                                    min="{{ dates_min }}" max="{{ dates_max }}" aria-label="直接指定快照日期">

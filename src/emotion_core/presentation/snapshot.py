@@ -156,6 +156,20 @@ def calendar_ctx(selected: date | None, month: str | None = None,
     }
 
 
+def recent_snapshots_ctx(selected: date | None, limit: int = 10) -> list[dict]:
+    """最近快照日列表（日历侧栏用）：iso + 星期 + 是否最新/选中。"""
+    dates = available_dates()
+    return [
+        {
+            "iso": d.isoformat(),
+            "weekday": _WEEKDAY_CN[d.weekday()],
+            "is_latest": bool(dates) and d == dates[0],
+            "is_selected": d == selected,
+        }
+        for d in dates[:limit]
+    ]
+
+
 def banner_ctx(selected: date | None) -> dict:
     """「当前快照日期」提示条所需数据。"""
     dates = available_dates()

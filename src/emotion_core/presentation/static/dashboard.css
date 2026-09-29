@@ -269,6 +269,9 @@ pre code {
   .header .container { flex-direction: column; gap: 12px; }
   .nav { flex-wrap: wrap; justify-content: center; }
   .stats { grid-template-columns: repeat(2, 1fr); }
+  .cal-row { flex-direction: column; }
+  .calendar { flex: 1 1 auto; width: 100%; max-width: 100%; }
+  .cal-sidebar { flex: 1 1 auto; width: 100%; min-width: 0; }
 }
 
 /* Print */
@@ -433,7 +436,44 @@ pre code {
 .btn-link.disabled { color: var(--text-muted); pointer-events: none; opacity: .5; }
 .snapshot-calendar { padding-bottom: 8px; }
 .snapshot-calendar > summary { cursor: pointer; padding: 4px 0; font-size: 13px; color: var(--text-secondary); }
-.calendar { margin: 8px 0 4px; max-width: 460px; }
+/* B 方案：日历 460px 左侧 + 右侧栏（最近快照 + 图例 + 跳转） */
+.cal-row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.calendar { margin: 8px 0 4px; max-width: 460px; flex: 0 0 460px; }
+.cal-sidebar { flex: 1 1 240px; margin: 8px 0 4px; min-width: 240px; }
+
+.cal-sidebar .panel {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+}
+.cal-sidebar .panel h4 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.recent-list { list-style: none; margin: 0; padding: 0; }
+.recent-list li + li { margin-top: 2px; }
+.recent-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-primary);
+    text-decoration: none;
+    gap: 8px;
+}
+.recent-link:hover { background: var(--bg-tertiary); text-decoration: none; }
+.recent-link.is-latest { background: var(--success-bg); }
+.recent-link.is-selected { background: var(--warning-bg); }
+.recent-iso { font-weight: 600; white-space: nowrap; }
+.recent-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .cal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .cal-nav { color: var(--accent-primary); text-decoration: none; font-size: 12px; }
 .cal-nav.disabled { color: var(--text-muted); pointer-events: none; opacity: .5; }

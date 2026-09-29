@@ -274,6 +274,7 @@ def render_dashboard(layer: str, **extra) -> str:
                       if snapshot.available_dates() else ""),
         "dates_max": (snapshot.available_dates()[0].isoformat()
                       if snapshot.available_dates() else ""),
+        "recent_dates": snapshot.recent_snapshots_ctx(selected),
     }
 
     if layer == "intuitive":
