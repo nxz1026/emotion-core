@@ -4,7 +4,30 @@
 
 ---
 
-## [Unreleased] — 2026-09-29
+## [Unreleased] — 2026-09-30
+
+### 新增
+
+- **services/wind_client.py**: Wind MCP CLI 适配器，窄接口（通用调用 + 配额记账 + 原始响应留存），复用 wind-mcp-skill CLI（8d659fe）
+- **services/ref_limit_rule.py**: 制度规则表 `ref_limit_rule` + 10 条种子数据（主板±10%/创业板±20%/科创板±20%/北交所±30%/ST±5%），查询服务 `get_limit_pct(market, board, as_of)`（8d659fe）
+- **services/ref_security_status.py**: ST 安全状态表 `ref_security_status` + `backfill_security_status()` 服务，对 is_st=true 股票逐只调 Wind `get_stock_events`（8d659fe）
+- **services/wind_manifest.py**: `record_call()` 将每次 Wind 调用落库到 `ops_raw_manifest`（原始 JSON 留存）+ `ops_quota_ledger`（配额消耗账本）（8d659fe）
+- **tests/unit/test_wind_client.py**: WindClient 单测 13/13，覆盖成功/配额/鉴权/参数/超时/空输出/count 递增（8d659fe）
+- **tests/unit/test_ref_limit_rule.py**: 制度规则种子与查询测试 7/7（8d659fe）
+
+### 数据
+
+- **schema.py**: 新增 4 张表 — `ref_limit_rule`, `ref_security_status`, `ops_raw_manifest`, `ops_quota_ledger`；索引 4 条；总表数 23→27（8d659fe）
+
+### 文档
+
+- **docs/06**: P1 T6/T7/T9/T10 标记完成（8d659fe）
+- **docs/15**: 测试数量 1147→1165，总表数 23→27（当前变更）
+- **CHANGELOG**: P1 批次新增条目（当前变更）
+
+---
+
+## [Unreleased] — 2026-09-29 (历史)
 
 ### 修复
 
