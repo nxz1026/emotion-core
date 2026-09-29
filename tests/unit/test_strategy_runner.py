@@ -211,21 +211,29 @@ def _skills(names: list[str]) -> list:
 
 
 def _overrides(max_llm: int, cfg: dict) -> dict:
-    """`_wire` 的配置默认值，允许调用方逐项覆盖（cfg 优先）。"""
-    values = {"STRATEGY_ENABLED": True, "STRATEGY_MAX_LLM": max_llm,
-              "STRATEGY_CALL_INTERVAL": 0.0, "STRATEGY_RETRY_BASE_DELAY": 0.0,
-              "STRATEGY_MAX_ATTEMPTS": 3, "STRATEGY_MAX_CONSECUTIVE_FAILURES": 3}
+    """`_wire` 的 **Config** 覆盖默认值，允许调用方逐项覆盖（cfg 优先）。
+
+    只装 Config 字段。调用侧的定速/退避/熔断旋钮是 runner 的模块级常量
+    （刻意不放进 Config，否则 config_hash() 指纹换代），由 `_wire` 单独
+    monkeypatch 常量本身。
+    """
+    values = {"STRATEGY_ENABLED": True, "STRATEGY_MAX_LLM": max_llm}
     values.update(cfg)
     return values
 
 
 def _wire(monkeypatch, *, skills, codes, store, client, snap,
-          max_llm=6, **cfg):
+          max_llm=6, call_interval=0.0, max_attempts=3,
+          retry_base_delay=0.0, max_consecutive_failures=3, **cfg):
     """装配一个不碰 DB / 网络 / 磁盘的 run_for_date 环境。"""
     import emotion_core.services.llm_backend as backend
 
     conf = dataclasses.replace(REAL_CONFIG, **_overrides(max_llm, cfg))
     monkeypatch.setattr(runner, "CONFIG", conf)
+    monkeypatch.setattr(runner, "CALL_INTERVAL", call_interval)
+    monkeypatch.setattr(runner, "MAX_ATTEMPTS", max_attempts)
+    monkeypatch.setattr(runner, "RETRY_BASE_DELAY", retry_base_delay)
+    monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
     monkeypatch.setattr(runner, "load_strategies", lambda _dir: skills)
     monkeypatch.setattr(runner, "build_universe", lambda _d: codes)
     monkeypatch.setattr(runner, "build_stock_context", lambda _d, _c: "上下文")
@@ -341,7 +349,7 @@ class TestRateLimitResilience:
         store, snap = _FakeSignalStore(), _Snapshots()
         _wire(monkeypatch, skills=_skills(["s1"]),
               codes=[f"c{i}" for i in range(9)], store=store, client=client,
-              snap=snap, max_llm=50, STRATEGY_MAX_CONSECUTIVE_FAILURES=2)
+              snap=snap, max_llm=50, max_consecutive_failures=2)
         runner.run_for_date(TRADE_DATE)
         distinct = {code for _name, code in client.called}
         assert distinct == {"c0", "c1"}, "熔断前只应尝试前 2 个组合"

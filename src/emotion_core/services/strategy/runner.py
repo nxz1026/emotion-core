@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -22,6 +23,18 @@ from .universe import build_universe
 log = logging.getLogger(__name__)
 
 STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
+
+# ── 调用侧定速 / 退避 / 熔断旋钮 ───────────────────────────────
+# 刻意放模块级常量而非 utils/config.py 的 Config：config_hash() 哈希
+# asdict(CONFIG) 的全字段，往 Config 里加键会让 pipeline_state / signal /
+# eval_result 的策略指纹平白换代。env 同名 EC_STRATEGY_* 可覆盖。
+# 另：agnes 单后端时 llm_backend 不重试 429（allow_status_retry 需链长>1），
+# 客户端自带的 max_retry 对限流失效，故这一层防护必须落在调用侧。
+CALL_INTERVAL: float = float(os.environ.get("EC_STRATEGY_CALL_INTERVAL", "1.5"))
+MAX_ATTEMPTS: int = int(os.environ.get("EC_STRATEGY_MAX_ATTEMPTS", "3"))
+RETRY_BASE_DELAY: float = float(os.environ.get("EC_STRATEGY_RETRY_BASE_DELAY", "2.0"))
+MAX_CONSECUTIVE_FAILURES: int = int(
+    os.environ.get("EC_STRATEGY_MAX_CONSECUTIVE_FAILURES", "8"))
 _CONTRACT = ('只输出 JSON：{"action":"BUY|WATCH|PASS","score":0-100,'
              '"confidence":0-1,"reason":"≤80字中文","evidence":{"k1":"v1"}}。')
 _COLS = ["trade_date", "code", "strategy", "prompt_hash", "name", "action",
@@ -54,7 +67,7 @@ def _chat_with_retry(client: Any, messages: list[dict]) -> Any:
     `allow_status_retry=len(chain) > 1` 为假，客户端自带的 max_retry 对
     429 不生效，故限流防护落在调用侧。
     """
-    attempts = max(1, CONFIG.STRATEGY_MAX_ATTEMPTS)
+    attempts = max(1, MAX_ATTEMPTS)
     last: Exception | None = None
     for attempt in range(attempts):
         try:
@@ -63,7 +76,7 @@ def _chat_with_retry(client: Any, messages: list[dict]) -> Any:
             last = exc
             if attempt + 1 >= attempts or not _retryable(exc):
                 raise
-            delay = CONFIG.STRATEGY_RETRY_BASE_DELAY * (2 ** attempt)
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
             log.warning("策略 LLM 限流，%.1fs 后重试（%d/%d）：%s",
                         delay, attempt + 1, attempts, exc)
             time.sleep(delay)
@@ -158,7 +171,7 @@ def run_for_date(trade_date: date) -> int:
             skipped.append({"strategy": skill.name, "code": code,
                             "reason": "达到LLM调用上限"})
             continue
-        if consecutive_failures >= CONFIG.STRATEGY_MAX_CONSECUTIVE_FAILURES:
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             skipped.append({"strategy": skill.name, "code": code,
                             "reason": "连续调用失败熔断"})
             continue
@@ -173,7 +186,7 @@ def run_for_date(trade_date: date) -> int:
         if _existing(trade_date, code, skill.name, prompt_hash):
             continue
         if calls or failed:  # 调用间定速，避免触发上游限流
-            time.sleep(CONFIG.STRATEGY_CALL_INTERVAL)
+            time.sleep(CALL_INTERVAL)
         try:
             reply = _chat_with_retry(client, messages)
         except Exception as exc:

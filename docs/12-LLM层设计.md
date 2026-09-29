@@ -224,8 +224,8 @@ class AgnesClient:
 src/emotion_core/services/strategy/
 ├── context.py    67 行   组装个股上下文（行情/涨停/情绪）注入 prompt
 ├── loader.py    125 行   纯 stdlib YAML 子集加载器 → Skill 数据类
-├── runner.py    237 行   主流程：门控 → 加载技能 → 建票池 → 调 LLM → 落库
-└── universe.py   37 行   当日票池
+├── runner.py    250 行   主流程：门控 → 加载技能 → 建票池 → 调 LLM → 落库
+└── universe.py   66 行   当日票池（ZT/ZB，排除跌停）
 
 src/emotion_core/llm/strategies/*.yaml    15 个策略
 ```
@@ -262,21 +262,39 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 
 | 事项 | 旧行为 | 现行为 |
 |---|---|---|
-| 配额分配 | `for skill: for code:`，上限判在内层 → 首个策略独吞 `STRATEGY_MAX_LLM` 全部名额（实测 15 策略 × 68 只 = 1020 组合里只有 `bottom_volume` 跑过，落库 18 行全是它） | 交错遍历（代码优先、策略轮转），每个策略都能轮到 |
+| 配额分配 | `for skill: for code:`，上限判在内层 → 首个策略独吞 `STRATEGY_MAX_LLM` 全部名额（实测 15 策略 × 68 只 = 1020 组合里只有 `bottom_volume` 跑过，落库 18 行全是它；该 68 只系票池尚未按 `pool_type` 收窄时的口径） | 交错遍历（代码优先、策略轮转），每个策略都能轮到 |
 | 429 限流 | agnes 单后端时 `llm_backend._chat_locked` 传入的 `allow_status_retry=len(chain) > 1` 为假，客户端自带 `max_retry` 对 429 不生效；且失败照样扣配额（实测 50 次里 32 次 429） | 调用侧定速 + 429/5xx 指数退避；**失败不占配额**；连续失败超阈值熔断 |
 | 去重 | 查询用 `sha256(prompt 文本)`、入库用 `sha256(strategy:code:date)`，两者永不相等 → `_existing()` 恒 False，每次重跑全量重打 LLM | 两侧同源，均取 prompt 文本摘要（`_signal_row` 直接用调用侧算好的值） |
 
-新增配置（`utils/config.py`）：
+调用侧旋钮（**模块级常量，刻意不进 `utils/config.py` 的 `Config`**）：
 
-| 键 | 默认 | 含义 |
-|---|---|---|
-| `EC_STRATEGY_CALL_INTERVAL` | `1.5` | 相邻两次 LLM 调用的最小间隔（秒） |
-| `EC_STRATEGY_MAX_ATTEMPTS` | `3` | 单个组合的最大尝试次数（含首次） |
-| `EC_STRATEGY_RETRY_BASE_DELAY` | `2.0` | 退避基数，第 n 次重试等待 `base × 2^(n-1)` 秒 |
-| `EC_STRATEGY_MAX_CONSECUTIVE_FAILURES` | `8` | 连续失败达此数即熔断，其余组合记 `连续调用失败熔断` |
+> ⚠️ `config_hash()` 哈希 `asdict(CONFIG)` 的**全字段**，往 `Config` 里加键会让
+> `pipeline_state` / `signal` / `eval_result` 的策略指纹平白换代
+> （同 `theme_service.py:31`、`notify.py:31` 的告警）。这些旋钮因此住在
+> `services/strategy/*.py` 顶部，env 同名覆盖，不动指纹。
+
+| 键 | 默认 | 声明处 | 含义 |
+|---|---|---|---|
+| `EC_STRATEGY_CALL_INTERVAL` | `1.5` | `runner.py` | 相邻两次 LLM 调用的最小间隔（秒） |
+| `EC_STRATEGY_MAX_ATTEMPTS` | `3` | `runner.py` | 单个组合的最大尝试次数（含首次） |
+| `EC_STRATEGY_RETRY_BASE_DELAY` | `2.0` | `runner.py` | 退避基数，第 n 次重试等待 `base × 2^(n-1)` 秒 |
+| `EC_STRATEGY_MAX_CONSECUTIVE_FAILURES` | `8` | `runner.py` | 连续失败达此数即熔断，其余组合记 `连续调用失败熔断` |
+| `EC_STRATEGY_POOL_TYPES` | `ZT,ZB` | `universe.py` | 收窄候选池 `pool_type`，逗号分隔 |
 
 汇总日志形如 `策略观察 2026-09-29: 调用 50, 入库 18, 失败 3, 跳过 1002, 快照 ...`。
 `skipped` 里可区分 `达到LLM调用上限` / `连续调用失败熔断` / `LLM调用失败:<原因>`。
+
+**候选池口径**（`universe.py`，2026-09-30）：`limit_pool_em` 是东财**涨停池**表，
+但同表混含三种 `pool_type`（实测 2026-09-29：`ZT` 57 / `DT` 10 / `ZB` 8）。查询现按
+`pool_type = ANY(%s)` 收窄到 `OBSERVED_POOL_TYPES`（默认 `ZT,ZB`），跌停股不再占
+LLM 配额 —— 该日候选池从 68 只降到 58 只，正好是 10 只 DT。
+
+两条查询都强制 `ORDER BY`（`limit_pool_em` 用 `code`，`hot_rank` 用 `rank, code` 兜底）：
+票池会被 `STRATEGY_MAX_UNIVERSE` 截断，**截断后的顺序就是 LLM 配额的归属顺序**，
+缺 `ORDER BY` 时同一交易日重跑会得到不同票池，「跑过哪些组合」不可复现。
+排序主键取 `code` 而非连板高度，是因为 `cont_days_em` 在跌停行上同样有值，按它排会把
+跌停股排进前列。日后若要改「强势优先」，注意 DT 行的 `first_seal` 存的是**空串而非
+NULL**，需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌停股会被排到最前。
 
 **调度**：`deploy/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
