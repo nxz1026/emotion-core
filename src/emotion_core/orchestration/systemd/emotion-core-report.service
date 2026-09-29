@@ -27,6 +27,8 @@ StandardOutput=journal
 StandardError=journal
 # 退出码 1 = 必需段渲染失败（数据缺口），保持失败态。publish 走
 # ON CONFLICT (date) DO UPDATE，同日重跑幂等。
+# 正常渲染单日约 1.5s，600s 是纯兜底——同 pool 单元，DB 异常时不应无限期占住定时器。
+TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target

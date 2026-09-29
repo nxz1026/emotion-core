@@ -21,6 +21,13 @@ StandardOutput=journal
 StandardError=journal
 # 退出码 1 = 三池全败（数据源事故），保持失败态。
 # pool_type 不在 EM 保留窗口内时 fetch_limit_pool 不报错，命令仍返回 0。
+#
+# ★2026-09-29 补 TimeoutStartSec：实测东财接口会**挂住不退**——连续高频拉取
+# （19 天回补 + 多次重跑）后，2026-09-29 02:10 那轮卡在首个 fetch 上 20 分钟
+# 仍处 activating，而同一单元 01:48 那轮只用 18.5s。akshare 内部无 socket 超时，
+# 挂起会一路传到 systemd，OnCalendar 定时任务被无限期占住。不设上限 = 定时器
+# 可能永远不再触发。600s 远超正常耗时（3 天 ×3 池 ≈ 20-60s），只用来兜住挂死。
+TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target
