@@ -4,17 +4,53 @@
 
 ---
 
-## [Unreleased] — 2026-10-01 (P2 批次续)
+## [Unreleased] — 2026-10-01 (零覆盖模块收尾)
 
 ### 新增
 
-- **tests/unit/test_strategy_context.py**: strategy.context 测试 11/11（_value/_daily_text/build_stock_context + 最大长度断言）
-- **tests/unit/test_strategy_universe.py**: strategy.universe 测试 11/11（_codes/build_universe + 去重/主板过滤/上限）
+- **tests/unit/test_strategy_context.py**: strategy.context 测试 11/11
+- **tests/unit/test_strategy_universe.py**: strategy.universe 测试 11/11
+- **tests/unit/test_wind_manifest.py**: wind_manifest 测试 6/6
+- **tests/unit/test_calibrate.py**: calibrate 测试 7/7
+- **tests/unit/test_ladder_service.py**: ladder_service 测试 4/4
+- **tests/unit/test_ref_security_status.py**: ref_security_status 测试 11/11
+- **tests/unit/test_derive.py**: derive 测试 16/16
+- **tests/unit/test_indicators.py**: indicators 测试 9/9
+- **tests/unit/test_state.py**: state 测试 26/26
+- **tests/unit/test_reconcile.py**: reconcile 测试 6/6
+- **tests/unit/test_stock.py**: stock 测试 53/53
+- **tests/unit/test_providers_base.py**: providers.base 测试 17/17
+- **tests/unit/test_normalize.py**: normalize 测试 19/19
+- **tests/unit/test_config.py**: config 测试 12/12
+- **tests/unit/test_dates.py**: dates 测试 7/7
+- **tests/unit/test_db.py**: db 测试 6/6
+- **tests/unit/test_cleanup.py**: cleanup 测试 6/6
+- **tests/unit/test_theme_source.py**: theme_source 测试 5/5
+- **tests/unit/test_tencent.py**: tencent 测试 5/5
+- **tests/unit/test_review_utils.py**: review.utils 测试 41/41
+- **tests/unit/test_sync.py**: sync 测试 10/10
+- **tests/unit/test_pool.py**: orchestration/pool 测试
+- **tests/unit/test_report.py**: orchestration/report 测试
+- **tests/unit/test_strategy_orchestration.py**: orchestration/strategy 测试
+- **tests/unit/test_watchdog.py**: orchestration/watchdog 测试
+- **tests/unit/test_loaders.py**: presentation/loaders 测试 8/8
+- **tests/unit/test_snapshot.py**: presentation/snapshot 测试 10/10
+- **tests/unit/test_translate.py**: presentation/translate 测试 7/7
+- **tests/unit/test_views.py**: presentation/views 测试 6/6
+- **tests/unit/test_llm_agnes.py**: llm/agnes 测试 18/18
+- **tests/unit/test_llm_render.py**: llm/render 测试 4/4
+
+### 修复
+
+- **pool.py:74**: dry-run 路径调已移除的 `ingest._retry` → 改用 `retry_fetch`
+- **pytdx_provider.py:47**: `_TLS` → `_tls` 模块级变量名大小写不一致
+- **test_exactly_half**: priced 计数错误修正
+- **test_sina_index_volume**: 下标偏移修正（下标 8 = 第 9 个字段）
 
 ### 文档
 
 - **docs/06**: T16 标记完成
-- **docs/15**: 测试数量 1372→1394
+- **docs/15**: 测试数量 1165→1765，98/98 模块全覆盖
 
 ---
 
