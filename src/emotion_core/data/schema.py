@@ -1,6 +1,6 @@
 """建表 DDL（幂等）。emotion-core 数据层 schema。
 
-23 张表，按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
+27 张表，按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
 新库直接建最新 schema，不需要 _MIGRATIONS。
 
 表清单：
@@ -12,6 +12,11 @@
 - 报告：review_report, eval_result
 - 题材：theme_tag, theme_group
 - 运维：alert, llm_call_log, ingest_progress, hot_rank, pipeline_state, data_revision, watchlist
+- 日历：trade_calendar
+- 制度规则：ref_limit_rule（涨跌幅限制等交易所制度）
+- 安全状态：ref_security_status（ST/*ST 历史）
+- 原始留存：ops_raw_manifest（Wind 原始响应 JSON）
+- 配额台账：ops_quota_ledger（Wind 调用记账）
 """
 from __future__ import annotations
 
@@ -315,6 +320,54 @@ DDL: dict[str, str] = {
             source text NOT NULL,
             updated_at timestamptz NOT NULL DEFAULT now()
         )""",
+    "ref_limit_rule": """
+        CREATE TABLE IF NOT EXISTS ref_limit_rule (
+            id           bigserial PRIMARY KEY,
+            market       text NOT NULL,
+            board        text NOT NULL,
+            rule_type    text NOT NULL DEFAULT 'limit_pct',
+            limit_pct    numeric(5,2) NOT NULL,
+            effective_from date NOT NULL,
+            effective_to   date,
+            note         text,
+            source       text NOT NULL DEFAULT 'wind',
+            UNIQUE (market, board, effective_from)
+        )""",
+    "ref_security_status": """
+        CREATE TABLE IF NOT EXISTS ref_security_status(
+            id           bigserial PRIMARY KEY,
+            code         text NOT NULL,
+            status       text NOT NULL,
+            effective_from date NOT NULL,
+            effective_to   date,
+            reason       text,
+            source       text NOT NULL DEFAULT 'wind',
+            UNIQUE (code, status, effective_from)
+        )""",
+    "ops_raw_manifest": """
+        CREATE TABLE IF NOT EXISTS ops_raw_manifest(
+            id           bigserial PRIMARY KEY,
+            ts           timestamptz NOT NULL DEFAULT now(),
+            server_type  text NOT NULL,
+            tool_name    text NOT NULL,
+            params       jsonb NOT NULL,
+            raw_response jsonb NOT NULL,
+            elapsed_ms   integer,
+            ok           boolean NOT NULL DEFAULT true,
+            code         text
+        )""",
+    "ops_quota_ledger": """
+        CREATE TABLE IF NOT EXISTS ops_quota_ledger(
+            id           bigserial PRIMARY KEY,
+            ts           timestamptz NOT NULL DEFAULT now(),
+            server_type  text NOT NULL,
+            tool_name    text NOT NULL,
+            params_hash  text,
+            ok           boolean NOT NULL,
+            code         text,
+            elapsed_ms   integer,
+            cost_units   integer NOT NULL DEFAULT 1
+        )""",
 }
 
 _INDEXES: tuple[str, ...] = (
@@ -328,6 +381,10 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_strategy_signal_strategy ON strategy_signal (strategy)",
     "CREATE UNIQUE INDEX IF NOT EXISTS position_open_code_uk"
     " ON position (code) WHERE status = 'OPEN'",
+    "CREATE INDEX IF NOT EXISTS idx_ref_limit_rule_market ON ref_limit_rule (market, board)",
+    "CREATE INDEX IF NOT EXISTS idx_ref_security_status_code ON ref_security_status (code)",
+    "CREATE INDEX IF NOT EXISTS idx_ops_raw_manifest_ts ON ops_raw_manifest (ts)",
+    "CREATE INDEX IF NOT EXISTS idx_ops_quota_ledger_ts ON ops_quota_ledger (ts)",
 )
 
 
