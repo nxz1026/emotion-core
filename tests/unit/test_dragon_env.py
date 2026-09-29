@@ -339,13 +339,12 @@ def test_persist_writes_rating_and_condition_payload(monkeypatch):
         captured.update(date=d, rating=rating, reasons=reasons, risks=risks)
         return 1
 
-    monkeypatch.setattr(dragon_env, "update_market_stat_ecosystem", fake_update)
     monkeypatch.setattr(dragon_env, "rate", lambda d, a, m: {
         "rating": "NEUTRAL",
         "goods": [("G1 可交易高度扩张", None, "H 序列仅 2 日")],
         "bads": [("B1 加速事件", False, "无加速事件")]})
 
-    assert dragon_env.persist(D) == 1
+    assert dragon_env.persist(D, persist_fn=fake_update) == 1
     assert captured["rating"] == "NEUTRAL"
     # None 状态必须落 jsonb null（F6 可审计），不能丢键
     assert '"ok": null' in captured["reasons"]
@@ -357,7 +356,7 @@ def test_run_range_replays_only_existing_market_stat_days(fake, monkeypatch):
     fake.days = [date(2026, 9, 23), date(2026, 9, 24)]
     seen: list[tuple[date, str]] = []
     monkeypatch.setattr(dragon_env, "persist",
-                        lambda d, accel=None, mode="live": seen.append((d, mode)) or 1)
+                        lambda d, accel=None, mode="live", *, persist_fn=None: seen.append((d, mode)) or 1)
     assert dragon_env.run_range(date(2026, 9, 1), D) == 2
     assert seen == [(date(2026, 9, 23), "replay"), (date(2026, 9, 24), "replay")]
 

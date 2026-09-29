@@ -70,7 +70,7 @@ from typing import Any
 import pandas as pd
 
 from emotion_core.algorithms import accelerate
-from emotion_core.services.ecosystem_service import update_market_stat_ecosystem
+from typing import Callable
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
 
@@ -349,10 +349,16 @@ def _ser(items: list) -> list[dict]:
 
 
 def persist(trade_date: date, accel: tuple | None = None,
-            mode: str = "live") -> int:
-    """评级写回 market_stat（UPDATE；行须已由 emotion.run_range 产出）。"""
+            mode: str = "live",
+            *, persist_fn: Callable[[date, str, str, str], int],
+            ) -> int:
+    """评级写回 market_stat（UPDATE；行须已由 emotion.run_range 产出）。
+
+    persist_fn 由 orchestration/服务层注入（走 data.loader.update_market_stat_ecosystem），
+    消除 algorithms → services / algorithms → data 的违规。
+    """
     r = rate(trade_date, accel, mode)
-    return update_market_stat_ecosystem(
+    return persist_fn(
         trade_date, r["rating"],
         json.dumps(_ser(r["goods"]), ensure_ascii=False),
         json.dumps(_ser(r["bads"]), ensure_ascii=False))

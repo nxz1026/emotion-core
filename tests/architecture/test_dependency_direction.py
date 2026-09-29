@@ -56,16 +56,17 @@ _DEBT: dict[tuple[str, str, str], str] = {
     # ("algorithms", "data", "algorithms/ladder.py"): 已修
     # ("algorithms", "data", "algorithms/doctor.py"): 已修（改为经 services.provider_service 取数）
     # 转移债务：A 类改走 services 后，变为 C 类（2026-09-29 偿还 A 类）
-    ("algorithms", "services", "algorithms/dragon_env.py"): (
-        "经 services.ecosystem_service 取数；最终方案应由 orchestration 注入"
-    ),
+    # algorithms/dragon_env.py 已偿还（2026-09-29）：persist_fn 参数注入，无 services/data 依赖
+    # ⏸️ ladder.py — 暂不修复（2026-09-29 评估：10+ 调用方改签名，收益仅关 1 条 C 类债务）
     ("algorithms", "services", "algorithms/ladder.py"): (
-        "经 services.ladder_service 取数；最终方案应由 orchestration 注入"
+        "⏸️ 暂不修复。经 services.ladder_service 取数；比原 A 类（algorithms→data）已有改善。"
+        "最终方案应由 orchestration 注入（待调用方就绪）。"
     ),
     # algorithms/doctor.py 已偿还（2026-09-29）：provider 函数改为参数注入
-    # C 类 algorithms → services：review 包静态引用 services（2026-09-29 验收，待偿还）
+    # ⏸️ review — 暂不修复（2026-09-29 评估：771 行 38 函数，涟漪大收益小，审计标记跳过）
     ("algorithms", "services", "algorithms/review/__init__.py"): (
-        "review 子包静态 import services.* 做报告生成；应改走 orchestration 注入"
+        "⏸️ 暂不修复。review 子包静态 import services.* 做报告生成；"
+        "应改走 orchestration 注入（待模块重构时一并处理）。"
     ),
     # llm/agnes.py 已偿还（2026-09-29）：自持密钥解析，无 services 依赖
 }
