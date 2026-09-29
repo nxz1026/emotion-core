@@ -57,6 +57,7 @@ log = logging.getLogger("emotion_core.health")
 REPORT_GAP_DAYS = 2          # 报告断档：>1 交易日前有报告即算断
 DATA_GAP_DAYS = 2            # 数据链：derived_bar 缺最近交易日
 OUTCOME_STALE_DAYS = 6       # 信号结果：>5 交易日前信号仍 incomplete
+POOL_STALE_DAYS = 2          # 东财三池：落后衍生层 1 个交易日即算断
 
 
 def _recent_trading_days(d: date, n: int) -> list[date]:
@@ -145,8 +146,40 @@ def check_pipeline_failed(trade_date: date) -> str | None:
     return (f"日更链有 {len(bad)} 个步骤停在 FAILED（未恢复）：{names}")
 
 
+def check_pool_stale(trade_date: date) -> str | None:
+    """东财三池停摆：limit_pool_em 最近日落后 derived_bar 最近日 ≥阈值。
+
+    ★2026-09-29 新增。本条堵的正是刚被发现的静默缺口：`ingest.sync_range` 在全仓
+    **没有任何调用方**，而 daily 的 sync 步只调 `snapshot_daily`（写 daily_bar），
+    于是 `limit_pool_em` 至今 0 行。不是"拉取失败"——是"从未被安排进任何流程"，
+    故数据侧的三条断档（报告/derived_bar/outcome）全都看不见它。
+
+    参照系用 **derived_bar 的最近日**而非 trade_date 本身：池是独立的
+    systemd 单元，若在 daily 之后、watchdog 之前跑，"今天还没落"属正常，
+    用 trade_date 判会天天误报。落后衍生层才说明同步单元真停摆了。
+
+    断档不只影响对账——`entry.py` c5 的「炸板≥1次回封」补偿分支靠
+    bomb_times，该列来自 limit_pool_em，池空则该分支恒不成立。
+    """
+    got = query_df("SELECT max(date) AS d FROM limit_pool_em")
+    have = query_df("SELECT max(date) AS d FROM derived_bar")
+    last_pool = got["d"].iloc[0] if not got.empty else None
+    last_data = have["d"].iloc[0] if not have.empty else None
+    if last_pool is None:
+        return ("limit_pool_em 无任何数据：东财三池从未同步——c5「炸板≥1次回封」"
+                "补偿分支恒不成立，复盘双源对账不可信")
+    if last_data is None:
+        return None                        # 衍生层也无数据，归 data 断档管
+    gap = _trading_gap(last_data, last_pool)
+    return (f"东财三池断档：limit_pool_em 最近 {last_pool}，落后 derived_bar"
+            f" {last_data} 共 {gap} 个交易日（阈值 {POOL_STALE_DAYS}）——"
+            f"c5 炸板回封补偿与双源对账均失效"
+            if gap >= POOL_STALE_DAYS else None)
+
+
 CHECKS = (("report", check_report_gap), ("data", check_data_gap),
-          ("outcome", check_outcome_stale), ("pipeline", check_pipeline_failed))
+          ("outcome", check_outcome_stale), ("pipeline", check_pipeline_failed),
+          ("pool", check_pool_stale))
 
 
 def run(trade_date: date | None = None) -> list[str]:

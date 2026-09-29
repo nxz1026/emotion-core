@@ -34,6 +34,15 @@ log = logging.getLogger("emotion_core.review")
 _ACCEL_ENFORCE: bool = getattr(CONFIG, "ACCEL_ENFORCE", False)
 _OVERVIEW_LOOKBACK: int = getattr(CONFIG, "OVERVIEW_LOOKBACK", 20)
 _MIN_UNIVERSE_WARN: int = getattr(CONFIG, "MIN_UNIVERSE_WARN", 3000)
+# ★2026-09-29 新增，非 CONFIG 字段（同上先例，取字面量）：
+# 可用性告警的「新鲜度」窗口。报告的 detail 内嵌 trade_date，而
+# `alerts.record_dedup` 按 (source, detail) 精确比对 → **每个交易日都是一条独立告警**。
+# 单日跑只多一条，符合预期；但历史回补会一次性灌入数百条未确认 WARN，
+# 把 alert 表埋掉——正是 2026-09-27~28「监控失明」那类噪声的同构问题
+# （health 侧已用 _dedup_key 抹日期跨日去重，这里改为**按新鲜度**收敛）。
+# 半年之前缺东财池的报告是历史事实、不可操作，不该占用告警通道；
+# 但报告正文里的「数据可信度 UNKNOWN」标记照旧渲染，读者仍能看见。
+_ALERT_WITHIN_DAYS: int = 5
 
 
 def _recent_days_upto(d: date, n: int) -> list[date]:
@@ -233,7 +242,11 @@ def _quality(trade_date: date) -> dict:
         warns.append("东财" + "、".join(f"{k}池" for k in missing)
                      + " 0 行但自算口径有货——对账口径缺失，"
                      "下方「无差异」不可信（A7）")
-    diff = reconcile(trade_date) if not missing else None
+    # ★2026-09-29：`reconcile` 是**模块**不是函数（`from ... import ladder,
+    # reconcile` 绑的是模块对象），调用须写 `reconcile.reconcile(...)`。
+    # 这行此前是死代码：`if not missing` 守卫让它在 limit_pool_em 恒空的整个
+    # 时期从不执行——池一补上就崩，填池反而暴露出这条潜伏断点。
+    diff = reconcile.reconcile(trade_date) if not missing else None
     return {"diff": diff, "y_comp": ladder.y_competition(trade_date),
             "warns": warns}
 
@@ -763,11 +776,23 @@ def _caliber(trade_date: date) -> dict:
 
 
 def _alert_usability(trade_date: date, d: dict) -> None:
-    """A2-7：报告可用性非 OK → 入 alert（WARN 级，可确认追踪）。"""
+    """A2-7：报告可用性非 OK → 入 alert（WARN 级，可确认追踪）。
+
+    ★2026-09-29 加新鲜度闸：只对**最近 _ALERT_WITHIN_DAYS 个交易日内**的报告告警。
+    参照系取 derived_bar 最近日（而非 today_sh）——回补历史日时，参照系就是被回补
+    到的最新那天，判定与「当下」一致；非交易日不误判。
+    报告正文的可用性标记不受影响，仍然照常渲染。
+    """
     u = d.get("usability") or _usability(d)
     if u["state"] == "OK":
         return
     try:
+        from emotion_core.utils.db import query_df
+        newest = query_df("SELECT max(date) d FROM derived_bar")["d"].iloc[0]
+        if newest is not None and trade_date not in _recent_days_upto(newest, _ALERT_WITHIN_DAYS):
+            log.info("%s 报告可用性 %s：超出 %d 交易日新鲜度窗，不入告警",
+                     trade_date, u["state"], _ALERT_WITHIN_DAYS)
+            return
         from emotion_core.algorithms import alerts
         alerts.record_dedup("WARN", "review",
                             f"{trade_date} 报告可用性 {u['state']}：{u['note']}")

@@ -1,0 +1,14 @@
+[Unit]
+Description=Emotion Core Daily Review Report Timer
+Requires=emotion-core-report.service
+
+[Timer]
+# 18:00 北京时间：晚于 pool（17:45）——报告的 ⑩ 双源对账读 limit_pool_em，
+# 早于池落库就会渲染成「东财池缺失 → 本报告不可用于决策」；早于 watchdog
+# （18:05），让当晚断档检查能看见本轮报告的结果。
+OnCalendar=Mon-Fri 18:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

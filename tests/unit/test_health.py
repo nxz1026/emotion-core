@@ -33,6 +33,7 @@ class FakeQuery:
         self.data = None            # derived_bar max(date)
         self.outcome = None         # signal LEFT JOIN signal_outcome
         self.trading = None         # daily_bar（_recent_trading_days）
+        self.pool = None            # limit_pool_em max(date)（check_pool_stale）
 
     @staticmethod
     def _frame(vals, col: str) -> pd.DataFrame:
@@ -53,6 +54,8 @@ class FakeQuery:
                 columns=["confirm_date", "code"])
         if "FROM daily_bar" in sql:
             return self._frame(self.trading, "date")
+        if "FROM limit_pool_em" in sql:
+            return self._frame(self.pool, "d")
         raise AssertionError(f"未预期的 SQL: {sql}")
 
 
@@ -134,12 +137,13 @@ def alerts_stub(monkeypatch) -> AlertsStub:
 
 def test_thresholds_and_checks_order_locked():
     assert (health.REPORT_GAP_DAYS, health.DATA_GAP_DAYS,
-            health.OUTCOME_STALE_DAYS) == (2, 2, 6)
+            health.OUTCOME_STALE_DAYS, health.POOL_STALE_DAYS) == (2, 2, 6, 2)
     assert [name for name, _ in health.CHECKS] == ["report", "data", "outcome",
-                                                  "pipeline"]
+                                                  "pipeline", "pool"]
     assert [fn for _, fn in health.CHECKS] == [
         health.check_report_gap, health.check_data_gap,
-        health.check_outcome_stale, health.check_pipeline_failed]
+        health.check_outcome_stale, health.check_pipeline_failed,
+        health.check_pool_stale]
 
 
 # ────────────────────────── _trading_gap ──────────────────────────
@@ -283,6 +287,7 @@ class TestRun:
                     date(2026, 9, 24), D0]
         db.report = [date(2026, 9, 11)]              # 断档（gap 10 ≥ 2）
         db.data = [date(2026, 9, 24)]                # 未断档（gap 0 < 2）
+        db.pool = [date(2026, 9, 24)]                 # 与衍生层同步（gap 0 < 2）
         db.outcome = pd.DataFrame({"confirm_date": [date(2026, 9, 11)],
                                    "code": ["000017"]})
         out = health.run(D0)

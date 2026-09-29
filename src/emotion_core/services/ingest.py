@@ -496,9 +496,16 @@ def fetch_limit_pool(trade_date: date) -> int:
     A7（审计 P1-8 修复）：逐池失败仍落可用部分，但**三池全败即抛 RuntimeError**
     ——此前全挂返回 0，daily.sh 的 set -e 拦不住，会拿空池照常出报告，
     reconcile 还把空池当"无差异 ✓"。全败属数据源事故，宁可中断也不出假报告。
+
+    ★2026-09-29 补第二层：原先只数 `fails`（抛异常的池），**三池都「返回空 DataFrame」
+    不算失败**。而 EM 涨停池接口的实达历史窗口比 `_POOL_RECENT_DAYS` 记的 30 日更短
+    （实测 2026-09-28 回拉最早只到 2026-09-04，09-01/02/03 三池全 0 行且不抛异常，
+    而那三天各有 5203+ 根 bar、6~7 只一字板，确属交易日）。于是「空池」被静默当成
+    同步成功——与 A7 要防的正是同一类假报告，只是从「拉取报错」换成了「拉回空表」。
+    现将「返回 0 行」也计为该池失败。
     """
     ds = trade_date.strftime("%Y%m%d")
-    total, fails = 0, []
+    total, fails, empties = 0, [], []
     for ptype, (fn, mapping) in _POOLS.items():
         try:
             df = _retry(fn, date=ds)
@@ -506,11 +513,19 @@ def fetch_limit_pool(trade_date: date) -> int:
             log.warning("pool %s %s 拉取失败: %s", ptype, ds, exc)
             fails.append(ptype)
             continue
-        total += _upsert_pool(df, trade_date, ptype, mapping)
-    if len(fails) == len(_POOLS):
-        raise RuntimeError(f"东财三池全部拉取失败({ds})：放弃出报告，待重跑")
-    if fails:
-        log.warning("池 %s 失败，仅 %s 入库（部分对账）", fails, total)
+        n = _upsert_pool(df, trade_date, ptype, mapping)
+        total += n
+        if n == 0:
+            empties.append(ptype)
+            log.warning("pool %s %s 返回 0 行（日期超出东财池实达窗口？）", ptype, ds)
+    dead = set(fails) | set(empties)
+    if len(dead) == len(_POOLS):
+        raise RuntimeError(
+            f"东财三池全部无数据({ds})：失败={sorted(fails)} 空={sorted(empties)}"
+            f"——放弃出报告，待重跑")
+    if dead:
+        log.warning("池 %s 无数据（失败=%s 空=%s），仅 %d 行入库（部分对账）",
+                    sorted(dead), sorted(fails), sorted(empties), total)
     return total
 
 
@@ -579,15 +594,31 @@ def refresh_first_bar() -> int:
         " WHERE f.code = s.code")
 
 
-def sync_range(start: date, end: date) -> None:
-    """池同步：EM 三池仅最近 POOL_RECENT_DAYS 交易日可拉（实测），自动钳制。"""
+def sync_range(start: date, end: date) -> list[date]:
+    """池同步：EM 三池仅最近 POOL_RECENT_DAYS 交易日可拉（实测），自动钳制。
+
+    返回**同步失败的交易日**列表（空 = 全部成功）。
+
+    ★2026-09-29：逐日 try 续跑，不因单日失败中断整段。A7 的 RuntimeError 是
+    「**这一天**的池不可信，别拿它出报告」，而多日回补里超出东财窗口的那几天
+    并不影响其余天——早先 `fetch_limit_pool` 直接透传异常，会让 19 天回补死在
+    第 1 天（09-01 超窗口）而后 16 天全白跑。失败日必须**记账并上报**：
+    CLI 据此返回非 0，避免「静默地把空池当成功」。
+    """
     from emotion_core.utils.dates import trading_days
     days = trading_days(start, end)[-_POOL_RECENT_DAYS:]
     log.info("池同步 %d 天（EM 池历史上限 %d 日）", len(days), _POOL_RECENT_DAYS)
+    failed: list[date] = []
     for d in days:
-        n = fetch_limit_pool(d)
+        try:
+            n = fetch_limit_pool(d)
+        except RuntimeError as exc:
+            log.warning("%s 池同步失败，跳过：%s", d, exc)
+            failed.append(d)
+            continue
         bad = verify_pre_close(d)
         log.info("%s 三池=%d pre_close异常=%d", d, n, len(bad))
+    return failed
 
 
 # ---------- T12 人气榜（东财，热度信号影子验证；2026-09 实测海外IP可用） ----------

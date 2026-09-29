@@ -1,0 +1,26 @@
+[Unit]
+Description=Emotion Core EastMoney Limit Pool Sync
+# 独立单元，不进 daily 主链：三池是「批量拉取 + 有限重试」的外网调用，三池全挂
+# 会抛 RuntimeError（fetch_limit_pool 的 A7 护栏），挂进 fail-fast 主链会因一个
+# 外部数据源不可用而拖红整条日更。
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/DSH/emotion-core
+# --last 3 而非 --latest：池按日期分键存，单日失败只丢一天。最近 3 个交易日重拉
+# 是幂等 upsert（_upsert_pool 先 DELETE 同日同池再写），让「某天机器关机/网络断」
+# 能在下一次触发时自愈，而不必等人工。代价是每天多两次外网往返（各池数秒）。
+ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.orchestration.pool --last 3
+Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+Environment=DB_CONFIG=/home/ubuntu/.dbconfig
+StandardOutput=journal
+StandardError=journal
+# 退出码 1 = 三池全败（数据源事故），保持失败态。
+# pool_type 不在 EM 保留窗口内时 fetch_limit_pool 不报错，命令仍返回 0。
+
+[Install]
+WantedBy=multi-user.target

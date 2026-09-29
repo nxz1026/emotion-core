@@ -1,0 +1,32 @@
+[Unit]
+Description=Emotion Core Daily Review Report
+# 独立单元，不进 daily 主链：报告依赖表比主链多（持仓/题材/情绪），任一缺口
+# 会因 daily 的 fail-fast 拖红整条日更，而报告只是可读性问题。
+# 刻意不 Requires/After=emotion-core-daily.service：与 watchdog 同理，监控/报告类
+# 单元必须能在主链死亡时照常跑，否则失去存在意义。
+# 用 After= 而非 Requires= 挂 pool：只在两者同批启动时保证池先落库，不强制拉起
+# 池单元（手动跑报告不该附带一次外网拉取）。
+After=network.target emotion-core-pool.service
+Wants=postgresql.service
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/DSH/emotion-core
+# --latest = 最近一个已入库 derived_bar 的交易日。非交易日/机器关机漏跑时
+# Persistent=true 补跑的是**当天**，当天无数据则 --latest 落到最近有数据的那天，
+# 不会空跑。
+ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.orchestration.report --latest
+Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+Environment=DB_CONFIG=/home/ubuntu/.dbconfig
+# webhook 地址可经 drop-in 补（与 watchdog 同）：
+#   /etc/systemd/system/emotion-core-report.service.d/webhook.conf
+StandardOutput=journal
+StandardError=journal
+# 退出码 1 = 必需段渲染失败（数据缺口），保持失败态。publish 走
+# ON CONFLICT (date) DO UPDATE，同日重跑幂等。
+
+[Install]
+WantedBy=multi-user.target
