@@ -217,7 +217,8 @@ def _load_algorithm_data(trade_date=None) -> dict:
     # 获取市场数据
     try:
         market = loaders.load_market_snapshot(trade_date)
-    except Exception:
+    except Exception as exc:
+        log.warning("server: load_market_snapshot 失败，返回空数据 — %s", exc)
         market = {}
 
     formulas = {

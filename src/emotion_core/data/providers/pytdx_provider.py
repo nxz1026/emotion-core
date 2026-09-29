@@ -24,10 +24,25 @@ from emotion_core.data.providers.base import (
     normalize_frame,
 )
 
-# TDX 服务器列表（与 lkl config.py 保持一致）
-_TDX_HOSTS = [("180.153.18.170", 7709), ("119.147.212.81", 7709),
-              ("124.160.88.183", 7709), ("218.85.139.19", 7727),
-              ("115.238.90.165", 7709)]
+# TDX 服务器列表（可通过环境变量 TDX_HOSTS 覆盖，格式 "host:port,host:port"）
+import os as _os
+
+def _parse_tdx_hosts() -> list:
+    env_raw = _os.environ.get("TDX_HOSTS", "").strip()
+    if not env_raw:
+        return [("180.153.18.170", 7709), ("119.147.212.81", 7709),
+                ("124.160.88.183", 7709), ("218.85.139.19", 7727),
+                ("115.238.90.165", 7709)]
+    try:
+        pairs = [p.strip() for p in env_raw.split(",") if p.strip()]
+        return [(h, int(p)) for h, p in (pair.rsplit(":", 1) for pair in pairs)]
+    except (ValueError, IndexError):
+        return [("180.153.18.170", 7709), ("119.147.212.81", 7709),
+                ("124.160.88.183", 7709), ("218.85.139.19", 7727),
+                ("115.238.90.165", 7709)]
+
+_TDX_HOSTS = _parse_tdx_hosts()
+
 
 # 重试参数（值同 lkl config.py: FETCH_RETRY=3, TIME_SLEEP=0.5）
 _FETCH_RETRY = 3
