@@ -355,6 +355,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                              (dates[0] if dates else None)),
             })
             return
+        if parsed.path == "/api/alerts":
+            # 未确认告警（门户「今日速览」用：只暴露条数与摘要，不做确认操作）
+            from emotion_core.algorithms import alerts as alerts_mod
+            items = alerts_mod.pending(30)
+            attention = [a for a in items if a["level"] in ("WARN", "ERROR")]
+            self._send_json({
+                "pending": len(items),
+                "attention": len(attention),
+                "items": [{"id": a["id"], "level": a["level"], "source": a["source"],
+                           "detail": a["detail"], "created_at": a["created_at"]}
+                          for a in items[:5]],
+            })
+            return
         if parsed.path == "/api/stock":
             from emotion_core.services import stock_service
             code = _query_arg(parsed, "code")
