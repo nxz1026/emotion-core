@@ -159,18 +159,19 @@ def replace_ladder_day(d: date, rows: list[LadderDay]) -> int:
             return 0
         data = [(r.date, r.code, r.cont_days, r.is_exchange, r.is_top, r.is_sole_top,
                  r.y_top_group_count, r.y_top_survivor_count) for r in rows]
-        conn.executemany(
-            """INSERT INTO ladder_day
-               (date, code, cont_days, is_exchange, is_top, is_sole_top,
-                y_top_group_count, y_top_survivor_count)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (date, code) DO UPDATE SET
-                 cont_days=EXCLUDED.cont_days, is_exchange=EXCLUDED.is_exchange,
-                 is_top=EXCLUDED.is_top, is_sole_top=EXCLUDED.is_sole_top,
-                 y_top_group_count=EXCLUDED.y_top_group_count,
-                 y_top_survivor_count=EXCLUDED.y_top_survivor_count""",
-            data,
-        )
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO ladder_day
+                   (date, code, cont_days, is_exchange, is_top, is_sole_top,
+                    y_top_group_count, y_top_survivor_count)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (date, code) DO UPDATE SET
+                     cont_days=EXCLUDED.cont_days, is_exchange=EXCLUDED.is_exchange,
+                     is_top=EXCLUDED.is_top, is_sole_top=EXCLUDED.is_sole_top,
+                     y_top_group_count=EXCLUDED.y_top_group_count,
+                     y_top_survivor_count=EXCLUDED.y_top_survivor_count""",
+                data,
+            )
         return len(data)
 
 
@@ -191,21 +192,22 @@ def upsert_promotion_day(rows: list[dict]) -> int:
                  r["promote_exchange"], r.get("rate_nominal"),
                  r.get("rate_exchange"), r.get("divergence"),
                  r.get("fail_perf")) for r in rows]
-        conn.executemany(
-            """INSERT INTO promotion_day
-               (date, layer, promote_from, promote_nominal, promote_exchange,
-                rate_nominal, rate_exchange, divergence, fail_perf)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (date, layer) DO UPDATE SET
-                 promote_from=EXCLUDED.promote_from,
-                 promote_nominal=EXCLUDED.promote_nominal,
-                 promote_exchange=EXCLUDED.promote_exchange,
-                 rate_nominal=EXCLUDED.rate_nominal,
-                 rate_exchange=EXCLUDED.rate_exchange,
-                 divergence=EXCLUDED.divergence,
-                 fail_perf=EXCLUDED.fail_perf""",
-            data,
-        )
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO promotion_day
+                   (date, layer, promote_from, promote_nominal, promote_exchange,
+                    rate_nominal, rate_exchange, divergence, fail_perf)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (date, layer) DO UPDATE SET
+                     promote_from=EXCLUDED.promote_from,
+                     promote_nominal=EXCLUDED.promote_nominal,
+                     promote_exchange=EXCLUDED.promote_exchange,
+                     rate_nominal=EXCLUDED.rate_nominal,
+                     rate_exchange=EXCLUDED.rate_exchange,
+                     divergence=EXCLUDED.divergence,
+                     fail_perf=EXCLUDED.fail_perf""",
+                data,
+            )
         return len(data)
 
 

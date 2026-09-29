@@ -27,8 +27,29 @@ def _insert_columns(sql: str) -> tuple[list[str], list[str]]:
     return cols, upd
 
 
+class _Cur:
+    """psycopg 游标替身：真实 Connection 没有 executemany，只有游标才有。"""
+
+    def __init__(self, rec: _Rec) -> None:
+        self._rec = rec
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def executemany(self, sql, rows) -> None:
+        self._rec.sql.append(sql)
+        self._rec.data.extend(rows)
+
+
 class _Rec:
-    """loader.transaction 替身：记录 SQL 与行数据。"""
+    """loader.transaction 替身：记录 SQL 与行数据。
+
+    刻意**不**提供 `executemany`：psycopg3 的 Connection 只有 `execute`，
+    批量写入必须走 `conn.cursor().executemany`（daily 卡在 ladder 的根因）。
+    """
 
     def __init__(self) -> None:
         self.sql: list[str] = []
@@ -43,9 +64,8 @@ class _Rec:
     def execute(self, sql, params=()) -> None:
         self.sql.append(sql)
 
-    def executemany(self, sql, rows) -> None:
-        self.sql.append(sql)
-        self.data.extend(rows)
+    def cursor(self) -> _Cur:
+        return _Cur(self)
 
 
 def _row(**kw) -> dict:

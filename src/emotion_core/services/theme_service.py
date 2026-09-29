@@ -10,7 +10,6 @@ from datetime import date
 
 from emotion_core.algorithms import theme
 from emotion_core.data.theme_source import get_provider
-from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import transaction
 
 log = logging.getLogger("emotion_core.theme_service")
@@ -25,7 +24,12 @@ def run(trade_date: date) -> int:
     Returns:
         题材组数。
     """
-    provider = get_provider(CONFIG.get("THEME_PROVIDER"))
+    # 题材源未接入：走 NullProvider 空实现（见 data/theme_source.py），降级不阻断主链。
+    # 原写法 CONFIG.get("THEME_PROVIDER") 属于旧 dict 配置时代的残留——本库 CONFIG 是
+    # frozen dataclass（utils/config.py），没有 .get()，也没有 THEME_PROVIDER 字段，
+    # 于是每天跑到 theme 就 AttributeError 崩（实测 2026-09-28 那次日更）。这里不做
+    # 「补一个字段」的扩张：新增字段会改变 config_hash()，让审计里的策略指纹平白换代。
+    provider = get_provider()
     tags = provider.fetch_tags(trade_date)
     if not tags:
         log.info("theme_service %s: 无题材数据", trade_date)
