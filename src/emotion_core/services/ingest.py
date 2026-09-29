@@ -30,6 +30,7 @@ import akshare as ak
 import pandas as pd
 import requests
 
+from emotion_core.data.providers.base import DataError, FetchError
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import execute, query_df, transaction
 
@@ -105,16 +106,9 @@ _SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
              "f6": "amount", "f8": "turnover_rate"}
 
 
-class FetchError(Exception):
-    """网络/HTTP 层失败（超时、5xx、连接拒绝）——可重试。"""
-
-    def __init__(self, msg, cause):
-        super().__init__(f"{msg}: {cause}")
-        self.cause = cause
-
-
-class DataError(Exception):
-    """协议/数据结构非法（非 JSON、非 dict、字段缺失）——重试无意义。"""
+# FetchError / DataError 的唯一定义处已下移到 `data.providers.base`（2026-09-29
+# 架构守护：services 允许依赖 data，反向不允许）：本模块从那里 import 并同名再导出，
+# 异常对象与 `data.providers.*` 抛出的那份是同一个类。
 
 
 def _get_json(url: str, params: dict) -> dict:

@@ -17,6 +17,24 @@ class ProviderError(Exception):
     """Provider 网络、解析或数据错误。"""
 
 
+# ── 抓取边界的两类异常：唯一定义处在本层（数据源协议层）──────────────
+# P3-4 分层语义：网络故障→FetchError（可重试），协议变化→DataError（重试无意义）。
+# 2026-09-29 架构守护（tests/architecture）：原先这两个类在 `services/ingest.py`
+# 与 `data/providers/eastmoney.py` 各逐字重复一份，逼得 `pytdx_provider.py` 反向
+# import `services`。现收归本层，两处改为从这里 import 并同名再导出——外部
+# `from emotion_core.services.ingest import DataError` 的既有写法照旧可用。
+class FetchError(Exception):
+    """网络/HTTP 层失败（超时、5xx、连接拒绝）——可重试。"""
+
+    def __init__(self, msg, cause):
+        super().__init__(f"{msg}: {cause}")
+        self.cause = cause
+
+
+class DataError(Exception):
+    """协议/数据结构非法（非 JSON、非 dict、字段缺失）——重试无意义。"""
+
+
 class DailyBarProvider(Protocol):
     """输出 daily_bar 落库同口径 DataFrame 的日线适配器。"""
 

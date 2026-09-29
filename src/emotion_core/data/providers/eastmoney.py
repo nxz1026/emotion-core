@@ -36,6 +36,8 @@ import requests
 from emotion_core.data.providers.base import (
     BAR_COLS,
     DailyBarProvider,
+    DataError,
+    FetchError,
     ProviderError,
     normalize_frame,
 )
@@ -58,16 +60,10 @@ _SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
              "f6": "amount", "f8": "turnover_rate"}
 
 
-class FetchError(Exception):
-    """网络/HTTP 层失败（超时、5xx、连接拒绝）——可重试。"""
-
-    def __init__(self, msg, cause):
-        super().__init__(f"{msg}: {cause}")
-        self.cause = cause
-
-
-class DataError(Exception):
-    """协议/数据结构非法（非 JSON、非 dict、字段缺失）——重试无意义。"""
+# FetchError / DataError 的唯一定义处已上移到 `data.providers.base`（2026-09-29
+# 架构守护）：本模块只 import 同名再导出，异常对象与 `services/ingest.py` 那份是
+# **同一个类**，`except DataError` 的语义不变（原先两份定义反而是隐患：跨模块抛出的
+# DataError 在另一侧的 except 里捕获不到）。
 
 
 def _get_json(url: str, params: dict) -> dict:

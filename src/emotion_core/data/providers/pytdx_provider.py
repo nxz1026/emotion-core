@@ -17,8 +17,12 @@ from datetime import date
 
 import pandas as pd
 
-from emotion_core.data.providers.base import DailyBarProvider, ProviderError, normalize_frame
-from emotion_core.services.ingest import DataError
+from emotion_core.data.providers.base import (
+    DailyBarProvider,
+    DataError,
+    ProviderError,
+    normalize_frame,
+)
 
 # TDX 服务器列表（与 lkl config.py 保持一致）
 _TDX_HOSTS = [("180.153.18.170", 7709), ("119.147.212.81", 7709),
