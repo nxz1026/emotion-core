@@ -80,7 +80,8 @@ def to_api(date_str: str) -> dict:
                 for row in frame.itertuples()
                 if row.name is not None
             }
-        except Exception:
+        except Exception as exc:
+            log.warning("strategy_view: 加载股票名称失败，跳过名称显示 — %s", exc)
             names = {}
     items = [dict(item, stock_name=names.get(str(item.get("code")))) for item in items]
     result = dict(payload)
