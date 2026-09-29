@@ -95,3 +95,40 @@ class TestBuildUniverse:
         result = universe.build_universe(date(2024, 6, 15))
         assert "600519" in result
         assert "830001" not in result
+
+
+class TestQueryOrderingIsDeterministic:
+    """候选池查询必须带完全确定的 ORDER BY。
+
+    结果会被 STRATEGY_MAX_UNIVERSE 截断，截断后的顺序决定 LLM 配额先烧
+    哪些 (code, skill) 组合。缺 ORDER BY 时 PostgreSQL 不保证顺序稳定，
+    同一交易日重复运行会得到不同候选池，让「跑过哪些组合」不可复现。
+    """
+
+    @staticmethod
+    def _captured_sql(monkeypatch) -> dict[str, str]:
+        seen: dict[str, str] = {}
+
+        def mock_query(sql, params):
+            if "limit_pool_em" in sql:
+                seen["pool"] = sql
+                return pd.DataFrame({"code": ["600519"]})
+            if "hot_rank" in sql:
+                seen["hot"] = sql
+                return pd.DataFrame({"code": ["000001"]})
+            return pd.DataFrame()
+
+        monkeypatch.setattr(universe, "query_df", mock_query)
+        universe.build_universe(date(2024, 6, 15))
+        return seen
+
+    def test_pool_query_orders_by_code(self, monkeypatch):
+        sql = self._captured_sql(monkeypatch)["pool"].lower()
+        assert "order by" in sql
+        assert sql.rstrip().endswith("order by code")
+
+    def test_hot_query_has_deterministic_tiebreaker(self, monkeypatch):
+        """仅 ORDER BY rank 时同名次并列的顺序不保证，需补 code 兜底。"""
+        sql = self._captured_sql(monkeypatch)["hot"].lower()
+        assert "order by rank, code" in sql
+
