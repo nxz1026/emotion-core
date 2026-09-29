@@ -100,7 +100,11 @@ def _push(md: str, trade_date: Any = None) -> bool:
             notify = importlib.import_module(modpath)
         except ImportError:
             continue
-        return notify.push(md, trade_date)
+        try:
+            return notify.push(md, trade_date)
+        except Exception:
+            log.exception("notify.push 异常，webhook 推送失败")
+            return False
     log.warning("notify 模块在 services/ 与 algorithms/ 均未找到，webhook 推送跳过")
     return False
 

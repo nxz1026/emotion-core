@@ -265,6 +265,6 @@ def upsert_market_stat(stat: MarketStat) -> int:
                  bomb_threshold=EXCLUDED.bomb_threshold,
                  has_candidate=EXCLUDED.has_candidate""",
             (stat.date, stat.phase.value, stat.buy_window, stat.limit_up_count,
-             stat.bomb_rate, stat.limit_down_count, stat.max_limit_days,
+             stat.bomb_count, stat.limit_down_count, stat.max_height,
              stat.force_liquidate, stat.bomb_threshold, stat.has_candidate),
         ).rowcount
