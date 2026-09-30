@@ -55,7 +55,9 @@ def _json_default(obj):
 
 def get_static(path: str) -> tuple[bytes, str]:
     """加载静态文件。"""
-    file_path = STATIC_DIR / path
+    file_path = (STATIC_DIR / path).resolve()
+    if not file_path.is_relative_to(STATIC_DIR.resolve()):
+        return b"", ""
     if not file_path.exists() or not file_path.is_file():
         return b"", ""
     content_type = "text/css" if path.endswith(".css") else "application/javascript"
@@ -409,10 +411,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(html.encode("utf-8"))
             except Exception as e:
+                log.error("dashboard render failed: %s", e)
                 self.send_response(500)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(f"<html><body><h1>Error</h1><pre>{e}</pre></body></html>".encode())
+                self.wfile.write(b"<html><body><h1>500 Internal Server Error</h1></body></html>")
             return
 
         # 根路径重定向

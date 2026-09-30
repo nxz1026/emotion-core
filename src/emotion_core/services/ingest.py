@@ -282,12 +282,17 @@ def _em_data_date_em() -> date:
 
 
 
+_UPSERT_ALLOWED_TABLES = {"daily_bar", "limit_pool_em", "hot_rank"}
+
+
 def _upsert_rows(table: str, columns: Sequence[str], rows: list[tuple],
                  conflict_cols: Sequence[str], conn=None) -> int:
     """通用幂等 upsert，返回写入行数（复刻 lkl utils/db.upsert_rows 写语义）。
 
     W3：可传入 transaction() 的共享连接，与 DELETE 同事务（防半新半旧）。
     """
+    if table not in _UPSERT_ALLOWED_TABLES:
+        raise ValueError(f"upsert 拒绝未知表: {table!r}")
     if not rows:
         return 0
     # 行宽校验防错位静默写脏数据

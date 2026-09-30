@@ -210,6 +210,7 @@ pub fn g1_height_expanding(
         return (None, format!("H 序列仅 {} 日，不足 {}", h_series.len(), expand_days));
     }
     let ok = h_series.windows(2).all(|w| w[1] >= w[0])
+        // SAFETY: h_series.len() >= expand_days ≥ 1 (checked above)
         && h_series.last().unwrap() > h_series.first().unwrap();
     let h_str = h_series.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("→");
     (Some(ok), format!("H {h_str}"))
@@ -226,6 +227,7 @@ pub fn g4_headroom(
     if h_series.len() < ref_window / 2 {
         return (None, format!("参照窗口仅 {} 日", h_series.len()));
     }
+    // SAFETY: h_series.len() >= ref_window / 2 ≥ 1 (checked above)
     let h = *h_series.last().unwrap();
     let max_ref = *h_series.iter().max().unwrap();
     let ok = h <= max_ref - headroom;
@@ -248,6 +250,7 @@ pub fn g2_theme_ladder(
         if theme_rows.is_empty() {
             return (None, "theme_group 当日无数据".to_string());
         }
+        // SAFETY: theme_rows is non-empty (checked at line 248)
         let top = theme_rows
             .iter()
             .max_by_key(|(_, mc, _, hb)| (*hb, *mc))
@@ -260,6 +263,7 @@ pub fn g2_theme_ladder(
             ),
         );
     }
+    // SAFETY: qualified is non-empty (line 247 returns early if empty)
     let best = qualified.iter().max_by_key(|(_, _, _, hb)| *hb).unwrap();
     (
         None,
@@ -355,12 +359,14 @@ pub fn b4_no_sector(
         .filter(|(_, th, mc)| th.is_some() && *mc >= 2)
         .collect();
     if !supported.is_empty() {
+        // SAFETY: supported is non-empty (line 361 checks !supported.is_empty())
         let best = supported.iter().max_by_key(|(_, _, mc)| *mc).unwrap();
         return (
             Some(false),
             format!(
                 "换手最高板 {}({}) 成员{}——板块有跟随",
                 best.0,
+                // SAFETY: best.1 is Some (filter at line 359 checks th.is_some())
                 best.1.as_ref().unwrap(),
                 best.2
             ),
@@ -537,6 +543,7 @@ pub fn ladder_health(
         *groups.entry(*cont).or_insert(0) += 1;
     }
 
+    // SAFETY: groups is non-empty (built from rows, checked non-empty above)
     let height_nominal = *groups.keys().max().unwrap();
 
     let ex_levels: Vec<i64> = rows
@@ -547,6 +554,7 @@ pub fn ladder_health(
     let height_exchange = if ex_levels.is_empty() {
         None
     } else {
+        // SAFETY: ex_levels is non-empty (line 553 checks is_empty)
         Some(*ex_levels.iter().max().unwrap())
     };
 

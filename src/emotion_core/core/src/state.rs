@@ -141,8 +141,13 @@ fn rule_ferment(t: &DayMetrics, y: Option<&DayMetrics>, b: Option<&DayMetrics>) 
         && y.is_some()
         && b.is_some()
         && gt(t.zt_performance, FERMENT_ZT_PERF)
+        // SAFETY: y is Some (checked at line 141)
         && gt(y.unwrap().zt_performance, FERMENT_ZT_PERF)
-        && t.limit_up_count > y.unwrap().limit_up_count
+        && t.limit_up_count > {
+            // SAFETY: y is Some (checked at line 141)
+            y.unwrap().limit_up_count
+        }
+        // SAFETY: y is Some (checked at line 141), b is Some (checked at line 142)
         && y.unwrap().limit_up_count > b.unwrap().limit_up_count
 }
 

@@ -109,7 +109,6 @@ def retry_fetch(
     last: Exception | None = None
     for i in range(fetch_retry):
         try:
-            time.sleep(time_sleep)
             return fn(*args, **kw)
         except DataError:
             raise
@@ -117,5 +116,5 @@ def retry_fetch(
             last = exc
             if "只能获取最近" in str(exc):
                 raise
-            time.sleep(2 ** i)
+            time.sleep(2 ** i + time_sleep)
     raise last  # type: ignore[misc]

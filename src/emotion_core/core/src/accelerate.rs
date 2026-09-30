@@ -64,7 +64,7 @@ pub fn baseline_median(ratios: Vec<Option<f64>>, window: usize) -> Option<f64> {
         return None;
     }
     let mut sorted = vals;
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = window / 2;
     let med = if window % 2 == 1 {
         sorted[mid]
