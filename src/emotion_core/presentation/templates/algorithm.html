@@ -2,9 +2,12 @@
 {#
   算法层 dashboard：回答「为什么这个数字是 50 不是 48」。
 
-  静态口径区（计算公式 / 数据血缘 / 口径裁决 / 已知缺口）写死在本文件，
+  静态口径区（计算公式 / 数据血缘 / 口径裁决）写死在本文件，
   每行带 `文件:行号` 溯源，可与代码逐条对账；参数值不复制 CONFIG，
   避免出现第二份阈值真相。
+
+  已知缺口区块（区块 9）由 `services/gaps.py` 动态扫描注入，
+  不再硬编码——修一个少一个，页面永远反映当前代码事实。
 
   context 契约（全部可选，缺任一项只影响对应动态区块的空态）：
     generated_at  str                     渲染时间
@@ -15,6 +18,7 @@
     sample_sizes  list[{metric,n,basis,ok,note}]
     replay        list[{metric,value,n,note}]       取自 evaluate.forward_stats
     market        dict                    market_stat 当日行
+     gaps          list[{item,detail,impl}]          services/gaps.py 动态扫描结果
 #}
 {% block title %}算法层{% endblock %}
 
@@ -114,21 +118,8 @@
   {"id": "C7", "title": "北交所不参与判定", "decision": "北交所数据保留在数据层（展示、个股诊断、未来研究），但历史判定口径冻结为「不含北交所」，过滤须在进入状态机之前完成。", "basis": "若「全市场」含北交所，limit_up_count 会变 -> phase 可能翻转 -> 全部历史要重算且无法验证。原文标注「存疑，待有懂策略的人核对」。", "evidence": "docs/04-数据源层讨论.md:98,112-115", "impl": "domain/market.py:32；data/sync.py:56-57（算法层 market_service 未落实，见「已知缺口」）", "status": "存疑"}
 ] %}
 
-{% set gaps = [
-  {"item": "覆盖率门槛未接线", "detail": "MIN_COVERAGE=0.90 仅为常量；无 coverage 字段、无 covered/in_market 比率、无 &lt;0.90 阻断、无退出码 76。", "impl": "utils/config.py:49；docs/15-实施追踪.md:230"},
-  {"item": "health 步骤是空实现", "detail": "每日编排第 10 步只打印 TODO，health.py 的三条断档检查未被调用。", "impl": "orchestration/daily.py:117-118"},
-  {"item": "tests/caliber/ 为空目录", "detail": "规划的 6 个口径守护测试一个未落地；页面不能声称 C1-C7 有专测。实际覆盖散在 tests/oracle 对账与 tests/unit。", "impl": "tests/caliber/；docs/13-架构评审与逐层代码框架设计.md:56-64"},
-  {"item": "展示层涨停价式与唯一实现不同源", "detail": "server.py 写死 (pre_close * 110 + 50) / 100（仅主板、无分单位），与 utils/price.py 的分整数式不是同一套实现，不可作为口径引用。", "impl": "presentation/server.py:113 vs utils/price.py:44-54"},
-  {"item": "C7 在算法层未落实", "detail": "market_service 的 _load_day_metrics 无 bj 前缀、无 is_st、无次新过滤，与 algorithms/emotion.py 的 _counts 口径不一致。", "impl": "services/market_service.py:19-54 vs algorithms/emotion.py:163-174"},
-  {"item": "晋级率落库双实现不一致", "detail": "loader 的 upsert_promotion_day 漏写 promote_from 列且 ON CONFLICT 不更新它，与 promotion.py 的 _INSERT_SQL 不一致；编排走的是前者。", "impl": "data/loader.py:177-201 vs algorithms/promotion.py:165-178"},
-  {"item": "config_hash() 无调用方", "detail": "函数声称写入 pipeline_state / signal / eval_result，但三张表均无该列，全仓只有定义处命中。", "impl": "utils/config.py:68-71"},
-  {"item": "eval_result 无写入方", "detail": "只有 DDL 与清理策略（保留最新 50 条），评估结果实际只落 reports/calib-&lt;date&gt;.md。", "impl": "data/schema.py:184-193；services/calibrate.py:127-131"},
-  {"item": "ecosystem.rs 是空壳", "detail": "全文仅 pub struct Ecosystem;，而 dragon_env.py 注释声称已有 Rust 实现；生态评级目前只有 Python 一份。", "impl": "core/src/ecosystem.rs:1 vs algorithms/dragon_env.py:56-57"},
-  {"item": "signal 表无 source 列", "detail": "entry._persist 写入 8 列不含 source，DDL 也无该列，回填信号无法在库内标记 live / replay。", "impl": "algorithms/entry.py:418-440；data/schema.py:125-140"},
-  {"item": "stock_basic 缺列", "detail": "diagnose_service 查询 industry / market_cap 两列，DDL 中不存在，该服务会抛列不存在错误。", "impl": "services/diagnose_service.py:48-50 vs data/schema.py:19-29"},
-  {"item": "每日编排 outcome 步骤接错服务", "detail": "outcome 步骤接到 replay_service.run（回填 signal），而非 algorithms.outcome.backfill（回填 signal_outcome）。", "impl": "orchestration/daily.py:113-116"},
-  {"item": "CONFIG 内有重复字段", "detail": "CLIMAX_AMPLITUDE 在 Config 中声明两次（第 33、35 行），值相同，dataclass 取后者；不影响运行但属冗余。", "impl": "utils/config.py:33,35"}
-] %}
+{# 缺口清单由 services/gaps.py 动态扫描生成，注入 context 的 gaps 变量；
+   修一个少一个，不再硬编码。详见 src/emotion_core/services/gaps.py。 #}
 
 {% set disambig = [
   {"series": "口径裁决 C1-C7", "meaning": "本页「口径裁决记录」区块，6 处历史口径冲突 + 1 条追加", "where": "docs/02-算法说明与接手决策规则.md:202-207；C7 见 docs/04-数据源层讨论.md:98"},
@@ -452,6 +443,7 @@
 
 <div class="card">
     <h2>9 · 已知缺口</h2>
+    {% if gaps %}
     <p class="lead muted">
       算法层当前<strong>不完整</strong>。以下缺口会直接削弱本页数字的可信度，按对结论的影响排序。
     </p>
@@ -467,6 +459,12 @@
             {% endfor %}
         </tbody>
     </table>
+    {% else %}
+    <p class="lead muted">
+      算法层当前<strong>无已知缺口</strong>。缺口清单由 <code>services/gaps.py</code> 从代码事实动态扫描生成，
+      修一个少一个。
+    </p>
+    {% endif %}
 </div>
 
 <div class="card">

@@ -247,11 +247,20 @@ def _load_algorithm_data(trade_date=None) -> dict:
         "EBB_LD_MIN": CONFIG.EBB_LD_MIN,
     }
 
+    # 动态缺口：从代码事实扫描，取代 algorithm.html 里的硬编码列表
+    try:
+        from emotion_core.services.gaps import scan_gaps
+        gaps = scan_gaps()
+    except Exception as exc:
+        log.warning("server: scan_gaps 失败 — %s", exc)
+        gaps = []
+
     return {
         "formulas": formulas,
         "thresholds": thresholds,
         "market": market,
         "trade_date": str(market.get("date", "") or ""),
+        "gaps": gaps,
     }
 
 
