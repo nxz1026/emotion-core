@@ -65,5 +65,23 @@ fn emotion_core_rust(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<outcome::OutcomeRow>()?;
     m.add_function(wrap_pyfunction!(outcome::pct, m)?)?;
     m.add_function(wrap_pyfunction!(outcome::outcome_row, m)?)?;
+    m.add_class::<ecosystem::EcosystemItem>()?;
+    m.add_class::<ecosystem::EcosystemRating>()?;
+    m.add_class::<ecosystem::LadderHealth>()?;
+    m.add_class::<ecosystem::PromotionLayer>()?;
+    m.add_class::<ecosystem::PromotionStrength>()?;
+    m.add_function(wrap_pyfunction!(ecosystem::g1_height_expanding, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::g4_headroom, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::g2_theme_ladder, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::g3_break_feedback, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::b1_acceleration, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::b2_oneword_made, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::b3_next_day_dump, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::b4_no_sector, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::b5_cross_theme, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::verdict, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::rate, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::ladder_health, m)?)?;
+    m.add_function(wrap_pyfunction!(ecosystem::promotion_strength, m)?)?;
     Ok(())
 }
