@@ -141,8 +141,8 @@ location /trade/ {
 ## 部署
 
 ```bash
-# 重启服务
-sudo systemctl restart emotion-core-dash
+# 重启服务（systemd 重启一律 sudo -n，避免非交互会话被 polkit 拒；见 docs/06 §3.4）
+sudo -n systemctl restart emotion-core-dash
 
 # 验证
 curl -k https://140.83.62.161/trade/health

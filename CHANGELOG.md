@@ -4,6 +4,33 @@
 
 ---
 
+## [Unreleased] — 2026-09-30 (cron 看门狗修复 + 文档口径同步)
+
+### 修复
+
+- **cron 看门狗重启分支失效（服务器 oracle，2026-09-30 修）**：原 crontab 行
+  `*/5 * * * * curl -sf -o /dev/null http://127.0.0.1:8098/ || systemctl restart emotion-core-dash`
+  的重启分支在 cron（非交互）里必被 polkit 拒绝，原文
+  `Access denied as the requested operation requires interactive authentication`，即看门狗实际从未生效。
+  改为：
+  `*/5 * * * * curl -sf --max-time 8 -o /dev/null http://127.0.0.1:8098/ || sudo -n systemctl restart emotion-core-dash >> /home/ubuntu/logs/ec-dash-watchdog.log 2>&1`
+  （旧 crontab 备份 `/tmp/crontab.backup.20260930`）。
+  **铁律：所有 systemd 重启一律 `sudo -n systemctl restart <unit>`**（裸 `systemctl restart` 在 SSH/cron 非交互场景必被 polkit 拒）。
+  e2e 验证（模拟 cron 环境打 8099 死端口）：重启分支 rc=0、`MainPID 1673194 → 1674630`、服务 active、日志 0 字节。
+
+### 测试
+
+- 全量测试口径更新为 **1859 collected / 1857 passed + 2 skipped**（2026-09-30 实测，HEAD 43d3da9）；
+  修复前基线（HEAD c1909cd）1839 collected / 1837 passed + 2 skipped。
+
+### 文档
+
+- **全量文档遍历同步**：`README` / `CHANGELOG` / `docs/11` / `docs/13-交接文档-2026-09-26` / `requirements.txt`
+  统一测试口径并标注历史（1822 / 926 为 2026-09-26 时点，历史口径）；README 补历史信号回填运维 CLI
+  与个股诊断三段式（A/B/C）接线说明；`docs/11` 标注 `diagnose_service.py` 已接入 `/api/stock`。
+
+---
+
 ## [Unreleased] — 2026-09-30 (个股诊断三段式接线 / R2)
 
 ### 新增
@@ -40,8 +67,8 @@
 
 ### 文档
 
-- **口径统一（外审 2026-09-30 复核发现）**: 测试数改用实测口径（1839 collected / 1837 passed + 2 skipped，
-  旧文里的 1822 / 926 标为历史）；`docs/15` 五张「行数」表原列实为**字节数**，全部用 `wc -l` 重算并在表头注明口径；
+- **口径统一（外审 2026-09-30 复核发现）**: 测试数改用实测口径（修复前基线 1839 collected / 1837 passed + 2 skipped；
+  修复后 1859 collected / 1857 passed + 2 skipped，旧文里的 1822 / 926 标为 2026-09-26 时点历史口径）；`docs/15` 五张「行数」表原列实为**字节数**，全部用 `wc -l` 重算并在表头注明口径；
   `docs/15` 的「10 层依赖拓扑」标注为**设计层口径、非目录树**（`models/`、`review/`、`trade/` 在仓内不存在，
   真身分别是 `domain/`、`algorithms/review/`（入口 `orchestration/report.py`）、`presentation/trade_api.py`）
 - **docs/05、docs/13**: `signal` 「只有 6 行」「172 个历史信号」标注为 2026-09-26 时点数字，

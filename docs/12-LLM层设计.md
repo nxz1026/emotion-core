@@ -300,7 +300,7 @@ NULL**，需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌�
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
 
 ```bash
-sudo systemctl start emotion-core-strategy.service
+sudo -n systemctl start emotion-core-strategy.service   # systemd 重启/启动一律 sudo -n，见 docs/06 §3.4
 # 或
 PYTHONPATH=src .venv/bin/python -m emotion_core.orchestration.strategy --date 2026-09-29
 ```

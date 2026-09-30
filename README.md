@@ -47,7 +47,7 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 **阶段 2b（Rust 移植）✅ · 阶段 3（PyO3 接线）✅ · 阶段 4~7（数据/编排/展示/LLM）✅ 已落地 · 阶段 8（上线）⏳ 进行中**
 
-Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（旧口径，2026-09-26 时点）；当前全量实测 **1839 collected / 1837 passed + 2 skipped**（实测 2026-09-30，命令见 `docs/15`「测试覆盖」）。
+Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）；当前全量实测 **1859 collected / 1857 passed + 2 skipped**（实测 2026-09-30，命令见 `docs/15`「测试覆盖」）。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
 ### Python ↔ Rust 模块对照
@@ -130,7 +130,7 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 逻辑层 | `/emotion/logic` | 市场参数与梯队明细 |
 | 算法层 | `/emotion/algorithm` | 公式与阈值（涨停价公式由 `utils/price` 现算，展示层不写死公式） |
 | 策略观察台 | `/emotion/strategy` | LLM 策略信号 + 历史日期切换 |
-| **个股诊断** | `/emotion/stock` | **输入代码/名称 → 该票的情绪周期体检 + 直观建议 + AI 解读** |
+| **个股诊断** | `/emotion/stock` · `/stock/<code>` | **输入代码/名称 → 该票的情绪周期体检 + 直观建议 + AI 解读；结果页三张卡（A 现在 / B 过去 / C 值不值）** |
 
 ### 快照日期（历史回看）
 
@@ -156,8 +156,12 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 - 判定 `algorithms/stock.py`（纯计算：零 SQL、零 LLM）→ 档位 `BUY` 可参与 / `LOW` 只做低吸回踩 /
   `WATCH` 观察 / `AVOID` 不建议参与；市场 `buy_window=NONE`、`force_liquidate`、ST、跌停为硬约束
 - 服务 `services/stock_service.py`（组装 + 可选 LLM；**整链路只读**，不写任何库表）
-- 展示 `presentation/templates/stock.html` + `static/stock.js`
-- API：`GET /emotion/api/stock?code=601811`（规则层，首次 ~2s 全表聚合、缓存后 ~0.15s）；
+- 三段式诊断 `services/diagnose_service.py`（**A 现在 / B 过去 / C 值不值**）：已接入 `/api/stock`，
+  payload 新增 `diagnose` 键（既有键名全部不变），昂贵统计由 `stock_service` TTL 缓存注入
+- 展示 `presentation/templates/stock.html` + `static/stock.js`（三张诊断卡 `#diagnose-a-card` /
+  `#diagnose-b-card` / `#diagnose-c-card`，`renderDiagnose()`，无数据显示「暂无」）
+- API：`GET /emotion/api/stock?code=601811`（规则层，首次 ~2s 全表聚合、缓存后 ~0.15s；
+  响应新增 `diagnose` 段：A/B/C 三段式）；
   `GET /emotion/api/stock/llm?code=601811`（AI 解读，4~6s，前端异步取，失败不影响规则层结论）
 - 页面内容：结论卡（档位 + 逐条依据 + 风险标签）、量价与连板结构（近 30 根 K 线逐日标注涨停/一字/
   换手/炸板/量比）、市场情绪环境与最高板梯队、**同层级历史晋级率/换手口径/次日收益分布**、AI 解读
@@ -181,10 +185,13 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 ```bash
 cd emotion-core
 # 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1805 passed
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1850 passed
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
+
+# 历史信号回填（运维入口；--dry-run 只预览区间与交易日数、不写库）
+PYTHONPATH=src .venv/bin/python -m emotion_core.services.replay_service --start 2024-01-01 --end 2026-09-30
 ```
 
 ---
@@ -219,7 +226,7 @@ emotion-core/
 │   ├── data/          数据层（DB + 同步 + 清理 + 独立交易日历）
 │   ├── orchestration/ 编排层（daily.py 13 步 + systemd）
 │   ├── presentation/  展示层（直观/逻辑/算法/策略/个股 5 页 + 4 个 JSON 接口）
-│   ├── services/      服务层（覆盖率门槛/校准/LLM/个股诊断）
+│   ├── services/      服务层（覆盖率门槛/校准/LLM/个股诊断/历史信号回填 CLI）
 │   ├── llm/           LLM 层（4 profile + 回退链 + prompts/strategies）
 │   ├── domain/        契约层（bar / ladder / market / position / signal / snapshot）
 │   └── utils/         工具层（db/dates/price/config）
