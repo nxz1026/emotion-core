@@ -76,6 +76,18 @@
 
 ---
 
+## [Unreleased] — 2026-10-01 (审计报告修复)
+
+### 修复
+
+- **presentation/server.py**: `get_static` 目录穿越漏洞 — 加 `is_relative_to` 校验 (H1)
+- **presentation/server.py**: HTML 回显异常 — 移除 `{e}` 拼接，改为通用 500 + server-side log (H2)
+- **services/ingest.py**: `upsert()` f-string SQL 注入风险 — 加 `_UPSERT_ALLOWED_TABLES` 白名单 (M4)
+- **Rust unwrap 修复**: 全部 `unwrap()` 加 `SAFETY` 注释 + `accelerate.rs` NaN 排序改 `unwrap_or` (M7)
+- **utils/fetch.py**: `retry_fetch` 首次 sleep 移除 — 仅重试间隔退避 (L2)
+
+---
+
 ## [Unreleased] — 2026-10-01 (P2 批次)
 
 ### 新增

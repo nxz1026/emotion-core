@@ -47,7 +47,7 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 **阶段 2b（Rust 移植）✅ · 阶段 3（PyO3 接线）✅ · 阶段 4~7（数据/编排/展示/LLM）✅ 已落地 · 阶段 8（上线）⏳ 进行中**
 
-Python 参考实现（阶段 2a）全部完成：10 个算法模块 + 495 tests 全绿。
+Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 495 tests 全绿。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
 ### Python ↔ Rust 模块对照
@@ -70,8 +70,8 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 
 | 层 | 状态 | 现状（2026-09-28 实测） |
 |---|---|---|
-| 阶段 2a Python 参考实现 | ✅ 完成 | 10 个算法模块 |
-| 阶段 2b Rust 移植 | ✅ 完成 | 10/10 模块 |
+| 阶段 2a Python 参考实现 | ✅ 完成 | 11 个算法模块 |
+| 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
 | 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` 加载 .so |
 | 阶段 4 数据层 | ✅ 已落地 | 24 张表 DDL；`daily_bar` 337.8 万行 / 663 交易日 / 5221 只；`derived_bar` 337.8 万行；`market_stat` 663 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
 | 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 12 步；systemd：`emotion-core-daily.{timer,service}`、`emotion-core-dash.service`、`emotion-core-strategy.{timer,service}` |
@@ -181,7 +181,7 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 ```bash
 cd emotion-core
 # 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1768 passed
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1805 passed
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
