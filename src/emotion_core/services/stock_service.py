@@ -17,6 +17,7 @@ from typing import Any
 
 from emotion_core.algorithms import stock as stock_algo
 from emotion_core.data import stock_query as q
+from emotion_core.services import diagnose_service
 from emotion_core.utils.config import CONFIG
 
 log = logging.getLogger("emotion_core.services.stock")
@@ -228,6 +229,26 @@ def llm_for(code: str, trade_date: date | None = None) -> dict:
     return llm_comment(payload)
 
 
+def _diagnose_segment(code: str, end: date, payload: dict) -> dict:
+    """三段式诊断段（docs/03 §4.2）——新增键，既有键/层级一律不动。
+
+    昂贵的统计从本服务已算好的缓存里注入（promotion_stats / forward_stats 命中 TTL 缓存，
+    不重复全表聚合）。段内已逐项降级，这里再兜一层：/api/stock 必须永远返回规则层结论。
+    """
+    layer = (payload.get("verdict") or {}).get("layer")
+    try:
+        return diagnose_service.diagnose(
+            code, end,
+            stats={"layer": layer,
+                   "promo_row": _promo_row(end, layer),
+                   "fwd5": forward_stats(end, layer) if layer else None,
+                   "buy_point": payload.get("buy_point")})
+    except Exception as exc:                                    # noqa: BLE001
+        log.warning("diagnose 段降级 %s %s：%s", code, end, exc)
+        return {"title": "三段式诊断", "available": False,
+                "note": f"诊断段异常，已降级：{exc}"}
+
+
 def analyze(query: str, trade_date: date | None = None,
             use_llm: bool = False) -> dict:
     """入口：把用户输入（代码或名称）诊断成一份可渲染的结果。
@@ -263,4 +284,5 @@ def analyze(query: str, trade_date: date | None = None,
     payload["llm"] = (llm_comment(payload) if use_llm else
                       {"enabled": False, "ok": False, "profile": None, "text": "",
                        "error": "按需异步获取（GET /api/stock/llm?code=…）"})
+    payload["diagnose"] = _diagnose_segment(code, end, payload)
     return payload

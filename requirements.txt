@@ -18,7 +18,7 @@
 # 重建：
 #   uv venv .venv --python 3.13
 #   uv pip install --python .venv/bin/python -r requirements.txt
-#   .venv/bin/python -m pytest tests -q        # 926 passed, 2 skipped
+#   PYTHONPATH=src .venv/bin/python -m pytest tests -q   # 全量口径实测 2026-09-30：1839 collected / 1837 passed + 2 skipped
 
 akshare==1.18.97
 httpx==0.28.1

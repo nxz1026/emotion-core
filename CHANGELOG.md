@@ -4,6 +4,54 @@
 
 ---
 
+## [Unreleased] — 2026-09-30 (个股诊断三段式接线 / R2)
+
+### 新增
+
+- **services/diagnose_service.py**: 三段式个股诊断（docs/03 §4.2）
+  - A 段：当日身份（连板/换手/梯队层级/唯一最高板）+ 五条件逐项 `PASS/FAIL/UNKNOWN` + 通俗原因 + W1 同身位扎堆警告
+  - B 段：历史身份（首个 bar / 次新）+ 历史唯一最高板日期与其后 T+1/T+3/T+5 + 历史信号与结果（signal ⋈ signal_outcome）
+  - C 段：晋级率双口径 + divergence + 题材完整性（theme_group.completeness）+ 生态评级（market_stat.dragon_env）+ 同状态赔率
+- **/api/stock**: 新增 `diagnose` 段（既有键名与层级不动）；昂贵统计由 stock_service 的 TTL 缓存注入，不重复全表聚合
+- **presentation/templates/stock.html + static/stock.js**: 个股页新增 A/B/C 三张卡片（`renderDiagnose`），无数据显示「暂无」
+- **services/replay_service.py**: 新增 `__main__` + argparse（`--start/--end/--dry-run`），历史信号回填终于有运维入口
+  （`PYTHONPATH=src .venv/bin/python -m emotion_core.services.replay_service --start 2024-01-01 --end 2026-09-30`），
+  `run()` 的签名与行为一字未改；`--dry-run` 只预览区间与交易日数，不写库
+- **orchestration/daily.py**: `_run_step` 改为返回短 detail 并落 `pipeline_state.detail`——
+  signal 步写 `signals=N code=… action=… buy_window=… source=live`，ladder 步写 `候选=N`，其余步留空
+
+### 修复
+
+- **R2 审计缺口②**：`services/diagnose_service.py` 此前是零调用方的并行死实现，现接入 `/api/stock`；
+  五条件判定只调 `algorithms/entry.py`（本模块不重写规则），梯队只取 `algorithms/ladder.py` 落库的 ladder_day
+- **降级纪律**：任一段缺表/缺列/异常只写 note（`applicable=false` + 「当日非候选」，不编造 PASS/FAIL），诊断段不可能让 `/api/stock` 500
+- **P1-B 仓库侧（`signal` 无 live 行不可观测）**：`pipeline_state` 是 latest-state UPSERT，`mark_done` 的 detail
+  默认空串 ⇒ 「跑了但没信号」与「根本没跑」在库内无法区分，`status=OK` 因此会被误读成「有信号」。
+  daily 现在把每步的产物摘要写进 detail，`signal OK ''` 这类空证据不再出现
+  （2026-09-29/30 实测重算为 `signals=0 buy_window=NONE`，即禁买日无候选，不是步骤没跑）
+- **过期注释**：`orchestration/report.py`、`orchestration/pool.py`、`tests/unit/test_review_entrypoints.py`
+  的「daily 12 步」→ 13 步；`algorithms/dragon_env.py` 的「1822 tests」→ 实测口径
+
+### 测试
+
+- **tests/unit/test_diagnose_service.py**: 5 → 16 个用例（A/B/C 各段、UNKNOWN 不否决、entry 行序变化退回 `entry.checklist`、DB 异常降级）
+- **tests/unit/test_stock_service.py**: 新增 diagnose 段接线用例；保持单测 DB-free（新增 `diagnose_service.query_df` 空表桩）
+- **tests/unit/test_daily.py**: 新增 8 个用例覆盖 detail 传递、返回 None 的桩、signal/ladder detail 落库
+
+### 文档
+
+- **口径统一（外审 2026-09-30 复核发现）**: 测试数改用实测口径（1839 collected / 1837 passed + 2 skipped，
+  旧文里的 1822 / 926 标为历史）；`docs/15` 五张「行数」表原列实为**字节数**，全部用 `wc -l` 重算并在表头注明口径；
+  `docs/15` 的「10 层依赖拓扑」标注为**设计层口径、非目录树**（`models/`、`review/`、`trade/` 在仓内不存在，
+  真身分别是 `domain/`、`algorithms/review/`（入口 `orchestration/report.py`）、`presentation/trade_api.py`）
+- **docs/05、docs/13**: `signal` 「只有 6 行」「172 个历史信号」标注为 2026-09-26 时点数字，
+  并补上 2026-09-30 实测（162 行全 `source='replay'`、`live=0`）；「6 行」的真实出处是
+  `tests/oracle/fixtures/signal_live.json` 这个只有 6 条的 fixtures 骨架
+- **docs/06**: 新增「重建 Rust 产物后必须对账」小节（`pytest tests/oracle` + `.so` 指纹
+  1,592,696 B / md5 `44ebfc09f0a813cead5c1c2b7c076469`）
+
+---
+
 ## [Unreleased] — 2026-10-01 (Rust ecosystem 移植)
 
 ### 新增

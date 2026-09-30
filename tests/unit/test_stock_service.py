@@ -12,6 +12,7 @@ import dataclasses
 import types
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from emotion_core.services import stock_service as svc
@@ -25,6 +26,17 @@ def _clear_cache():
     svc.clear_cache()
     yield
     svc.clear_cache()
+
+
+@pytest.fixture(autouse=True)
+def _db_free_diagnose(monkeypatch):
+    """三段式诊断段（services/diagnose_service）自持 query_df：单测一律空表。
+
+    与仓库基线（单测 DB-free）一致：analyze 新增的 diagnose 段只走降级分支。
+    """
+    from emotion_core.services import diagnose_service
+    monkeypatch.setattr(diagnose_service, "query_df",
+                        lambda sql, params=(), conn=None: pd.DataFrame())
 
 
 def _fake_data(monkeypatch, *, calls=None, promo=None):
@@ -88,6 +100,22 @@ def test_analyze_main_path_has_no_llm_and_rich_payload(monkeypatch):
     assert out["verdict"]["disclaimer"].startswith("统计参考")
     assert len(out["promotion_table"]) == 1
     assert isinstance(out["trade_date"], date)
+
+
+def test_analyze_payload_gains_diagnose_segment(monkeypatch):
+    """新增 `diagnose` 段（A/B/C）——既有键不动，统计从本服务已算好的缓存注入。"""
+    _fake_data(monkeypatch)
+    out = svc.analyze("601811")
+    legacy = {"ok", "code", "trade_date", "basic", "is_new_issuer", "trend", "structure",
+              "market_env", "market_top", "themes", "promotion_table", "series",
+              "verdict", "buy_point", "candidates", "llm"}
+    assert legacy <= set(out)
+    dg = out["diagnose"]
+    assert set(dg) >= {"A", "B", "C"}
+    assert dg["A"]["applicable"] is False            # 空表 → 非候选，不编造 PASS/FAIL
+    assert dg["A"]["conditions"] == []
+    assert dg["C"]["layer"] == out["verdict"]["layer"]
+    assert dg["C"]["forward5"]["n"] == 300           # 同层前瞻统计已注入（未重复聚合）
 
 
 def test_analyze_uses_target_date_and_is_readonly(monkeypatch):

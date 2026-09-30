@@ -67,7 +67,7 @@
 同一交易日分别调 lkl.services.dragon_env 与本模块同名函数，逐值比对。
 """
 
-# ✅ Rust 实现（oracle 对账通过，1822 tests）：src/emotion_core/core/src/ecosystem.rs
+# ✅ Rust 实现（oracle 对账通过；2026-09-30 全量 1857 passed + 2 skipped）：src/emotion_core/core/src/ecosystem.rs
 # 纯判定逻辑（g1~g4 / b1~b5 / _verdict / rate）由 Rust 执行；本文件保留 DB 查询
 # 与 IO 适配层（_series / _tradable_theme_members / _B3_SQL），数据备好后送 Rust 判定。
 # 对账测试：tests/oracle/test_ecosystem_rust_vs_python.py（47 tests，同输入同输出）。

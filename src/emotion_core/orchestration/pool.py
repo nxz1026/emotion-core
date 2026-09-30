@@ -1,6 +1,6 @@
 """东财三池同步 CLI —— `ingest.sync_range` 的独立入口。
 
-**为什么不进 daily**：daily 是 fail-fast 的 12 步主链，而池同步是「批量拉取 +
+**为什么不进 daily**：daily 是 fail-fast 的 13 步主链，而池同步是「批量拉取 +
 有限重试」的外网调用——三池全挂会抛 RuntimeError（`fetch_limit_pool` 的 A7
 护栏），直接挂进主链会因一个外部数据源不可用而拖红整条日更。故独立成单元。
 

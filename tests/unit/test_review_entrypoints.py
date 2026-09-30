@@ -1,7 +1,7 @@
 """复盘报告入口层单元测试：搬运后从未执行过的四个断点 + 报告 CLI。
 
 背景：`review.publish` 是 review_report 表唯一的写入方，但仓内**零调用方**
-（daily 的 12 步里没有 review、无 CLI、无 systemd 单元），模块自 2026-09-26
+（daily 的 13 步里没有 review、无 CLI、无 systemd 单元），模块自 2026-09-26
 手写进来后一次都没跑过。首次执行暴露的断点全部是「照 lkl 的 API 写、
 emotion-core 的契约已漂移」：
 

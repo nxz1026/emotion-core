@@ -32,6 +32,26 @@
       `<div class="stat-value ${cls || ""}">${value}</div></div>`;
   }
 
+  function tableHtml(head, rows) {
+    return `<thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>` +
+      (rows.length ? rows.join("")
+        : `<tr><td colspan="${head.length}" class="muted">暂无</td></tr>`) + "</tbody>";
+  }
+
+  function statusCell(status) {
+    const cls = status === "PASS" ? "up"
+      : (status === "FAIL" || status === "WARN") ? "down" : "muted";
+    return `<td class="${cls}">${esc(status)}</td>`;
+  }
+
+  function retCell(v) {
+    return `<td class="${v == null ? "muted" : (v >= 0 ? "up" : "down")}">${num(v, "%")}</td>`;
+  }
+
+  function boolCell(v) {
+    return `<td>${v == null ? "—" : (v ? "是" : "否")}</td>`;
+  }
+
   function showError(msg) {
     $("stock-error").style.display = "block";
     $("stock-error").textContent = msg;
@@ -168,6 +188,114 @@
       : "当前标的不在连板层级内（未涨停）。";
   }
 
+  function renderDiagnose(dg) {
+    const A = dg && dg.A, B = dg && dg.B, C = dg && dg.C;
+
+    if (dg && !A && dg.note) {          // 整段降级：只显示原因，不摆空卡
+      $("diagnose-a-card").style.display = "";
+      $("diagnose-note").textContent = dg.note;
+      $("diagnose-a-sub").textContent = "";
+      $("diagnose-a-stats").innerHTML = "";
+      $("diagnose-a-note").textContent = "";
+      $("diagnose-a-table").innerHTML = "";
+      return;
+    }
+
+    if (A) {
+      $("diagnose-a-card").style.display = "";
+      $("diagnose-note").textContent = dg.note || "";
+      $("diagnose-a-sub").textContent =
+        `${TRADE_DATE} · 窗口 ${A.window || "—"}（${A.window_source || "—"}）`;
+      $("diagnose-a-stats").innerHTML = [
+        statHtml("连板", num(A.cont_days, " 板")),
+        statHtml("层级", A.layer || "—"),
+        statHtml("换手板", A.is_exchange ? "是" : "—"),
+        statHtml("梯队身份", A.ladder_role || "—"),
+        statHtml("唯一最高板", A.is_sole_top ? "是" : "否"),
+        statHtml("同身位只数", A.peers && A.peers.same_cont != null ? A.peers.same_cont : "—"),
+        statHtml("买入窗口", A.window || "—"),
+        statHtml("五条件", A.applicable
+          ? (A.passed === true ? "全过" : (A.passed === false ? "未全过" : "不可核验"))
+          : "不适用"),
+      ].join("");
+      $("diagnose-a-note").textContent =
+        [A.note, A.reason, A.window_text].filter(Boolean).join("；");
+      const items = (A.conditions || []).concat(A.warnings || []);
+      $("diagnose-a-table").innerHTML = tableHtml(["项", "状态", "说明"],
+        items.map((c) => `<tr><td>${esc(c.label)}</td>${statusCell(c.status)}` +
+          `<td>${esc(c.note)}</td></tr>`));
+    }
+
+    if (B) {
+      $("diagnose-b-card").style.display = "";
+      const id = B.identity || {}, rs = B.return_summary || {};
+      $("diagnose-b-sub").textContent = id.name
+        ? `${id.name}（${id.industry || "行业未接入"}）` : "";
+      $("diagnose-b-stats").innerHTML = [
+        statHtml("首个 bar", id.first_bar_date || "—"),
+        statHtml("次新", id.is_new_issuer == null ? "—" : (id.is_new_issuer ? "是" : "否")),
+        statHtml("历史唯一最高板", num(B.sole_top_n, " 次")),
+        statHtml("其后 T+1 均值", num(rs.avg_t1, "%")),
+        statHtml("T+1 胜率", num(rs.win_rate_t1, "%")),
+        statHtml("T+3 / T+5 均值", `${num(rs.avg_t3, "%")} / ${num(rs.avg_t5, "%")}`),
+        statHtml("历史信号", num(B.signal_n, " 条")),
+      ].join("");
+      $("diagnose-b-note").textContent = B.note || "";
+      $("diagnose-b-table").innerHTML = tableHtml(["当日", "T+1", "T+3", "T+5"],
+        (B.sole_top_history || []).map((h) => `<tr><td>${esc(h.date)}</td>` +
+          retCell(h.t1_ret) + retCell(h.t3_ret) + retCell(h.t5_ret) + "</tr>"));
+      $("diagnose-b-signals").innerHTML = tableHtml(
+        ["确认日", "动作", "状态", "窗口", "来源", "T+1 高开", "T+1 晋级", "T+1 收益",
+          "5 日最大上行", "5 日最大回撤", "T+5 收益", "规则 A", "规则 D", "完成"],
+        (B.signals || []).map((s) => {
+          const o = s.outcome || {};
+          return `<tr><td>${esc(s.confirm_date)}</td><td>${esc(s.action)}</td>` +
+            `<td>${esc(s.status)}</td><td>${esc(s.buy_window)}</td><td>${esc(s.source)}</td>` +
+            `<td>${num(o.t1_gap, "%")}</td>${boolCell(o.t1_promote)}` + retCell(o.t1_close_ret) +
+            `<td>${num(o.max_up5, "%")}</td><td>${num(o.max_dd5, "%")}</td>` +
+            retCell(o.t5_close_ret) + retCell(o.rule_ret_a) + retCell(o.rule_ret_d) +
+            boolCell(o.complete) + "</tr>";
+        }));
+    }
+
+    if (C) {
+      $("diagnose-c-card").style.display = "";
+      const p = C.promotion || {}, f5 = C.forward5 || {}, de = C.dragon_env || {};
+      $("diagnose-c-sub").textContent = C.layer ? `${C.layer} 层级` : "无连板层级";
+      $("diagnose-c-stats").innerHTML = [
+        statHtml("层级", C.layer || "—"),
+        statHtml("晋级率（名义）", num(p.rate, "%")),
+        statHtml("晋级率（换手）", num(p.rate_exchange, "%")),
+        statHtml("背离 divergence", num(p.divergence)),
+        statHtml("同层 5 日前瞻中位", num(f5.median, "%")),
+        statHtml("5 日胜率", num(f5.win_rate, "%")),
+        statHtml("生态评级", de.rating || "—"),
+        statHtml("分歧窗", C.diverge == null ? "—" : (C.diverge ? "是" : "否")),
+      ].join("");
+      const notes = [];
+      if (p.total != null) notes.push(`同层样本 ${p.total}（晋级 ${p.promoted}）`);
+      if (p.fail_perf != null) notes.push(`未晋级次日均值 ${p.fail_perf}%`);
+      if (f5.n != null) notes.push(`前瞻样本 N=${f5.n}`);
+      if (C.odds && C.odds.limit_price != null) notes.push(`打板价 ${C.odds.limit_price}`);
+      if (C.note) notes.push(C.note);
+      const side = (list, label) => {
+        if (!Array.isArray(list) || !list.length) return;
+        notes.push(label + list.map((x) => `${x.cond || ""}${x.cond ? "：" : ""}` +
+          `${x.note || x}`).join(" / "));
+      };
+      side(de.reasons, "评级理由：");
+      side(de.risks, "评级风险：");
+      $("diagnose-c-note").textContent = notes.join("；");
+      $("diagnose-c-table").innerHTML = tableHtml(
+        ["日期", "主题材", "角色", "完整度", "状态", "最高板", "成员数", "龙头"],
+        (C.themes || []).map((t) => `<tr><td>${esc(t.date)}</td>` +
+          `<td>${esc(t.primary_theme)}</td><td>${esc(t.role)}</td>` +
+          `<td>${num(t.completeness)}</td><td>${esc(t.status)}</td>` +
+          `<td>${num(t.highest_board)}</td><td>${num(t.member_count)}</td>` +
+          `<td>${esc(t.top_code)}</td></tr>`));
+    }
+  }
+
   function renderLlm(llm) {
     if (!llm) return;
     $("llm-card").style.display = "";
@@ -206,6 +334,7 @@
       renderSeries(data.series || []);
       renderEnv(data.market_env, data.market_top);
       renderPromotion(data.promotion_table, data.verdict.layer);
+      renderDiagnose(data.diagnose);
       $("llm-card").style.display = "none";
       window.location.hash = "code=" + encodeURIComponent(data.basic.code);
       history.replaceState(null, "", `${BASE}/stock?code=${encodeURIComponent(data.basic.code)}`

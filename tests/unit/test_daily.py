@@ -4,16 +4,22 @@ P1-D：orchestration/daily 零测试 — 核心生产路径无回归保护。
 桩掉 pipeline.mark_running/mark_done/mark_mark_failed 与全部步骤实现，
 验证：交易日守卫、步骤执行顺序、from_step 断点续跑、dry_run 模式、
 CoverageBlocked 专用退出码、通用异常退出码、未知步骤拒绝。
+
+打点回归（2026-09-30）：`mark_done` 必须带 `pipeline_state.detail`——
+此前恒不带，生产上 signal 步天天 `status=OK` / `detail=''`，而 signal 表
+`source='live'` 恒 0 行（`entry.check_signal` 只在全过时落库、其余只写日志），
+库里无从区分「当天没信号」与「步骤没跑」。
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
 from emotion_core.orchestration import daily
 from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocked
 
@@ -41,6 +47,30 @@ def patch_trading_day(monkeypatch):
 def patch_today(monkeypatch):
     """固定 today 为 2026-09-29（周二）。"""
     monkeypatch.setattr(daily, "today_sh", lambda: date(2026, 9, 29))
+
+
+@pytest.fixture
+def patch_all_steps(monkeypatch):
+    """桩掉 13 步的实现（只留编排层），使 run_daily 走真实 ``_run_step`` 分派。
+
+    返回值取真实量纲（行数 / 窗口），供 detail 断言；不依赖 DB 与网络。
+    """
+    monkeypatch.setattr("emotion_core.services.ingest.snapshot_daily", lambda d: 0)
+    monkeypatch.setattr("emotion_core.data.providers.eastmoney.em_data_date",
+                        lambda: date(2026, 9, 29))
+    monkeypatch.setattr("emotion_core.services.ingest.fetch_hot_snapshot", lambda d: 0)
+    monkeypatch.setattr("emotion_core.services.coverage.gate", lambda d: "coverage line")
+    monkeypatch.setattr("emotion_core.services.derive_service.run", lambda d: 0)
+    monkeypatch.setattr("emotion_core.services.market_service.run", lambda d: 0)
+    monkeypatch.setattr("emotion_core.algorithms.ladder.persist", lambda d: 42)
+    monkeypatch.setattr("emotion_core.services.signal_service.run", lambda d: None)
+    monkeypatch.setattr("emotion_core.algorithms.entry.current_window", lambda d: "NONE")
+    monkeypatch.setattr("emotion_core.services.promotion_service.run", lambda d: 0)
+    monkeypatch.setattr("emotion_core.services.theme_service.run", lambda d: 0)
+    monkeypatch.setattr("emotion_core.services.ecosystem_service.run", lambda d: "NEUTRAL")
+    monkeypatch.setattr("emotion_core.services.strategy.run_for_date", lambda d: 0)
+    monkeypatch.setattr("emotion_core.algorithms.outcome.backfill", lambda: 0)
+    monkeypatch.setattr("emotion_core.algorithms.health.push", lambda d: 0)
 
 
 # ── 1. _trading_day_guard ─────────────────────────────────────────────
@@ -103,6 +133,38 @@ class TestRunDailyStepOrder:
         assert rc == 0
         mock_run.assert_not_called()
         daily.pipeline.mark_running.assert_not_called()
+
+    def test_step_detail_is_passed_to_mark_done(self, patch_pipeline, patch_today, patch_trading_day):
+        """回归：每步产出摘要必须作为 detail 落 pipeline_state（此前恒不传）。"""
+        with patch.object(daily, "_run_step", side_effect=lambda step, d: f"{step} 摘要"):
+            rc = daily.run_daily(date(2026, 9, 29))
+
+        assert rc == 0
+        target = date(2026, 9, 29)
+        assert daily.pipeline.mark_done.call_args_list == [
+            call(step, target, f"{step} 摘要") for step, _ in daily.STEPS]
+
+    def test_none_returning_step_marks_empty_detail(self, patch_pipeline, patch_today,
+                                                    patch_trading_day):
+        """桩函数/_run_step 返回 None 时，detail 归一化为 '' 而不是 None。"""
+        with patch.object(daily, "_run_step", side_effect=lambda step, d: None):
+            rc = daily.run_daily(date(2026, 9, 29))
+
+        assert rc == 0
+        target = date(2026, 9, 29)
+        assert daily.pipeline.mark_done.call_args_list == [
+            call(step, target, "") for step, _ in daily.STEPS]
+
+    def test_signal_and_ladder_details_land_in_pipeline_state(
+            self, patch_pipeline, patch_today, patch_trading_day, patch_all_steps):
+        """真实分派下：signal / ladder 两步带摘要，其余步骤允许为空串。"""
+        rc = daily.run_daily(date(2026, 9, 29))
+
+        assert rc == 0
+        by_step = {c.args[0]: c.args[2] for c in daily.pipeline.mark_done.call_args_list}
+        assert list(by_step) == [s for s, _ in daily.STEPS]
+        assert "signals=" in by_step["signal"]
+        assert by_step["ladder"] == "候选=42"
 
 
 # ── 3. run_daily: 守卫与异常处理 ──────────────────────────────────────
@@ -202,7 +264,75 @@ class TestRunStepDispatch:
             daily._run_step("nonexistent", date(2026, 9, 29))
 
 
-# ── 5. 默认参数 ───────────────────────────────────────────────────────
+# ── 5. signal 步产出摘要（pipeline_state.detail） ──────────────────────
+
+class TestSignalStepDetail:
+    """signal 步 detail：``signals=1 code=… action=… buy_window=… source=…``
+    / ``signals=0 buy_window=…``。
+
+    这是 docs/05 §P4 ①（signal 表 `source='live'` 恒 0 行、signal 步却天天
+    `status=OK` / `detail=''`）留下的可观测缺口：``entry.check_signal`` 只在
+    五条件全过时 ``_persist``、其余只写日志，库里分不出「当天没信号」与
+    「步骤没跑」。``Signal`` 无 buy_window 属性（domain/signal.py:39-47），
+    故该字段取 ``entry.current_window()`` 的当日窗口。
+    """
+
+    @staticmethod
+    def _signal() -> Signal:
+        """按 domain/signal.py 真实定义构造（不编造属性、不用 SimpleNamespace）。"""
+        return Signal(
+            code="600519", date=date(2026, 9, 29), action=Action.BUY,
+            checklist=Checklist(c1_uniqueness=True, c2_exchange=True,
+                                c3_elimination=True, c4_min_days=True,
+                                c5_strength_diverge=True, w1_crowding=True),
+            source=SignalSource.LIVE,
+        )
+
+    def test_written_signal_is_recorded(self):
+        with patch("emotion_core.services.signal_service.run", return_value=self._signal()), \
+                patch("emotion_core.algorithms.entry.current_window",
+                      return_value="ENHANCED"):
+            assert (daily._run_step("signal", date(2026, 9, 29))
+                    == "signals=1 code=600519 action=BUY"
+                       " buy_window=ENHANCED source=live")
+
+    def test_no_signal_reports_zero_and_window(self):
+        with patch("emotion_core.services.signal_service.run", return_value=None), \
+                patch("emotion_core.algorithms.entry.current_window",
+                      return_value="STANDARD"):
+            assert (daily._run_step("signal", date(2026, 9, 29))
+                    == "signals=0 buy_window=STANDARD")
+
+    def test_none_window_reported_as_is(self):
+        with patch("emotion_core.services.signal_service.run", return_value=None), \
+                patch("emotion_core.algorithms.entry.current_window", return_value="NONE"):
+            assert (daily._run_step("signal", date(2026, 9, 29))
+                    == "signals=0 buy_window=NONE")
+
+    def test_window_read_failure_degrades_without_raising(self):
+        """打点是旁路：读窗口失败不得把 signal 步变成 FAILED。"""
+        with patch("emotion_core.services.signal_service.run", return_value=None), \
+                patch("emotion_core.algorithms.entry.current_window",
+                      side_effect=RuntimeError("db down")):
+            assert (daily._run_step("signal", date(2026, 9, 29))
+                    == "signals=0 buy_window=unknown")
+
+    def test_detail_reaches_pipeline_state(self, patch_pipeline, patch_today,
+                                           patch_trading_day, patch_all_steps, monkeypatch):
+        """端到端（编排层）：有信号时摘要经 mark_done 落 pipeline_state。"""
+        monkeypatch.setattr("emotion_core.services.signal_service.run",
+                            lambda d: self._signal())
+        monkeypatch.setattr("emotion_core.algorithms.entry.current_window",
+                            lambda d: "ENHANCED")
+
+        assert daily.run_daily(date(2026, 9, 29)) == 0
+
+        by_step = {c.args[0]: c.args[2] for c in daily.pipeline.mark_done.call_args_list}
+        assert by_step["signal"] == ("signals=1 code=600519 action=BUY"
+                                     " buy_window=ENHANCED source=live")
+
+
+# ── 6. 默认参数 ───────────────────────────────────────────────────────
 
 class TestDefaultArgs:
     """默认参数行为。"""

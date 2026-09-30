@@ -2,6 +2,10 @@
 
 一个 Python 脚本，线性步骤 + 表打点 + 失败即停。
 步骤顺序严格照 lkl daily.sh（策略语义）。
+
+打点带**产出摘要**：`_run_step` 的返回值（默认 `""`）即 `pipeline_state.detail`——
+`status=OK` 只证明「没抛异常」，摘要才让「写了 0 行」与「正常产出」可区分，
+见 _run_step 与 _signal_detail。
 """
 from __future__ import annotations
 
@@ -102,8 +106,11 @@ def run_daily(trade_date: date | None = None, *, from_step: str | None = None, d
 
         pipeline.mark_running(step, trade_date)
         try:
-            _run_step(step, trade_date)
-            pipeline.mark_done(step, trade_date)
+            # detail：本步产出摘要（此前恒不带 → pipeline_state.detail 恒空，
+            # 「写入 0 行」与「正常产出」在库里无从区分）。`or ""`：桩函数/旧实现
+            # 返回 None 时不得把 None 落库。语义见 _run_step。
+            detail = _run_step(step, trade_date) or ""
+            pipeline.mark_done(step, trade_date, detail)
         except CoverageBlocked as exc:
             # 半截数据比报错危险：拒绝装配，专用退出码 76（docs/01 A12）。
             pipeline.mark_failed(step, trade_date, str(exc))
@@ -118,8 +125,47 @@ def run_daily(trade_date: date | None = None, *, from_step: str | None = None, d
     return 0
 
 
-def _run_step(step: str, trade_date: date) -> None:
-    """执行单个步骤。"""
+def _signal_detail(trade_date: date, sig: object | None) -> str:
+    """signal 步产出摘要（进 ``pipeline_state.detail``）。
+
+    为什么需要它：``entry.check_signal`` 只在五条件全过时才 ``_persist``
+    （algorithms/entry.py:430-431），其余情况只写日志 ⇒「当天没信号」与「步骤
+    根本没跑」在库内无法区分——这正是「signal 表 source='live' 恒 0 行、而
+    pipeline_state 每日 OK/detail=''」能长期潜伏的原因（docs/05 §P4 ①）。
+
+    字段来源全部是真实属性，不编造：``Signal`` 只有 code / date / action /
+    checklist / source / status（domain/signal.py:39-47，**没有** buy_window），
+    故 ``buy_window`` 取 ``entry.current_window(trade_date)`` 的当日买入窗口
+    （algorithms/entry.py:400），这是事实读取、不是判据复算。
+
+    格式：``signals=1 code=600519 action=BUY buy_window=ENHANCED source=live``
+    / ``signals=0 buy_window=NONE``。无信号时不塞清单（库里上限 500 字符，越短越好）；
+    ``signals`` 只反映**主信号**（``check_signal`` 返回 None 时次级推荐仍可能落库，
+    它吞掉了 ``check_secondary_signal`` 的返回值）。
+    """
+    try:
+        from emotion_core.algorithms import entry
+        window = entry.current_window(trade_date)
+    except Exception as exc:                      # noqa: BLE001
+        # 打点是旁路：读窗口失败不得把 signal 步变成 FAILED（信号本身可能已落库）
+        log.warning("signal 明细降级：buy_window 读取失败 %s", exc)
+        window = "unknown"
+    if sig is None:
+        return f"signals=0 buy_window={window}"
+    return (f"signals=1 code={sig.code} action={sig.action.value}"
+            f" buy_window={window} source={sig.source.value}")
+
+
+def _run_step(step: str, trade_date: date) -> str:
+    """执行单个步骤；返回写进 ``pipeline_state.detail`` 的短摘要。
+
+    默认 ``""``（无产出摘要的步骤）。只有**算法/服务层已有现成返回值**、
+    编排层不必新增查询的步骤才给摘要（``ladder`` / ``signal``）：口径只有业务层
+    一处，编排层复刻判据就是第二份真相。
+
+    ``run_daily`` 侧按 ``_run_step(...) or ""`` 取值——桩函数（测试）返回 None
+    时不得把 None 塞进 ``mark_done``。
+    """
     if step == "sync":
         from emotion_core.services.ingest import snapshot_daily
         snapshot_daily(trade_date)
@@ -135,7 +181,7 @@ def _run_step(step: str, trade_date: date) -> None:
         current = em_data_date()
         if current != trade_date:
             log.info("hot: 跳过 %s（人气榜只对应 %s，不回补历史）", trade_date, current)
-            return
+            return ""
         from emotion_core.services.ingest import fetch_hot_snapshot
         fetch_hot_snapshot(trade_date)
     elif step == "coverage":
@@ -149,10 +195,11 @@ def _run_step(step: str, trade_date: date) -> None:
         market_run(trade_date)
     elif step == "ladder":
         from emotion_core.algorithms import ladder
-        ladder.persist(trade_date)
+        # 现成返回值即当日梯队行数（= 候选数），不改算法层、不新增查询
+        return f"候选={ladder.persist(trade_date)}"
     elif step == "signal":
         from emotion_core.services.signal_service import run as signal_run
-        signal_run(trade_date)
+        return _signal_detail(trade_date, signal_run(trade_date))
     elif step == "promotion":
         from emotion_core.services.promotion_service import run as promotion_run
         promotion_run(trade_date)
@@ -177,6 +224,7 @@ def _run_step(step: str, trade_date: date) -> None:
         health.push(trade_date)
     else:
         raise ValueError(f"未知步骤: {step}")
+    return ""
 
 
 def main() -> None:

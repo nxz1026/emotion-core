@@ -47,7 +47,7 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 **阶段 2b（Rust 移植）✅ · 阶段 3（PyO3 接线）✅ · 阶段 4~7（数据/编排/展示/LLM）✅ 已落地 · 阶段 8（上线）⏳ 进行中**
 
-Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿。
+Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（旧口径，2026-09-26 时点）；当前全量实测 **1839 collected / 1837 passed + 2 skipped**（实测 2026-09-30，命令见 `docs/15`「测试覆盖」）。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
 ### Python ↔ Rust 模块对照
@@ -74,10 +74,10 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
 | 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` 加载 .so |
 | 阶段 4 数据层 | ✅ 已落地 | 24 张表 DDL；`daily_bar` 337.8 万行 / 663 交易日 / 5221 只；`derived_bar` 337.8 万行；`market_stat` 663 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
-| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 12 步；systemd：`emotion-core-daily.{timer,service}`、`emotion-core-dash.service`、`emotion-core-strategy.{timer,service}` |
+| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 13 步（sync/coverage/hot/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health）；systemd：`emotion-core-daily.{timer,service}`、`emotion-core-dash.service`、`emotion-core-strategy.{timer,service}` |
 | 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 4 个 JSON 接口（另有 `/api/*` 兜底状态），端口 8098，nginx 前缀 `/emotion` |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
-| 阶段 8 上线 | ⏳ 进行中 | 日更链尚未成功跑通完整一轮：`signal` / `ladder_day` / `promotion_day` / `theme_tag` / `signal_outcome` 仍为 0 行 |
+| 阶段 8 上线 | ⏳ 进行中 |（2026-09-28 快照）日更链尚未成功跑通完整一轮：`signal` / `ladder_day` / `promotion_day` / `theme_tag` / `signal_outcome` 仍为 0 行。**2026-09-30 更新**：`signal` / `signal_outcome` 已各 162 行、全部 `source='replay'`、`source='live'`=0，日更链自 2026-09-29 起连续两日 `daily done`；`ladder_day` / `promotion_day` / `theme_tag` 未复核。详见 `docs/05` §P4 |
 
 > 数据现状决定了展示口径：只有 `daily_bar` / `derived_bar` / `market_stat` / `stock_basic`
 > 四张表有数据，所以个股诊断等功能的统计**全部从这四张表现算**（PIT 安全），
@@ -217,10 +217,11 @@ emotion-core/
 │   ├── core/          Rust 算法核心（.so）
 │   ├── algorithms/    Python 算法外壳（PyO3）+ 个股判定
 │   ├── data/          数据层（DB + 同步 + 清理 + 独立交易日历）
-│   ├── orchestration/ 编排层（daily.py 12 步 + systemd）
+│   ├── orchestration/ 编排层（daily.py 13 步 + systemd）
 │   ├── presentation/  展示层（直观/逻辑/算法/策略/个股 5 页 + 4 个 JSON 接口）
 │   ├── services/      服务层（覆盖率门槛/校准/LLM/个股诊断）
 │   ├── llm/           LLM 层（4 profile + 回退链 + prompts/strategies）
+│   ├── domain/        契约层（bar / ladder / market / position / signal / snapshot）
 │   └── utils/         工具层（db/dates/price/config）
 ├── tests/            unit / oracle / caliber / architecture / e2e
 └── scripts/
