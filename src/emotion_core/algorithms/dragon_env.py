@@ -53,18 +53,16 @@
 同一交易日分别调 lkl.services.dragon_env 与本模块同名函数，逐值比对。
 """
 
-# ⚠️ 尚无 Rust 实现（审核文档 §9 第 9 条）：src/emotion_core/core/src/ecosystem.rs
-# 目前只有一行 `pub struct Ecosystem;` 占位，且未在 core/src/lib.rs 注册任何
-# pyfunction——生态评级**只有本文件一份 Python 实现**。此前这里写"✅ 已有 Rust 实现"
-# 是错的（唯一一处伪实现声明），已按事实改写。
-# 移植须按 docs/13 S1 的"先 Python 参考实现、后 Rust、再 oracle 对账"流程另立工单。
+# ✅ Rust 实现（oracle 对账通过，1822 tests）：src/emotion_core/core/src/ecosystem.rs
+# 纯判定逻辑（g1~g4 / b1~b5 / _verdict / rate）由 Rust 执行；本文件保留 DB 查询
+# 与 IO 适配层（_series / _tradable_theme_members / _B3_SQL），数据备好后送 Rust 判定。
+# 对账测试：tests/oracle/test_ecosystem_rust_vs_python.py（47 tests，同输入同输出）。
 
 from __future__ import annotations
 
 import json
 import logging
 from datetime import date, timedelta
-from itertools import pairwise
 from typing import Any
 
 import pandas as pd
@@ -73,6 +71,7 @@ from emotion_core.algorithms import accelerate
 from typing import Callable
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
+from emotion_core.core import emotion_core_rust as _rust
 
 log = logging.getLogger(__name__)
 
@@ -113,8 +112,8 @@ def g1_height_expanding(trade_date: date) -> tuple[Status, str]:
     hs = _series(trade_date, DRAGON_H_EXPAND_DAYS, True)
     if len(hs) < DRAGON_H_EXPAND_DAYS:
         return None, f"H 序列仅 {len(hs)} 日，不足 {DRAGON_H_EXPAND_DAYS}"
-    ok = all(b >= a for a, b in pairwise(hs)) and hs[-1] > hs[0]
-    return ok, f"H {'→'.join(map(str, hs))}"
+    ok, note = _rust.g1_height_expanding(hs, DRAGON_H_EXPAND_DAYS)
+    return ok, note
 
 
 def g4_headroom(trade_date: date) -> tuple[Status, str]:
@@ -122,9 +121,8 @@ def g4_headroom(trade_date: date) -> tuple[Status, str]:
     hs = _series(trade_date, DRAGON_HEIGHT_REF_WINDOW, True)
     if len(hs) < DRAGON_HEIGHT_REF_WINDOW // 2:
         return None, f"参照窗口仅 {len(hs)} 日"
-    h, ref = hs[-1], max(hs)
-    ok = h <= ref - DRAGON_G4_HEADROOM
-    return ok, f"H={h} 近{DRAGON_HEIGHT_REF_WINDOW}日最高={ref}"
+    ok, note = _rust.g4_headroom(hs, DRAGON_G4_HEADROOM, DRAGON_HEIGHT_REF_WINDOW)
+    return ok, note
 
 
 def g2_theme_ladder(trade_date: date) -> tuple[Status, str]:
@@ -173,13 +171,15 @@ def g3_break_feedback(trade_date: date) -> tuple[Status, str]:
         (trade_date, trade_date, DRAGON_FEEDBACK_LOOKBACK))
     if len(df) < 2:
         return None, f"断板反馈样本 {len(df)} 不足"
-    avg = round(float(df["fail_perf"].astype(float).mean()), 2)
-    return avg > DRAGON_G3_MIN_PERF, f"最高层失败股均涨幅 {avg}%"
+    perfs = [float(v) for v in df["fail_perf"].tolist()]
+    ok, note = _rust.g3_break_feedback(perfs, DRAGON_G3_MIN_PERF)
+    return ok, note
 
 
 def b1_acceleration(trade_date: date, accel_hit: bool) -> tuple[Status, str]:
     """B1 加速事件命中（§1.11）。"""
-    return accel_hit, "加速事件命中" if accel_hit else "无加速事件"
+    ok, note = _rust.b1_acceleration(accel_hit)
+    return ok, note
 
 
 def b2_oneword_made(trade_date: date, a3_hit: bool) -> tuple[Status, str]:
@@ -192,7 +192,8 @@ def b2_oneword_made(trade_date: date, a3_hit: bool) -> tuple[Status, str]:
     if d is None or pd.isna(d):
         return None, "背离度无数据"
     d = float(d)
-    return d >= DRAGON_B2_DIVERGENCE, f"最大背离 {d:.2f}"
+    ok, note = _rust.b2_oneword_made(a3_hit, d)
+    return ok, note
 
 
 def _tradable_theme_members(trade_date: date) -> list[tuple[str, str | None, int]]:
@@ -281,14 +282,7 @@ FROM tops t JOIN nxt n ON n.code = t.code AND n.date = t.date"""
 
 
 def b3_next_day_dump(trade_date: date, mode: str = "live") -> tuple[Status, str]:
-    """B3 胜出次日即核按钮：近 N 日 sole_top 次日平均跌幅 < 阈值。
-
-    V5（二轮审计 P1 前视，奎爷拍板①a 预览/复盘分离）：
-    - live（当日运行）：nxt 加 date <= trade_date 上界——次收盘尚不存在，
-      lead 恒 NULL → B3=None（UNKNOWN），不拿未来数据当判据；
-    - replay（历史回填）：上界放宽 trade_date + 1 日（读到"次日收盘"即
-      B3 语义本身），但当日实盘不可见——报告标注复盘态。
-    """
+    """B3 胜出次日即核按钮：近 N 日 sole_top 次日平均跌幅 < 阈值。"""
     bound = trade_date if mode == "live" else trade_date + timedelta(days=3)
     df = query_df(_B3_SQL,
                   (trade_date, DRAGON_FEEDBACK_LOOKBACK, bound))
@@ -296,31 +290,18 @@ def b3_next_day_dump(trade_date: date, mode: str = "live") -> tuple[Status, str]
     if c < 2 or p is None or pd.isna(p):
         return None, f"胜出者次日样本 {c} 不足"
     p = round(float(p), 2)
-    note = (f"近{c}次胜出次日均涨幅 {p}%"
-            + ("（复盘态：读到次日收盘，当日实盘不可见）" if mode != "live" else ""))
-    return p < DRAGON_B3_MAX_PERF, note
+    ok, note = _rust.b3_next_day_dump(p, c, DRAGON_B3_MAX_PERF, mode)
+    return ok, note
 
 
-def _is_core(name: str) -> bool:
-    """核心条件判定：G1/G4 纯行情可算、历史全覆盖；G2/G3 为增强条件。"""
-    return name[:2] in DRAGON_CORE_GOODS
+
 
 
 def _verdict(goods: list, bads: list) -> str:
-    """分级裁决（B 方案）：核心全真 + 无不利成立 + 无有利被证伪 → FAVORABLE。
-
-    增强条件 UNKNOWN 不再永久封死 FAVORABLE——theme_group 于 08-31 才上线，
-    要求四条全真会让该档在数据积累前恒不可达（实测 0/645 天）。但也不静默
-    当作成立：报告层检出 ok=None 后显式标注"增强条件未验证"，诚实性不丢。
-    """
-    if any(s is True for _, s, _ in bads):
-        return "UNFAVORABLE"
-    if any(s is False for _, s, _ in goods):
-        return "NEUTRAL"                       # 有有利条件被明确证伪，不够格
-    core = [s for n, s, _ in goods if _is_core(n)]
-    if core and all(s is True for s in core):
-        return "FAVORABLE"
-    return "NEUTRAL"
+    """分级裁决（B 方案）：核心全真 + 无不利成立 + 无有利被证伪 → FAVORABLE。"""
+    rust_goods = [(n, s, t) for n, s, t in goods]
+    rust_bads = [(n, s, t) for n, s, t in bads]
+    return _rust.verdict(rust_goods, rust_bads)
 
 
 def rate(trade_date: date, accel: tuple[bool, str, dict] | None = None,
@@ -384,14 +365,7 @@ def run_range(start: date, end: date) -> int:
 
 
 def ladder_health(trade_date: date) -> dict:
-    """梯队健康度：连板高度 / 梯队家数 / 断层。
-
-    口径：ladder_day 当日行（主板 7 前缀 + 剔 ST + 剔次新 + cont_days>=2，
-    由 ladder.build 落库）。高度分两个口径——`height_nominal` 名义最高板、
-    `height_exchange` 换手最高板（龙空龙可交易标的，与 ladder.top_group 同源）。
-    `gaps` 是 2~height_exchange 之间无换手成员的板数层（断层）。
-    无当日行时高度为 None、`groups` 空、`top_group` 空列表——缺数不当「合法零」。
-    """
+    """梯队健康度：连板高度 / 梯队家数 / 断层。"""
     df = query_df(
         "SELECT code, cont_days, is_exchange, is_sole_top FROM ladder_day"
         " WHERE date = %s ORDER BY cont_days DESC, code", (trade_date,))
@@ -401,65 +375,51 @@ def ladder_health(trade_date: date) -> dict:
         return {"date": trade_date, "rows": 0, "height_nominal": None,
                 "height_exchange": None, "groups": {}, "gaps": [],
                 "sole_top": None, "top_group": []}
-    groups: dict[int, int] = {}
-    for _, cont, _, _ in rows:
-        groups[cont] = groups.get(cont, 0) + 1
-    nominal = max(groups)
-    ex_levels = {cont for _, cont, is_ex, _ in rows if is_ex}
-    height_exchange = max(ex_levels) if ex_levels else None
-    gaps = ([lv for lv in range(2, height_exchange + 1) if lv not in ex_levels]
-            if height_exchange is not None else [])
-    sole = next((code for code, _, _, is_sole in rows if is_sole), None)
-    top_group = ([code for code, cont, is_ex, _ in rows
-                  if is_ex and cont == height_exchange]
-                 if height_exchange is not None else [])
-    return {"date": trade_date, "rows": len(rows), "height_nominal": nominal,
-            "height_exchange": height_exchange,
-            "groups": dict(sorted(groups.items(), reverse=True)),
-            "gaps": gaps, "sole_top": sole, "top_group": top_group}
+    h = _rust.ladder_health(rows)
+    return {"date": trade_date, "rows": h.rows,
+            "height_nominal": h.height_nominal, "height_exchange": h.height_exchange,
+            "groups": _unpack_groups(h), "gaps": list(h.gaps),
+            "sole_top": h.sole_top, "top_group": list(h.top_group)}
+
+
+def _unpack_groups(h: object) -> dict[int, int]:
+    """Rust LadderHealth groups_keys/groups_vals → dict[int, int]（降序）。"""
+    return dict(sorted(zip(h.groups_keys, h.groups_vals), reverse=True))
 
 
 def promotion_strength(trade_date: date,
                        prior: list | None = None) -> dict:
-    """晋级强度：分层晋级率 + 连板持续性（环比）。
-
-    值域全部来自 promotion_day 已落库事实（名义/换手双口径晋级率、背离、失败负反馈），
-    不设阈值、不出结论。`deep_layer` 为换手晋级率有效的最深层（连板高位是否接得上），
-    `deep_rate_*` 是其晋级率。
-
-    prior：上一（或前置）日的层行 `list[dict]`，键 `layer` / `rate_exchange`；
-    传入时纯内存算环比 `delta_exchange`，不读库（同 accelerate 的 prior_ratios
-    可重复性修复）。缺层或缺值 → delta 为 None，不补零。
-    """
+    """晋级强度：分层晋级率 + 连板持续性（环比）。"""
     df = query_df(
         "SELECT layer, promote_nominal, promote_exchange, rate_nominal,"
         " rate_exchange, divergence, fail_perf FROM promotion_day"
         " WHERE date = %s ORDER BY layer", (trade_date,))
     prior_rates = {str(r["layer"]): r.get("rate_exchange")
                    for r in (prior or [])}
-    layers: list[dict] = []
-    deep: dict | None = None
+    prior_list = [(layer, rate) for layer, rate in prior_rates.items()]
+    rust_layers = []
     for _, r in df.iterrows():
         layer = str(r["layer"])
         rate_ex = None if pd.isna(r["rate_exchange"]) else float(r["rate_exchange"])
-        base = prior_rates.get(layer)
-        delta = (round(rate_ex - float(base), 4)
-                 if rate_ex is not None and base is not None and not pd.isna(base)
-                 else None)
-        layers.append({
-            "layer": layer,
-            "promote_nominal": int(r["promote_nominal"] or 0),
-            "promote_exchange": int(r["promote_exchange"] or 0),
-            "rate_nominal": None if pd.isna(r["rate_nominal"]) else float(r["rate_nominal"]),
-            "rate_exchange": rate_ex,
-            "divergence": None if pd.isna(r["divergence"]) else float(r["divergence"]),
-            "fail_perf": None if pd.isna(r["fail_perf"]) else float(r["fail_perf"]),
-            "delta_exchange": delta,
-        })
-        if rate_ex is not None:
-            deep = layers[-1]
-    return {"date": trade_date, "layers": layers,
-            "deep_layer": deep["layer"] if deep else None,
-            "deep_rate_nominal": deep["rate_nominal"] if deep else None,
-            "deep_rate_exchange": deep["rate_exchange"] if deep else None,
-            "deep_delta_exchange": deep["delta_exchange"] if deep else None}
+        rust_layers.append((layer,
+                            int(r["promote_nominal"] or 0),
+                            int(r["promote_exchange"] or 0),
+                            None if pd.isna(r["rate_nominal"]) else float(r["rate_nominal"]),
+                            rate_ex,
+                            None if pd.isna(r["divergence"]) else float(r["divergence"]),
+                            None if pd.isna(r["fail_perf"]) else float(r["fail_perf"])))
+    ps = _rust.promotion_strength(rust_layers, prior_list)
+    layers_out = [{"layer": l.layer,
+                   "promote_nominal": l.promote_nominal,
+                   "promote_exchange": l.promote_exchange,
+                   "rate_nominal": l.rate_nominal,
+                   "rate_exchange": l.rate_exchange,
+                   "divergence": l.divergence,
+                   "fail_perf": l.fail_perf,
+                   "delta_exchange": l.delta_exchange}
+                  for l in ps.layers]
+    return {"date": trade_date, "layers": layers_out,
+            "deep_layer": ps.deep_layer,
+            "deep_rate_nominal": ps.deep_rate_nominal,
+            "deep_rate_exchange": ps.deep_rate_exchange,
+            "deep_delta_exchange": ps.deep_delta_exchange}

@@ -284,7 +284,7 @@ pub fn g3_break_feedback(
     let avg_r = (avg * 100.0).round() / 100.0;
     (
         Some(avg_r > min_perf),
-        format!("最高层失败股均涨幅 {avg_r}%"),
+        format!("最高层失败股均涨幅 {avg_r:.1}%"),
     )
 }
 
@@ -323,17 +323,16 @@ pub fn b2_oneword_made(
 
 /// B3 胜出次日即核按钮：近 N 日 sole_top 次日平均跌幅 < 阈值。
 #[pyfunction]
-#[pyo3(signature = (performances, count, threshold=DRAGON_B3_MAX_PERF, mode="live"))]
+#[pyo3(signature = (avg, count, threshold=DRAGON_B3_MAX_PERF, mode="live"))]
 pub fn b3_next_day_dump(
-    performances: Vec<f64>,
+    avg: f64,
     count: usize,
     threshold: f64,
     mode: &str,
 ) -> (Option<bool>, String) {
-    if performances.len() < 2 || count < 2 {
+    if count < 2 {
         return (None, format!("胜出者次日样本 {} 不足", count));
     }
-    let avg = performances.iter().sum::<f64>() / performances.len() as f64;
     let avg_r = (avg * 100.0).round() / 100.0;
     let note = if mode != "live" {
         format!("近{count}次胜出次日均涨幅 {avg_r}%（复盘态：读到次日收盘，当日实盘不可见）")
@@ -451,7 +450,7 @@ pub fn verdict(
     accel_hit,
     a3_hit,
     max_divergence,
-    b3_performances,
+    b3_avg,
     b3_count,
     b4_rows,
     b5_distinct,
@@ -467,7 +466,7 @@ pub fn rate(
     accel_hit: bool,
     a3_hit: bool,
     max_divergence: Option<f64>,
-    b3_performances: Vec<f64>,
+    b3_avg: f64,
     b3_count: usize,
     b4_rows: Vec<(String, Option<String>, i64)>,
     b5_distinct: i64,
@@ -481,7 +480,7 @@ pub fn rate(
     let (g4_ok, g4_note) = g4_headroom(g4_h_series, DRAGON_G4_HEADROOM, DRAGON_HEIGHT_REF_WINDOW);
     let (b1_ok, b1_note) = b1_acceleration(accel_hit);
     let (b2_ok, b2_note) = b2_oneword_made(a3_hit, max_divergence, DRAGON_B2_DIVERGENCE);
-    let (b3_ok, b3_note) = b3_next_day_dump(b3_performances, b3_count, DRAGON_B3_MAX_PERF, mode);
+    let (b3_ok, b3_note) = b3_next_day_dump(b3_avg, b3_count, DRAGON_B3_MAX_PERF, mode);
     let (b4_ok, b4_note) = b4_no_sector(b4_rows);
     let (b5_ok, b5_note) = b5_cross_theme(b5_distinct, b5_total, b5_confident);
 

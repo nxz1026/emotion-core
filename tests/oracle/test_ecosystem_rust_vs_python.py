@@ -128,15 +128,15 @@ def test_b2_a3_hit_no_divergence():
 
 # ── b3_next_day_dump ───────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("perfs,count,expected_ok", [
-    ([-8.0, -9.0], 2, True),      # avg=-8.5 < -7.0
-    ([-5.0, -6.0], 2, False),     # avg=-5.5 > -7.0
-    ([1.0], 1, None),             # 样本不足
-    ([], 0, None),                # 空
+@pytest.mark.parametrize("avg,count,expected_ok", [
+    (-8.5, 2, True),      # avg=-8.5 < -7.0
+    (-5.5, 2, False),     # avg=-5.5 > -7.0
+    (1.0, 1, None),       # 样本不足
+    (0.0, 0, None),       # 空
 ])
-def test_b3(perfs, count, expected_ok):
-    rust_ok, rust_note = rust.b3_next_day_dump(perfs, count, -7.0, "live")
-    assert rust_ok == expected_ok, f"perfs={perfs}: rust={rust_ok}"
+def test_b3(avg, count, expected_ok):
+    rust_ok, rust_note = rust.b3_next_day_dump(avg, count, -7.0, "live")
+    assert rust_ok == expected_ok, f"avg={avg}: rust={rust_ok}"
 
 
 # ── b4_no_sector ───────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ def test_rate_favorable():
         accel_hit=False,
         a3_hit=False,
         max_divergence=None,
-        b3_performances=[],
+        b3_avg=0.0,
         b3_count=0,
         b4_rows=[("000001", None, 0)],
         b5_distinct=0,
@@ -302,7 +302,7 @@ def test_rate_unfavorable():
         accel_hit=True,
         a3_hit=False,
         max_divergence=None,
-        b3_performances=[],
+        b3_avg=0.0,
         b3_count=0,
         b4_rows=[],
         b5_distinct=0,
@@ -323,7 +323,7 @@ def test_rate_neutral():
         accel_hit=False,
         a3_hit=False,
         max_divergence=None,
-        b3_performances=[],
+        b3_avg=0.0,
         b3_count=0,
         b4_rows=[],
         b5_distinct=0,
