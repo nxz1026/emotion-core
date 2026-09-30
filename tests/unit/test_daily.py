@@ -67,7 +67,7 @@ class TestRunDailyStepOrder:
     """run_daily 步骤执行顺序、打点行为。"""
 
     def test_all_steps_execute_in_order(self, patch_pipeline, patch_today, patch_trading_day):
-        """所有 12 步按 STEPS 顺序执行，每步都 mark_running + mark_done。"""
+        """所有 13 步按 STEPS 顺序执行，每步都 mark_running + mark_done。"""
         step_calls = []
 
         def mock_run_step(step, trade_date):
@@ -78,8 +78,8 @@ class TestRunDailyStepOrder:
 
         assert rc == 0
         assert step_calls == [s for s, _ in daily.STEPS]
-        assert daily.pipeline.mark_running.call_count == 12
-        assert daily.pipeline.mark_done.call_count == 12
+        assert daily.pipeline.mark_running.call_count == 13
+        assert daily.pipeline.mark_done.call_count == 13
         daily.pipeline.mark_failed.assert_not_called()
 
     def test_from_step_resumes(self, patch_pipeline, patch_today, patch_trading_day):
@@ -215,10 +215,10 @@ class TestDefaultArgs:
         # 验证至少执行了一个步骤（今天是交易日）
         mock_run.assert_called()
 
-    def test_steps_list_has_12_entries(self):
-        """STEPS 注册表必须有 12 步。"""
-        assert len(daily.STEPS) == 12
+    def test_steps_list_has_13_entries(self):
+        """STEPS 注册表必须有 13 步（R20 起含 hot）。"""
+        assert len(daily.STEPS) == 13
         step_names = [s for s, _ in daily.STEPS]
-        expected = ["sync", "coverage", "derive", "market", "ladder", "signal",
+        expected = ["sync", "coverage", "hot", "derive", "market", "ladder", "signal",
                     "promotion", "theme", "ecosystem", "strategy", "outcome", "health"]
         assert step_names == expected

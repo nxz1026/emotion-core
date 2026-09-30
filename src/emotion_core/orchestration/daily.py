@@ -20,6 +20,12 @@ log = logging.getLogger("emotion_core.daily")
 STEPS = [
     ("sync", "数据同步"),
     ("coverage", "覆盖率门槛"),
+    # R20：此前 fetch_hot_snapshot / backfill_hot_rank 定义了但**全仓零调用**，
+    # 导致 hot_rank 长期 0 行（CPT /pool 的「热门 5 只」全靠 ladder_day 顶替）。
+    # 位置在 coverage 之后而不是 sync 之后：test_coverage 守的契约是
+    # 「coverage 紧跟 sync」（拉完立刻验、早失败），插中间会破坏它。hot 不参与
+    # coverage 门槛，故排在门槛之后同样安全。
+    ("hot", "人气榜"),
     ("derive", "判据+连板"),
     ("market", "状态机"),
     ("ladder", "梯队"),
@@ -117,6 +123,21 @@ def _run_step(step: str, trade_date: date) -> None:
     if step == "sync":
         from emotion_core.services.ingest import snapshot_daily
         snapshot_daily(trade_date)
+    elif step == "hot":
+        # 东财人气榜 top100。``fetch_hot_snapshot`` 自带守卫：当前榜只对应最新
+        # 交易日，传入别的日期会 raise。
+        #
+        # 为什么不把 raise 直接放出去（那样更简单）：那会让**所有历史回补**全挂。
+        # ``run_daily(from_step=..., 旧交易日)`` 跑到 hot 步必然守卫失败 →
+        # 整条 daily 返回 1，「人气榜不能回补」是**不适用**，不是**失败**。
+        # 口径与 ``_trading_day_guard`` 一致：非交易日直接返回 0，不算失败。
+        from emotion_core.data.providers.eastmoney import em_data_date
+        current = em_data_date()
+        if current != trade_date:
+            log.info("hot: 跳过 %s（人气榜只对应 %s，不回补历史）", trade_date, current)
+            return
+        from emotion_core.services.ingest import fetch_hot_snapshot
+        fetch_hot_snapshot(trade_date)
     elif step == "coverage":
         from emotion_core.services.coverage import gate
         gate(trade_date)          # 不足 0.90 抛 CoverageBlocked → 退出码 76
