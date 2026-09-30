@@ -4,8 +4,7 @@
 <div class="strategy-top-bar">
     <h1>策略观察台</h1>
     <div class="strategy-controls">
-        <label for="dateSelect">日期</label>
-        <select id="dateSelect"></select>
+        <span class="muted" id="strategyDateLabel">当前快照：{{ prefill_date or '—' }}</span>
         <select id="strategySelect"><option value="">全部策略</option></select>
         <input id="strategyFilter" type="search" placeholder="筛选代码、名称、理由…" aria-label="筛选策略结果">
         <label for="sortSelect">排序</label>
@@ -49,10 +48,12 @@
     </table>
 </div>
 <script>
-const dates = {{ dates_json | safe }};
-// 全局快照日（URL ?date=）：若报告列表里有同一天，就默认选中它
-const prefillDate = {{ (prefill_date or '') | tojson }};
-const dateSelect = document.getElementById('dateSelect');
+// 日期选择统一走 base.html 的日历组件（?date= 参数），不再用独立 <select>
+function getSnapshotDate() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('date') || '{{ prefill_date or "" }}';
+}
+const prefillDate = getSnapshotDate();
 const strategySelect = document.getElementById('strategySelect');
 const filterInput = document.getElementById('strategyFilter');
 const sortSelect = document.getElementById('sortSelect');
@@ -92,7 +93,7 @@ function renderRows(items){
     });
 }
 async function load(){
-    const date=dateSelect.value;
+    const date=getSnapshotDate();
     if(!date){renderRows([]);note.textContent='当日无策略产出（开关未开或休市）';return;}
     const resp=await fetch(`api/strategy?date=${encodeURIComponent(date)}`);
     const data=await resp.json();
@@ -111,9 +112,6 @@ function updateSortHeaders(){
     });
 }
 function init(){
-    dateSelect.innerHTML=dates.map(d=>`<option>${esc(d)}</option>`).join('');
-    if (prefillDate && dates.includes(prefillDate)) dateSelect.value = prefillDate;
-    dateSelect.onchange=load;
     strategySelect.onchange=()=>renderRows(currentItems);
     filterInput.oninput=()=>renderRows(currentItems);
     sortSelect.onchange=()=>{sortKey=sortSelect.value;updateSortHeaders();renderRows(currentItems);};
