@@ -58,6 +58,31 @@
     ).join("");
   }
 
+  function renderBuyPoint(bp) {
+    if (!bp || (!bp.limit_price && !bp.odds)) {
+      $("buy-point-card").style.display = "none";
+      return;
+    }
+    $("buy-point-card").style.display = "block";
+    const limit = bp.limit_price != null ? num(bp.limit_price) : "—";
+    $("buy-point-limit").textContent = limit;
+    const odds = bp.odds || {};
+    const rows = [];
+    if (odds.layer) {
+      rows.push(`<div class="buy-point-row"><span>层级</span><strong>${esc(odds.layer)}（${odds.cont_days} 连板）</strong></div>`);
+    }
+    if (odds.promote_rate != null) {
+      rows.push(`<div class="buy-point-row"><span>历史晋级率</span><strong>${num(odds.promote_rate, "%")}（N=${odds.promote_n || "—"}）</strong></div>`);
+    }
+    if (odds.fwd_median != null) {
+      rows.push(`<div class="buy-point-row"><span>前瞻 5 日中位收益</span><strong>${num(odds.fwd_median, "%")}（胜率 ${num(odds.fwd_win_rate, "%")} · N=${odds.fwd_n}）</strong></div>`);
+    }
+    $("buy-point-odds").innerHTML = rows.join("") || "<p class='muted'>暂无同层级历史样本</p>";
+    if (bp.disclaimer) {
+      $("buy-point-disclaimer").textContent = bp.disclaimer;
+    }
+  }
+
   function renderTrend(t, structure) {
     $("trend-stats").innerHTML = [
       statHtml("收盘", num(t.price), ""),
@@ -176,6 +201,7 @@
       $("stock-hint").textContent =
         `口径：只用 ${data.trade_date} 及之前的样本；标的数据源 daily_bar/derived_bar/market_stat/stock_basic。`;
       renderVerdict(data.verdict, data.basic, data.trade_date);
+      renderBuyPoint(data.buy_point);
       renderTrend(data.trend, data.structure);
       renderSeries(data.series || []);
       renderEnv(data.market_env, data.market_top);

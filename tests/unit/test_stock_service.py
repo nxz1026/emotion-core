@@ -82,7 +82,8 @@ def test_analyze_main_path_has_no_llm_and_rich_payload(monkeypatch):
     assert out["ok"] and out["code"] == "601811"
     assert out["llm"]["enabled"] is False          # 主接口不调 LLM
     for key in ("basic", "trend", "structure", "market_env", "market_top",
-                "themes", "promotion_table", "series", "verdict", "trade_date"):
+                "themes", "promotion_table", "series", "verdict", "trade_date",
+                "buy_point"):
         assert key in out, key
     assert out["verdict"]["disclaimer"].startswith("统计参考")
     assert len(out["promotion_table"]) == 1
@@ -173,3 +174,48 @@ def test_llm_success_returns_text_and_model(monkeypatch):
     # 提示词必须带上规则层结论与统计依据，且不许写"编造"
     assert "只做低吸回踩" in user["content"] or "观察" in user["content"]
     assert "晋级率" in user["content"] or "样本不足" in user["content"]
+
+
+class TestBuyPointReference:
+    def test_limit_price_computed_from_pre_close(self):
+        basic = {"code": "601811", "pre_close": 10.0}
+        trend = {"cont_days": 2}
+        promo = {"promote_rate": 20.0, "n": 100}
+        fwd5 = {"median": 1.0, "win_rate": 52.0, "avg": 1.5, "n": 300}
+        bp = svc._buy_point_reference(basic, trend, "1->2", promo, fwd5)
+        assert bp["limit_price"] is not None
+        assert bp["limit_price"] > 10.0  # 涨停价 > 昨收
+        assert bp["odds"]["promote_rate"] == 20.0
+        assert bp["odds"]["fwd_median"] == 1.0
+        assert "打板价" in bp["disclaimer"]
+
+    def test_non_stock_code_has_no_limit_price(self):
+        basic = {"code": "000001", "pre_close": 5.0}
+        trend = {"cont_days": 1}
+        bp = svc._buy_point_reference(basic, trend, "1->2",
+                                      {"promote_rate": 30.0, "n": 50},
+                                      {"median": 0.5, "win_rate": 55.0, "avg": 1.0, "n": 100})
+        # 000001 是深市主板，板比 10%
+        assert bp["limit_price"] is not None
+        assert bp["limit_price"] > 5.0
+
+    def test_no_layer_no_cont_days_returns_none_odds(self):
+        basic = {"code": "601811", "pre_close": 10.0}
+        trend = {"cont_days": 0}
+        bp = svc._buy_point_reference(basic, trend, None, None, {"n": 0})
+        assert bp["odds"] is None
+
+    def test_missing_pre_close_returns_none_limit_price(self):
+        basic = {"code": "601811"}
+        trend = {"cont_days": 2}
+        bp = svc._buy_point_reference(basic, trend, "1->2", None, {"n": 0})
+        assert bp["limit_price"] is None
+
+    def test_odds_include_layer_info(self):
+        basic = {"code": "601811", "pre_close": 10.0}
+        trend = {"cont_days": 3}
+        fwd5 = {"median": 2.0, "win_rate": 60.0, "avg": 2.5, "n": 200}
+        bp = svc._buy_point_reference(basic, trend, "3->4",
+                                      {"promote_rate": 15.0, "n": 80}, fwd5)
+        assert bp["odds"]["layer"] == "3->4"
+        assert bp["odds"]["cont_days"] == 3

@@ -147,6 +147,48 @@ def llm_comment(payload: dict) -> dict:
                 "text": "", "error": str(exc)[:300]}
 
 
+def _buy_point_reference(basic: dict, trend: dict, layer: str | None,
+                          promo_row: dict | None, fwd5: dict) -> dict:
+    """买点参考：打板价 + 赔率对照（P0-2 审计修复）。
+
+    返回 {"limit_price": float|None, "odds": dict|None, "disclaimer": str}。
+    """
+    from emotion_core.utils import price as price_util
+
+    # 打板价：昨收 × 板比（分整数式）
+    limit_price = None
+    pre_close = basic.get("pre_close") or trend.get("pre_close")
+    code = basic.get("code", "")
+    if pre_close and code:
+        try:
+            pre_cents = int(round(float(pre_close) * 100))
+            limit_cents = price_util.limit_up_price_cents(pre_cents, code)
+            limit_price = round(limit_cents / 100, 2)
+        except Exception:
+            pass
+
+    # 赔率对照：同层级历史晋级率 + 前瞻收益
+    odds = {}
+    if promo_row:
+        odds["promote_rate"] = promo_row.get("promote_rate")
+        odds["promote_n"] = promo_row.get("n")
+    if fwd5 and fwd5.get("n"):
+        odds["fwd_median"] = fwd5.get("median")
+        odds["fwd_win_rate"] = fwd5.get("win_rate")
+        odds["fwd_avg"] = fwd5.get("avg")
+        odds["fwd_n"] = fwd5.get("n")
+    if trend.get("cont_days", 0) >= 1:
+        odds["layer"] = layer
+        odds["cont_days"] = trend["cont_days"]
+
+    return {
+        "limit_price": limit_price,
+        "odds": odds or None,
+        "disclaimer": "打板价 = 昨收 × 板比（分整数式）；"
+                      "赔率 = 同层级历史统计样本，非未来承诺。",
+    }
+
+
 def _payload(code: str, end: date, basic: dict, series: list[dict],
              structure: dict, env: dict, top: list[dict],
              themes: list[dict]) -> dict:
@@ -156,6 +198,10 @@ def _payload(code: str, end: date, basic: dict, series: list[dict],
     fwd5 = forward_stats(end, layer) if layer else {"n": 0}
     v = stock_algo.verdict(basic, trend, structure, env or {}, promo_row,
                            None, fwd5, basic.get("first_bar_date"), end)
+
+    # 买点参考：打板价 + 赔率对照（P0-2 审计修复）
+    buy_point = _buy_point_reference(basic, trend, layer, promo_row, fwd5)
+
     return {
         "code": code,
         "trade_date": end,
@@ -169,6 +215,7 @@ def _payload(code: str, end: date, basic: dict, series: list[dict],
         "promotion_table": promotion_stats(end),
         "series": series,
         "verdict": v,
+        "buy_point": buy_point,
     }
 
 
