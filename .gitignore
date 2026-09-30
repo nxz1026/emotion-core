@@ -31,3 +31,4 @@ graphflow-out/
 *.swp
 .omp-logs/
 target/
+*.so

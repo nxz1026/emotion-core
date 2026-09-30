@@ -4,6 +4,28 @@
 
 ---
 
+## [Unreleased] — 2026-10-01 (Rust ecosystem 移植)
+
+### 新增
+
+- **src/emotion_core/core/src/ecosystem.rs**: Rust 实现 g1~g4 + b1~b5 + verdict + rate + ladder_health + promotion_strength（PyO3 绑定）
+- **tests/oracle/test_ecosystem_rust_vs_python.py**: Rust vs Python 对账测试 47/47
+
+### 重构
+
+- **algorithms/dragon_env.py**: 纯判定逻辑下沉到 Rust（_python 文件保留 DB 查询层 + 薄包装）
+  - g1/g4/g3/b3/b1/b2/_verdict → 调用 `_rust.*`（ecosystem.rs）
+  - ladder_health/promotion_strength → 调用 `_rust.*` 返回 Rust 结构体
+  - DB 查询（_series / _B3_SQL / query_df）保留在 Python 层
+  - 函数 docstring 标注 ★ Rust: ecosystem.rs::*
+
+### 构建
+
+- **Cargo.toml**: 新增 pyo3 依赖（已存在）
+- **.gitignore**: 移除 emotion_core_rust.so（不再跟踪编译产物）
+
+---
+
 ## [Unreleased] — 2026-10-01 (零覆盖模块收尾)
 
 ### 新增

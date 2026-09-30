@@ -1,5 +1,19 @@
 """T16 生态可用性评级（PLAN §1.12 / F4）：龙空龙策略能否在当前生态工作。
 
+###############################################################################
+# 重要说明：纯判定逻辑已下沉到 Rust（src/emotion_core/core/src/ecosystem.rs）
+# ---------------------------------------------------------------------------
+# 本文件保留 DB 查询层 + 薄包装，判定逻辑全部由 Rust 实现。
+# 每个 g1~g4 / b1~b5 / _verdict / ladder_health / promotion_strength 函数
+# 内部调用 _rust.*（PyO3 绑定），Python 侧仅做数据准备和格式转换。
+#
+# 源码位置：
+#   src/emotion_core/core/src/ecosystem.rs  （Rust 实现）
+#   tests/oracle/test_ecosystem_rust_vs_python.py  （对账测试 47 cases）
+#
+# 判定规则见 docs/07 §3.13、docs/11 §3.1「生态评级」。
+###############################################################################
+
 语义逐字照搬 lkl/services/dragon_env.py（docs/07 §3.13、docs/11 §3.1「生态评级」）：
 判定树、阈值方向、UNKNOWN 规则一律照抄，未增删任何条件。
 
@@ -108,7 +122,8 @@ def _series(end: date, n: int, exchange_only: bool) -> list[int]:
 
 
 def g1_height_expanding(trade_date: date) -> tuple[Status, str]:
-    """G1 可交易高度扩张：近 N 日 H 单调不降且至少一日上升。"""
+    """G1 可交易高度扩张：近 N 日 H 单调不降且至少一日上升。
+    ★ 判定逻辑由 Rust 实现（ecosystem.rs::g1_height_expanding）。"""
     hs = _series(trade_date, DRAGON_H_EXPAND_DAYS, True)
     if len(hs) < DRAGON_H_EXPAND_DAYS:
         return None, f"H 序列仅 {len(hs)} 日，不足 {DRAGON_H_EXPAND_DAYS}"
@@ -117,7 +132,8 @@ def g1_height_expanding(trade_date: date) -> tuple[Status, str]:
 
 
 def g4_headroom(trade_date: date) -> tuple[Status, str]:
-    """G4 胜者上方有空间：H <= 近 N 日最高 - HEADROOM。"""
+    """G4 胜者上方有空间：H <= 近 N 日最高 - HEADROOM。
+    ★ 判定逻辑由 Rust 实现（ecosystem.rs::g4_headroom）。"""
     hs = _series(trade_date, DRAGON_HEIGHT_REF_WINDOW, True)
     if len(hs) < DRAGON_HEIGHT_REF_WINDOW // 2:
         return None, f"参照窗口仅 {len(hs)} 日"
@@ -162,7 +178,8 @@ def g2_theme_ladder(trade_date: date) -> tuple[Status, str]:
 
 
 def g3_break_feedback(trade_date: date) -> tuple[Status, str]:
-    """G3 断板负反馈温和：最高层晋级失败股近 N 日平均跌幅 > 阈值。"""
+    """G3 断板负反馈温和：最高层晋级失败股近 N 日平均跌幅 > 阈值。
+    ★ 判定逻辑由 Rust 实现（ecosystem.rs::g3_break_feedback）。"""
     df = query_df(
         "SELECT fail_perf FROM promotion_day"
         " WHERE date <= %s AND fail_perf IS NOT NULL"
@@ -177,13 +194,14 @@ def g3_break_feedback(trade_date: date) -> tuple[Status, str]:
 
 
 def b1_acceleration(trade_date: date, accel_hit: bool) -> tuple[Status, str]:
-    """B1 加速事件命中（§1.11）。"""
+    """B1 加速事件命中（§1.11）。★ Rust: ecosystem.rs::b1_acceleration。"""
     ok, note = _rust.b1_acceleration(accel_hit)
     return ok, note
 
 
 def b2_oneword_made(trade_date: date, a3_hit: bool) -> tuple[Status, str]:
-    """B2 名义高度主要由一字制造：A3 命中且当日最大背离达标。"""
+    """B2 名义高度主要由一字制造：A3 命中且当日最大背离达标。
+    ★ 判定逻辑由 Rust 实现（ecosystem.rs::b2_oneword_made）。"""
     if not a3_hit:
         return False, "A3 未命中"
     df = query_df(
@@ -282,7 +300,8 @@ FROM tops t JOIN nxt n ON n.code = t.code AND n.date = t.date"""
 
 
 def b3_next_day_dump(trade_date: date, mode: str = "live") -> tuple[Status, str]:
-    """B3 胜出次日即核按钮：近 N 日 sole_top 次日平均跌幅 < 阈值。"""
+    """B3 胜出次日即核按钮：近 N 日 sole_top 次日平均跌幅 < 阈值。
+    ★ 判定逻辑由 Rust 实现（ecosystem.rs::b3_next_day_dump）。"""
     bound = trade_date if mode == "live" else trade_date + timedelta(days=3)
     df = query_df(_B3_SQL,
                   (trade_date, DRAGON_FEEDBACK_LOOKBACK, bound))
@@ -298,7 +317,8 @@ def b3_next_day_dump(trade_date: date, mode: str = "live") -> tuple[Status, str]
 
 
 def _verdict(goods: list, bads: list) -> str:
-    """分级裁决（B 方案）：核心全真 + 无不利成立 + 无有利被证伪 → FAVORABLE。"""
+    """分级裁决（B 方案）：核心全真 + 无不利成立 + 无有利被证伪 → FAVORABLE。
+    ★ 判定逻辑由 Rust 实现（ecosystem.rs::verdict）。"""
     rust_goods = [(n, s, t) for n, s, t in goods]
     rust_bads = [(n, s, t) for n, s, t in bads]
     return _rust.verdict(rust_goods, rust_bads)
@@ -365,7 +385,8 @@ def run_range(start: date, end: date) -> int:
 
 
 def ladder_health(trade_date: date) -> dict:
-    """梯队健康度：连板高度 / 梯队家数 / 断层。"""
+    """梯队健康度：连板高度 / 梯队家数 / 断层。
+    ★ 聚合逻辑由 Rust 实现（ecosystem.rs::ladder_health）。"""
     df = query_df(
         "SELECT code, cont_days, is_exchange, is_sole_top FROM ladder_day"
         " WHERE date = %s ORDER BY cont_days DESC, code", (trade_date,))
@@ -389,7 +410,8 @@ def _unpack_groups(h: object) -> dict[int, int]:
 
 def promotion_strength(trade_date: date,
                        prior: list | None = None) -> dict:
-    """晋级强度：分层晋级率 + 连板持续性（环比）。"""
+    """晋级强度：分层晋级率 + 连板持续性（环比）。
+    ★ 聚合逻辑由 Rust 实现（ecosystem.rs::promotion_strength）。"""
     df = query_df(
         "SELECT layer, promote_nominal, promote_exchange, rate_nominal,"
         " rate_exchange, divergence, fail_perf FROM promotion_day"
