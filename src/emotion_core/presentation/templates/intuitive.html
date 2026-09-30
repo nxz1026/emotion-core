@@ -6,6 +6,13 @@
     <p class="lead">市场处于 <strong>{{ phase }}</strong> 阶段 —— {{ phase_desc }}
         {% if banner.is_latest %}<span class="badge badge-success">最新快照</span>
         {% else %}<span class="badge badge-warning">历史回看</span>{% endif %}</p>
+    {% if neg_exp and neg_exp.n > 0 %}
+    <p class="warning-box" style="margin-top:0.5rem">
+        ⚠️ 历史回溯：信号次日开盘买入平均收益 <strong>{{ neg_exp.mean }}%</strong>
+        （中位数 {{ neg_exp.median }}%，样本 {{ neg_exp.n }}，胜率 {{ neg_exp.hit_rate }}%）
+        —— 负期望，本页推荐仅为信号展示，非买入建议。
+    </p>
+    {% endif %}
     <div class="stats">
         <div class="stat"><div class="stat-label">买入窗口</div>
             <div class="stat-value">{{ buy_window }}</div></div>
@@ -35,12 +42,9 @@
         {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">该快照日<strong>没有推荐信号</strong>：`signal` 表当日 {{ signal_counts.day }} 行、
-        全表 <strong>{{ signal_counts.total }} 行</strong>。
-        {% if signal_counts.total == 0 %}
-        说明日更链至今没有成功产出一轮信号（不是"昨天没运行"——库里快照本身只到
-        {{ banner.latest }}），所以任何日期的推荐都会是空的。市场结论、梯队、日历不受影响。
-        {% endif %}</p>
+    <p class="muted">该快照日<strong>没有 BUY 推荐</strong>：{{ no_buy_reason }}</p>
+    <p class="muted"><code>signal</code> 表当日 {{ signal_counts.day }} 行、
+        全表 <strong>{{ signal_counts.total }} 行</strong>（含 SECONDARY 观察信号）。</p>
     <form class="stock-form" action="{{ base_path }}/stock" method="get">
         <input type="hidden" name="date" value="{{ banner.selected_iso }}">
         <input type="text" name="code" placeholder="输入股票代码或名称，例如 601811">

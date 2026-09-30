@@ -196,8 +196,11 @@ def test_intuitive_page_explains_empty_signals(monkeypatch):
         "limit_down_count": 13, "ladder_count": 0, "signal_count": 0,
         "dragon_env": "", "dragon_desc": "", "accelerate": False, "accel_reason": "",
         "recommendation": None, "recommendations": [], "top_ladder": [],
-        "signal_counts": {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0}})
+        "signal_counts": {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        "neg_exp": {"mean": None, "median": None, "n": 0, "hit_rate": None},
+        "no_buy_reason": "策略过滤条件较严（五条件 checklist + 生态评级）。"})
     html = server.render_dashboard("intuitive", date="2026-09-24", path="/emotion/")
-    assert "没有推荐信号" in html and "全表 <strong>0 行" in html
-    assert "不是" in html and "昨天没运行" in html        # 如实说明根因
+    assert "没有 BUY 推荐" in html
+    assert "signal" in html and "全表" in html and "0 行" in html
+    assert "策略过滤" in html or "五条件" in html or "生态评级" in html  # 策略解释替代 DB 心跳
     assert "当日最高板梯队" in html

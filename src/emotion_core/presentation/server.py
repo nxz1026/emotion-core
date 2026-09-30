@@ -134,6 +134,12 @@ def _load_intuitive_data(trade_date=None) -> dict:
     recommendations = [s for s in signals if s.get("action") == "BUY"]
     recommendation = recommendations[0] if recommendations else None
 
+    # 负期望披露：从 signal_outcome 聚合历史均值（P1-2 审计修复）
+    neg_exp = _load_negative_expectation()
+
+    # 空态策略解释：为什么今天没有 BUY 信号（P1-1 审计修复）
+    no_buy_reason = _explain_no_buy(phase, market, signal_counts)
+
     return {
         "phase": phase,
         "phase_desc": phase_desc,
@@ -153,7 +159,75 @@ def _load_intuitive_data(trade_date=None) -> dict:
         "dragon_desc": dragon_desc,
         "accelerate": market.get("accelerate", False),
         "accel_reason": market.get("accel_reason", ""),
+        "neg_exp": neg_exp,
+        "no_buy_reason": no_buy_reason,
     }
+
+
+def _load_negative_expectation() -> dict:
+    """从 signal_outcome 聚合历史负期望数据（P1-2 审计修复）。
+
+    返回 {"mean": float|None, "median": float|None, "n": int, "hit_rate": float|None}。
+    数据不足时各字段为 None，模板侧自行降级。
+    """
+    from emotion_core.utils.db import query_df
+    df = query_df(
+        "SELECT count(*) AS n, "
+        "avg(rule_ret_a) AS mean_a, "
+        "percentile_cont(0.5) WITHIN GROUP (ORDER BY rule_ret_a) AS median_a "
+        "FROM signal_outcome WHERE rule_ret_a IS NOT NULL"
+    )
+    if df.empty:
+        return {"mean": None, "median": None, "n": 0, "hit_rate": None}
+    row = df.iloc[0]
+    n = int(row["n"])
+    if n == 0:
+        return {"mean": None, "median": None, "n": 0, "hit_rate": None}
+    mean_a = round(float(row["mean_a"]), 2) if row["mean_a"] is not None else None
+    median_a = round(float(row["median_a"]), 2) if row["median_a"] is not None else None
+    # 胜率：rule_ret_a > 0 的占比
+    hit_df = query_df(
+        "SELECT count(*) AS pos FROM signal_outcome "
+        "WHERE rule_ret_a IS NOT NULL AND rule_ret_a > 0"
+    )
+    hit_rate = round(int(hit_df.iloc[0]["pos"]) / n * 100, 1) if not hit_df.empty and n > 0 else None
+    return {"mean": mean_a, "median": median_a, "n": n, "hit_rate": hit_rate}
+
+
+def _explain_no_buy(phase: str, market: dict, signal_counts: dict) -> str:
+    """解释为什么今天没有 BUY 信号（P1-1 审计修复）。
+
+    不再只说「signal 表 N 行」——给出市场阶段、门槛、可能原因。
+    """
+    total = signal_counts.get("total", 0)
+    if total == 0:
+        return ("策略自 2024-01-05 运行至今，尚未产出任何 BUY 信号。"
+                "这可能因为市场长期处于退潮/冰点阶段，或信号门槛过高。")
+
+    reasons = []
+    # 阶段解释
+    phase_explain = {
+        "退潮": "市场处于退潮期，策略主动收紧买入窗口",
+        "冰点": "市场处于冰点期，涨停稀少，不符合信号触发条件",
+        "高潮": "市场虽处高潮但可能已到尾声，策略在等待确认",
+        "发酵": "市场在发酵初期，尚未形成明确趋势",
+    }
+    if phase in phase_explain:
+        reasons.append(phase_explain[phase])
+
+    # 买入窗口
+    bw = market.get("buy_window", "NONE")
+    if bw == "NONE":
+        reasons.append("当前买入窗口关闭（buy_window=NONE）")
+
+    # 强制清仓
+    if market.get("force_liquidate"):
+        reasons.append("触发强制清仓条件（force_liquidate）")
+
+    if not reasons:
+        reasons.append("策略过滤条件较严（五条件 checklist + 生态评级）")
+
+    return "；".join(reasons) + "。"
 
 
 def _load_logic_data(trade_date=None) -> dict:
