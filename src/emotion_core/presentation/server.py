@@ -7,6 +7,8 @@
 
 basic auth 由 nginx 转发层处理（/etc/nginx/.htpasswd），
 本服务不再重复鉴权。
+
+Trade API（/api/trade/）：LKL-Trade 决策/结果 HTTP 交换。
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from urllib.parse import urlparse
 
 from jinja2 import Environment, FileSystemLoader
 
-from emotion_core.presentation import loaders, snapshot, strategy_view
+from emotion_core.presentation import loaders, snapshot, strategy_view, trade_api
 from emotion_core.utils import price as price_util
 
 log = logging.getLogger("emotion_core.dash")
@@ -466,6 +468,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             code = _query_arg(parsed, "code")
             self._send_json(stock_service.llm_for(code, _query_date(parsed)))
             return
+
+        # Trade API (LKL-Trade 决策/结果交换)
+        if parsed.path == "/api/trade/decisions":
+            payload, status = trade_api.handle_trade_decisions(parsed.query)
+            self._send_json(payload, status)
+            return
+        if parsed.path == "/api/trade/results":
+            payload, status = trade_api.handle_trade_results_get(parsed.query)
+            self._send_json(payload, status)
+            return
+        if parsed.path == "/api/trade/health":
+            payload, status = trade_api.handle_trade_health()
+            self._send_json(payload, status)
+            return
+
         if parsed.path.startswith("/api/"):
             self._handle_status()
             return
@@ -512,6 +529,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         self.wfile.write(b"<html><body><h1>404 Not Found</h1></body></html>")
+
+    def do_POST(self) -> None:
+        """POST handler (Trade API results submission)."""
+        parsed = urlparse(self.path)
+
+        if parsed.path == "/api/trade/results":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            payload, status = trade_api.handle_trade_results_post(body)
+            self._send_json(payload, status)
+            return
+
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b'{"error": "not found"}')
 
     def _handle_status(self) -> None:
         """返回 emotion-core 状态数据（可带 ?date=）。"""
