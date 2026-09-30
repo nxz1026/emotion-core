@@ -88,6 +88,30 @@
 
 ---
 
+## [Unreleased] — 2026-10-01 (产品审计修复)
+
+### 修复
+
+- **P0-2 买点参考**: `services/stock_service.py` 增加 `_buy_point_reference()`（打板价 + 同层级历史赔率），注入 `buy_point` 到 API payload；`stock.html` 增加买点卡片；`stock.js` 增加 `renderBuyPoint()`；`dashboard.css` 增加买点样式（88e9079）
+- **P1-1 空态策略解释**: `server.py` 增加 `_load_negative_expectation()`（从 signal_outcome 聚合）+ `no_buy_reason`（策略解释）；`intuitive.html` 空态从 DB 心跳改为策略原因（59103a0）
+- **P1-2 负期望披露**: `intuitive.html` 页头增加负期望警示框（均值/中位数/胜率/样本量）（59103a0）
+- **P1-3 坦白机制**: `services/gaps.py` 10 项动态检查器；`algorithm.html` 缺口清单条件渲染（6605cb7）
+- **P2-1 免责声明**: `stock.html` 顶部增加显式免责警示框（BUY/AVOID 动作配套强免责）（13de08b）
+- **P2-2 日期交互**: `strategy.html` 移除独立 `<select>` 日期选择器，统一使用 base.html 日历组件（13de08b）
+
+### 数据
+
+- **schema.py**: 买点参考复用现有 promotion_matrix + layer_forward 统计
+
+### 文档
+
+- **docs/13**: 回写至当前阶段（1822 tests / 阶段 8）（24f2805）
+- **docs/06**: P0/P1/P2 全部标记完成
+- **README**: 测试计数 495→1822
+- **CHANGELOG**: 本段
+
+---
+
 ## [Unreleased] — 2026-10-01 (P2 批次)
 
 ### 新增
