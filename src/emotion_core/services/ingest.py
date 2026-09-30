@@ -610,13 +610,31 @@ def _em_symbol(code: str) -> str:
 
 
 def fetch_hot_history(code: str) -> int:
-    """单票人气榜排名史（约366日）→ hot_rank（影子验证回填源）。"""
-    df = ak.stock_hot_rank_detail_em(symbol=_em_symbol(code))
+    """单票人气榜排名史（约366日）→ hot_rank（影子验证回填源）。
+
+    注：akshare 1.18.97 的 ``stock_hot_rank_detail_em`` 列赋值与当前 API 返回
+    格式不兼容（API 改字段名，akshare 仍按旧列数强赋值），直接绕过 akshare
+    调原始接口，按新字段名 ``calcTime`` / ``rank`` 入库。
+    """
+    import requests as _requests
+
+    url_rank = "https://emappdata.eastmoney.com/stockrank/getHisList"
+    payload = {
+        "appId": "appId01",
+        "globalId": "786e4c21-70dc-435a-93bb-38",
+        "marketType": "",
+        "srcSecurityCode": _em_symbol(code),
+        "yearType": "5",
+    }
+    r = _requests.post(url_rank, json=payload, timeout=15)
+    r.raise_for_status()
+    data_json = r.json()
     rows = []
-    for r in df.to_dict("records"):
-        rk = _to_int(r.get("排名"))
-        if rk is not None:
-            rows.append((pd.to_datetime(r["时间"]).date(), code, rk))
+    for item in data_json.get("data", []):
+        calc_time = item.get("calcTime")
+        rk = _to_int(item.get("rank"))
+        if calc_time is not None and rk is not None:
+            rows.append((pd.to_datetime(calc_time).date(), code, rk))
     return _upsert_rows("hot_rank", _HOT_COLS, rows, ["date", "code"])
 
 
