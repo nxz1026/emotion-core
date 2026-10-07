@@ -4,6 +4,72 @@
 
 ---
 
+## [Unreleased] — 2026-10-07（第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）
+
+### systemd：仓 ↔ `/etc/systemd/system` 双向对齐（两边现在都是 11 个单元）
+
+| 单元 | 修之前 | 修之后 |
+|---|---|---|
+| `dash.service` | 只在生产 | **按生产原样收进仓库** |
+| `strategy.{service,timer}` | 只在生产 | **按生产原样收进仓库** |
+| `close.{service,timer}` | 只在仓库，**从未装到生产** | 🚫 **已撤销** |
+| 5 个 `.timer` 的 `Asia/Shanghai` | 由 `.timer.d/10-timezone.conf` 提供 | **直接写在 `.timer` 本体**；`/etc` 与仓内的 `.timer.d/` 均已删除 |
+
+- **备份**：`~/ec-systemd-backup-20261007-065933.tar.gz`（11 个单元 + 4 个 drop-in 目录，删改前打）。
+- **时区真相源合一**是这次的重点。两份都存在时，改了本体忘了 drop-in（或反过来），
+  漂移的表现是**排期静默偏 8 小时、没有任何报错**。同步后实测 `systemctl list-timers`
+  的 NEXT 时刻与同步前一致（±20 秒内，来自新加的 `RandomizedDelaySec` 重掷），
+  **没有出现 8 小时偏移**；`emotion-core-dash` 与 `cpt-dashboard` 全程 active、:8098 HTTP 200。
+- `daily.timer` 新增 `RandomizedDelaySec=120`（其余四个原本就有）。
+
+### 撤销 close 重复调度
+
+`emotion-core-close.{service,timer}`（15:05）执行的是**完整 13 步 daily**，与 17:20 的
+`emotion-core-daily.timer` **全量重复**；而 `docs/08` §4.2 / `docs/13` 所说的「收盘对账」
+模块 `orchestration/close.py` **从未存在**。已 `git rm`（历史可追回），并在
+`docs/08`、`docs/10`、`docs/13`、`docs/15`、README 五处标注撤销原因。
+
+### doctor「日线双源」从永不失败改为可失败
+
+`_check_provider_consistency` 原先四个出口全 `True`，偏差只 `log.warning`
+⇒ `doctor.run()` 里这一行**永远显示通过**。这是照搬 lkl 时一起搬过来的**失效检查**，
+不是本仓的设计。现在：查出偏差 → `ok=False`，note 点名前 5 只并保留总数；
+「没得查」（链关闭 / 未注入 / 无样本 / 依赖不可用）仍返回 `True`。
+已标为**唯一一处有意偏离 lkl**，并改掉模块头「未新增别的分支」的表述。3 条新测试 + 变异验证。
+
+### 文档矛盾一律以实测为准
+
+- `docs/15` 两处同名「部署状态」直接打架（`/cpt/` 一处 ✅ 一处 ❌ 已移除；
+  `/dashboard/` 上游 8099 vs 8098）→ **合并为一份**并按 2026-10-07 实测重写，
+  另附 nginx / systemd / 数据现状三张实测表。
+- `schema.py` 「27 张表」→ **30**（`len(DDL)`）；原表清单只列了 23 个，已补全。
+- `docs/05` §1.3 标题「空壳（15 张）」但表内 13 行、正文结论也写 13 → 统一按 13，
+  并把「其余 13 张」更正为「其余 11 张（5 落地 + 6 暂缓）」。
+- **澄清一个不是 bug 的矛盾**：`docs/05` 通篇的「41 张表」是 **`longkonglong` 库**
+  （lkl 时代）口径，与 emotion-core 用的 `emotion_core` 库不是同一个库，已加互不校正说明。
+  实测 `emotion_core.public` 32 张 = DDL 30 − 未建 6 + CPT 共用的 8 张 `cpt_*`。
+- `README` 阶段 8 `⏳ 进行中` → `✅ 已完成`（按实测重写）。
+
+### 更正我自己写下的一处错误陈述
+
+README 曾写「仓内没有任何单元处于 enabled/active，emotion-core 的共享表没有东西会写」。
+**实测为误**：五个 timer 全部 `enabled + active`，`emotion-core-daily.timer` 于
+2026-10-06 17:20 北京成功执行、`pipeline_state` 13 步全 `OK`。业务表停在 2026-09-30
+是因为 10-01~10-07 国庆休市、交易日守卫正常跳过，**不是没有调度器**。
+
+### 顺带修的门禁自身缺陷
+
+- `test_dependency_direction.py` 用 `str(rel)` 生成键，Windows 下得到 `algorithms\ladder.py`
+  而 `_DEBT` 写的是正斜杠 ⇒ 同一条目**同时**被判成「新增违规」和「已偿还」，
+  两个测试互斥失败而 Linux/CI 全绿。改 `as_posix()`。
+- systemd 契约门禁两处过严：`-m` 目标只认 `def main(`（漏了 `presentation/server.py`
+  的 `__main__` 守卫形态）；引用检查只认 `.service`（漏了 `strategy.timer` 的
+  `After=emotion-core-daily.timer`）。**门禁比约定更严不是更安全，是没人愿意维护它。**
+
+ruff format 债务 226 → 225，基线已下调。生产全量 **1912 passed + 2 skipped**。
+
+---
+
 ## [Unreleased] — 2026-10-07（以层为单位审计的收口：零告警三成因 + 三道新门禁）
 
 本节所有修复都经**变异验证**（把修复改回原样，确认对应测试真的会红）。
@@ -99,21 +165,15 @@
 - **生产 `.so` 仍无 `92` 修复**：机器上没有 cargo，`src/core_lib/emotion_core_rust.so`
   无法就地重建（当前 md5 `44ebfc09…`、mtime 2026-09-30 01:47:57 UTC）。须在别处
   `cargo build --release` 后拷回，并按 `docs/06` §3.3 跑 `pytest tests/oracle` 对账。
-- **systemd 仓/生产严重漂移**：`emotion-core-close.*` 根本没装；`dash` / `strategy`
-  只存在于 `/etc`；生产 `.timer` 本体**没有** `Asia/Shanghai`，时区靠 `.timer.d/` 兜。
-  详见 README 新增的「systemd 仓/生产漂移」小节。同步时**本体与 drop-in 必须一起处理**，
-  否则排期会静默偏 8 小时且无任何报错。
-- **`close` 单元职责存疑**：`docs/08` §4.2 / `docs/13` 把它定为「收盘对账（交易桥）」、
-  列了 `orchestration/close.py`，但该文件从未存在；close 实际跑的是完整 13 步 daily，
-  与 17:20 的 daily **全量重复**。需要 owner 定：补 close.py，还是撤掉重复调度。
-- **`doctor._check_provider_consistency` 四个出口全 `True`**：模块 docstring 写明是
-  照搬 lkl 的降级分支、偏差只进 `log.warning`。结果是双源比对**永不失败**，doctor
-  输出里看不出偏差。改它会破坏「逐字照搬 lkl」的既定契约，故留给 owner。
 - **`Checklist.passed` 全 None 返回 True** 核实为**有意契约**（UNKNOWN 不否决，
   Python/Rust/回测三边一致，`tests/oracle/test_exit_rust_vs_python.py:89` 断言），
   已补 docstring 说明，不改行为。
-- **`docs/15-实施追踪.md:8-18` vs `:464-485`** 两处同名「部署状态」段互相打架；
-  `README.md` 阶段 8 标 `⏳ 进行中` 而 `docs/15` 完成度总览标 `✅ 100%`。
+- `docs/evidence`、`docs/archive-lkl` 等历史目录仍保留旧数字，按门禁的
+  「历史目录不要求对齐」原则豁免；若要一并更新需单独立项。
+
+> 上一版此处列的 systemd 漂移、`close` 职责重复、doctor 双源永不失败、
+> `docs/15` 两处部署状态冲突 —— **四项已在 2026-10-07 第二段全部处理完毕**，
+> 见本文件上方对应条目。
 
 ---
 
