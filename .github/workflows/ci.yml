@@ -1,0 +1,62 @@
+# emotion-core CI
+#
+# ⚠️ **分阶段的**（2026-10-07 建）。本仓此前**没有任何 CI** —— 122 个测试文件
+# 全靠人记得手动跑。实测「跑起来是绿的」（1857 passed / 2 skipped），
+# 但没人知道它绿。
+#
+# **为什么不一步到位把 ruff / mypy 挂进来**：实测债务是
+#     ruff check : 291 errors（81 F401 / 78 E501 / 47 I001 / 11 B905 / …）
+#     ruff format: 226/240 个文件待格式化
+# 挂进来的第一秒就红 ⇒ 结局只有「被注释掉」或「被学会无视」，
+# **那比没有门禁更糟**（它还占着「我们有 CI」的位子）。
+#
+# 所以：**现在**跑测试 + 门禁（含一条**只许减不许增**的债务棘轮），
+# **之后** debt 清到接近零再把 ruff/mypy 真正接进来。
+# 详见 scripts/check_lint_debt.py 的文件头。
+name: emotion-core CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ⚠️ 依赖以 requirements.txt 为准（生产实际安装的那一份，已钉版本），
+      # 不是 pyproject.toml —— 后者只是新增的打包元数据。
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest ruff==0.16.8
+
+      # ⚠️ 必须显式设 PYTHONPATH：仓里没有 console_scripts 入口，
+      # 代码是 `src/` 布局（生产靠 systemd 的 PYTHONPATH 跑）。
+      - name: Unit and integration tests
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests -q
+
+      # 架构依赖方向（本仓既有的门禁，此前只在本地跑）
+      - name: Layer dependency direction
+        env:
+          PYTHONPATH: src
+        run: python -m pytest tests/architecture -q
+
+      - name: Doc numbers match reality
+        run: python scripts/check_doc_numbers.py
+
+      # 只许减不许增的静态债务棘轮（见文件头：为什么不直接挂 ruff）
+      - name: Lint debt must not grow
+        run: python scripts/check_lint_debt.py
+
+      - name: No gate escapes the health check
+        run: python scripts/check_gate_coverage.py

@@ -3,10 +3,15 @@ Description=Emotion Core EastMoney Limit Pool Sync Timer
 Requires=emotion-core-pool.service
 
 [Timer]
+# ⚠️ 时区是**显式**的，不要去掉 Asia/Shanghai 后缀：这些时刻连同本文件的
+#    注释（「收盘后 2 小时」「盘前」）都是按北京时间推理的。机器时区是 Etc/UTC，
+#    不写后缀就会整体偏 8 小时 —— daily 变成北京时间凌晨 01:20、watchdog 的
+#    「盘前 08:50」变成 16:50（收盘后）。2026-10-07 实测发现，timer 全 inactive 时
+#    无人察觉。显式写死 = 机器时区再改也不会漂。
 # 17:45 北京时间：刻意晚于 daily（17:20）——EM 池是收盘后的当日快照，
 # 早于 daily 跑只会拉到半日数据；早于 watchdog（18:05），让当晚的断档检查
 # 能看见本轮池同步的结果。
-OnCalendar=Mon-Fri 17:45
+OnCalendar=Mon-Fri 17:45 Asia/Shanghai
 Persistent=true
 RandomizedDelaySec=60
 

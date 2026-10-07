@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emotion-core"
+version = "0.1.0"
+description = "A股盘后选股：数据同步 → 判据 → 信号 → 展示"
+requires-python = ">=3.12"
+# 运行时依赖刻意**只有 6 个**且全部钉死版本 —— 见 requirements.txt（那一份才是
+# 生产实际安装的清单，CI 按它装）。这里不重复钉，避免两处漂移。
+dependencies = []
+
+[project.scripts]
+emotion-core-daily = "emotion_core.orchestration.daily:main"
+emotion-core-pool = "emotion_core.orchestration.pool:main"
+emotion-core-report = "emotion_core.orchestration.report:main"
+emotion-core-watchdog = "emotion_core.orchestration.watchdog:main"
+emotion-core-strategy = "emotion_core.orchestration.strategy:main"
+
+# ⚠️ R57：这是**新增**的。仓里原来**没有**打包元数据，运行时靠 systemd 的
+# `PYTHONPATH=/home/ubuntu/DSH/emotion-core/src` 才能 import 到 —— 也就是说
+# 本仓根本不是一个可安装包，别的项目想用它连 `import emotion_core` 都做不到。
+# 有 pyproject 之后 `pip install -e .` 就是唯一真相源，PYTHONPATH 这个
+# 「路径知识」不再散落在 5 个 unit 文件里。
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["references", "build", "dist", "docs", "target", "whitelist.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"references/**" = ["ALL"]
+"whitelist.py" = ["ALL"]
+# Rust 构建产物目录（260MB），不是 Python 源码
+"**/core/target/**" = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+ignore_missing_imports = true
+exclude = ["references/", "build/", "dist/", ".*/core/target/"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra"

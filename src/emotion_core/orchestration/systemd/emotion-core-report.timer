@@ -3,10 +3,15 @@ Description=Emotion Core Daily Review Report Timer
 Requires=emotion-core-report.service
 
 [Timer]
+# ⚠️ 时区是**显式**的，不要去掉 Asia/Shanghai 后缀：这些时刻连同本文件的
+#    注释（「收盘后 2 小时」「盘前」）都是按北京时间推理的。机器时区是 Etc/UTC，
+#    不写后缀就会整体偏 8 小时 —— daily 变成北京时间凌晨 01:20、watchdog 的
+#    「盘前 08:50」变成 16:50（收盘后）。2026-10-07 实测发现，timer 全 inactive 时
+#    无人察觉。显式写死 = 机器时区再改也不会漂。
 # 18:00 北京时间：晚于 pool（17:45）——报告的 ⑩ 双源对账读 limit_pool_em，
 # 早于池落库就会渲染成「东财池缺失 → 本报告不可用于决策」；早于 watchdog
 # （18:05），让当晚断档检查能看见本轮报告的结果。
-OnCalendar=Mon-Fri 18:00
+OnCalendar=Mon-Fri 18:00 Asia/Shanghai
 Persistent=true
 RandomizedDelaySec=60
 
