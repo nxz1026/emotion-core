@@ -23,6 +23,22 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # ⚠️ 起一个真 Postgres，而不是把 16 条真连库的测试 skip 掉。
+    # 这批测试（test_server / test_presentation_stock / test_snapshot*）会真的发 SQL，
+    # skip 它们等于让 CI 对展示层整块失明 —— 而展示层正是最不该没有门禁的一层。
+    # 空库即可：它们验的是取数到页面这条链路，不是库里的具体数据。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -42,18 +58,15 @@ jobs:
       # 代码是 `src/` 布局（生产靠 systemd 的 PYTHONPATH 跑）。
       #
       # ⚠️ 占位 `~/.dbconfig`：`utils/db.py` 在 `psycopg.connect` **之前**先读凭据文件。
-      # 有一批单测（test_db::TestTransaction、test_server、test_snapshot_calendar…）
-      # 只 mock 了 `psycopg.connect`，在生产机上能过**纯粹因为那台机器恰好有
-      # ~/.dbconfig** —— 测试隔离有洞，搬到一个干净环境就红。
-      #
-      # 这里给 CI 放一个**占位**凭据文件，而不是去改那一批测试：
-      #   · 占位文件只被上述 mock 掉的调用链读到，不会真的去连库；
-      #   · 万一某个测试确实要连库，它会在 psycopg.connect 处以明确的连接错误失败，
-      #     而不会被这里悄悄放过。
-      # 该隔离洞本身已登记在 README 的「未修项」里，待单独收口。
-      - name: Provide a placeholder dbconfig
+      # 有一批单测（test_db::TestTransaction 等）只 mock 了 `psycopg.connect`，
+      # 在生产机上能过**纯粹因为那台机器恰好有 ~/.dbconfig** —— 隔离有洞。
+      # 这里指向上面那个 CI 内的 Postgres service（不是真的生产库）。
+      # 该隔离洞本身已登记，待单独收口。
+      - name: Point dbconfig at the CI Postgres service
         run: |
-          printf '$RDSHOST=127.0.0.1\n$DB_PW=ci-placeholder-not-a-real-secret\n' >> ~/.dbconfig
+          printf '$RDSHOST=127.0.0.1\n$DB_PW=postgres\n' >> ~/.dbconfig
+          # utils/db.py 把 dbname 写死为 emotion_core、user 写死为 postgres
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -c 'CREATE DATABASE emotion_core;'
 
       - name: Unit and integration tests
         env:
