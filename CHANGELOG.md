@@ -20,7 +20,8 @@
   漂移的表现是**排期静默偏 8 小时、没有任何报错**。同步后实测 `systemctl list-timers`
   的 NEXT 时刻与同步前一致（±20 秒内，来自新加的 `RandomizedDelaySec` 重掷），
   **没有出现 8 小时偏移**；`emotion-core-dash` 与 `cpt-dashboard` 全程 active、:8098 HTTP 200。
-- `daily.timer` 新增 `RandomizedDelaySec=120`（其余四个原本就有）。
+- `daily.timer` 新增 `RandomizedDelaySec=120`（pool 60 / report 60 / watchdog 120 **原本就有**；
+  `strategy.timer` 没有，是刻意不加——17:50 紧跟 daily，不需要抖动）。
 
 ### 撤销 close 重复调度
 

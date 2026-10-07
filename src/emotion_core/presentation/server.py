@@ -101,7 +101,17 @@ def _render_template(template_name: str, **context) -> str:
 
 
 def _load_intuitive_data(trade_date=None) -> dict:
-    """加载直观层数据（指定快照日）。"""
+    """加载直观层数据（指定快照日）。
+
+    ⚠️ 2026-10-07：DB 异常时**必须与「今天没数据」看起来不一样**。
+    原实现在异常分支把 `phase` 兜成「未知」、计数兜成 0/`—`、`snapshot_date` 兜成
+    None——于是**整库宕机在看板上与「今天无信号」完全同形**。而这正是运维的主监控面：
+    上线首日若 DB 抖动，你看到的会是一片「正常」的空页，红色只出现在 journal 里。
+
+    现在异常分支把 `phase` 置为显式的「数据加载失败」，并把异常文本经
+    `data_error` 透传到模板（模板用 `.get`，缺键不影响既有页面）。
+    """
+    load_error: str | None = None
     try:
         market = loaders.load_market_snapshot(trade_date)
         ladder = loaders.load_ladder(trade_date)
@@ -113,16 +123,22 @@ def _load_intuitive_data(trade_date=None) -> dict:
         # 键必须与 loaders.load_signal_counts() 完全一致：模板会读 ladder_total，
         # 缺键会让"降级展示"变成 500（UndefinedError），正是这页要避免的。
         signal_counts = {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0}
-        log.error("加载数据失败: %s", e)
+        load_error = f"{type(e).__name__}: {e}"[:200]
+        log.exception("加载数据失败")
 
     # 市场情绪一句话
-    phase = market.get("phase", "未知")
-    phase_desc = {
-        "发酵": "市场正在上升，涨停股增多",
-        "高潮": "市场狂热，涨停家数多但风险也在积累",
-        "退潮": "市场下跌，建议观望",
-        "冰点": "市场低迷，涨停股稀少",
-    }.get(phase, "市场状态不明")
+    if load_error:
+        # 与「市场状态不明」区分开：前者是**读不到**，后者是**读到但看不懂**。
+        phase = "数据加载失败"
+        phase_desc = f"数据库读取异常，本页所有数字不可信：{load_error}"
+    else:
+        phase = market.get("phase", "未知")
+        phase_desc = {
+            "发酵": "市场正在上升，涨停股增多",
+            "高潮": "市场狂热，涨停家数多但风险也在积累",
+            "退潮": "市场下跌，建议观望",
+            "冰点": "市场低迷，涨停股稀少",
+        }.get(phase, "市场状态不明")
 
     # 生态评级通俗解释
     dragon_env = market.get("dragon_env", "")
@@ -140,11 +156,16 @@ def _load_intuitive_data(trade_date=None) -> dict:
     neg_exp = _load_negative_expectation()
 
     # 空态策略解释：为什么今天没有 BUY 信号（P1-1 审计修复）
-    no_buy_reason = _explain_no_buy(phase, market, signal_counts)
+    if load_error:
+        # 读不到数据时**不能**说「尚未产出任何 BUY 信号」——那是把故障说成了结论。
+        no_buy_reason = "数据加载失败，无法判断今天有无 BUY 信号（见 phase_desc）。"
+    else:
+        no_buy_reason = _explain_no_buy(phase, market, signal_counts)
 
     return {
         "phase": phase,
         "phase_desc": phase_desc,
+        "data_error": load_error,
         "top_ladder": top_ladder,
         "signal_counts": signal_counts,
         "snapshot_date": market.get("date"),
@@ -484,6 +505,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/api/"):
+            # ⚠️ 兜底是有意的（门户「今日速览」需要一个永远可用的 status），
+            # 但它让**拼错的接口也返回 200 + status 数据** ⇒ 前端会静默降级
+            # 而不是报错，监控也看不出接口调用失败。这里记 warning 让错拼可见。
+            log.warning("未识别的 API 路径，返回 status 兜底：%s", parsed.path)
             self._handle_status()
             return
 

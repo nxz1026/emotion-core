@@ -136,14 +136,44 @@ def _matrix(trade_date: date, pairs: Sequence[Pair],
             for name, lo, hi in PROMOTION_LAYERS]
 
 
+class PromotionSkipped(RuntimeError):
+    """守卫命中：本次算不出晋级矩阵，且**不得清空当日已有行**。
+
+    ⚠️ 2026-10-07 新增。此前 `promotion_matrix` 对三种完全不同的情况一律返回 `[]`：
+
+    1. 无前一交易日（**日历**问题）
+    2. `derived_bar` 当日整体缺失（**上游缺数**）
+    3. 当日确实没有任何晋级对（**真平静**）
+
+    而 `persist()` 只看 `if not rows` ⇒ 三种情况都执行 `DELETE FROM promotion_day
+    WHERE date = %s` 并提交，日志还写「真平静，清空」。于是**上游缺数被翻译成
+    「今天无人晋级」**，且 `daily.py` 不消费 persist 的返回值 ⇒ 步骤被标 `DONE`。
+    结果是：数据在没有任何告警的情况下被删掉，步骤还是绿的。
+
+    现在 1/2 抛本异常（`persist` 捕获后**跳过删除**并记 error），只有 3 才返回 `[]`。
+    """
+
+    def __init__(self, trade_date: date, reason: str) -> None:
+        super().__init__(f"晋级矩阵 {trade_date} 跳过：{reason}")
+        self.trade_date = trade_date
+        self.reason = reason
+
+
 def promotion_matrix(trade_date: date, *, conn: Any | None = None) -> list[dict[str, Any]]:
-    """当日全层晋级矩阵；边界/缺数据日返回 []（不产出假数）。
+    """当日全层晋级矩阵。
+
+    返回 `[]` **只**表示「当日确实没有任何晋级对」（真平静）。
+    守卫命中（日历无前一交易日 / `derived_bar` 当日缺失）抛 `PromotionSkipped`
+    —— 那不是「今天没有晋级」，而是「算不出来」，两者对 `persist` 的含义完全相反。
+
+    Raises:
+        PromotionSkipped: 守卫命中，调用方**不得**据此清空当日已有行。
 
     Args:
         trade_date: 交易日。
         conn: 可选 psycopg 连接（复用调用方事务）；默认自开自关。
     Returns:
-        5 行 dict（PROMOTION_LAYERS 顺序）；无昨日数据或今日整体缺失 → []。
+        5 行 dict（PROMOTION_LAYERS 顺序）；当日确无晋级对 → []。
     """
     own = conn is None
     if own:
@@ -152,11 +182,10 @@ def promotion_matrix(trade_date: date, *, conn: Any | None = None) -> list[dict[
         with conn.cursor() as cur:
             prev = _prev_trading_day(cur, trade_date)
             if prev is None:
-                log.warning("晋级矩阵 %s：无前一交易日，跳过", trade_date)
-                return []
+                raise PromotionSkipped(trade_date, "无前一交易日（独立日历源查不到）")
             if _today_bar_count(cur, trade_date) == 0:
-                log.warning("晋级矩阵 %s：derived_bar 当日整体缺失，不产出假 0%%", trade_date)
-                return []
+                raise PromotionSkipped(
+                    trade_date, "derived_bar 当日整体缺失（上游 derive 未产出）")
             pairs = _fetch_pairs(cur, trade_date, prev)
     finally:
         if own:
@@ -187,12 +216,22 @@ def persist(trade_date: date) -> int:
 
     A8：空结果同样替换——当日无晋级数据时清旧防幽灵行（源修正后旧层不得残留）。
     W3：DELETE+INSERT 同一连接事务，中途异常整体回滚。
+
+    ⚠️ 2026-10-07：`PromotionSkipped`（算不出来）**不再**清空当日已有行。
+    原实现对「真平静」与「上游缺数/日历失效」一律 DELETE，而 `daily.py` 不消费
+    返回值 ⇒ 步骤照样标 DONE，等于「缺数 → 删数据 + 报成功」。实测生产当前
+    不存在 `derived_bar` 空而 `promotion_day` 非空的日期，故此前未触发；
+    这是把「一旦发生就静默毁数据」的地雷拆掉，而不是修一个正在烧的火。
     """
-    rows = promotion_matrix(trade_date)
+    try:
+        rows = promotion_matrix(trade_date)
+    except PromotionSkipped as exc:
+        log.error("promotion_day %s 保持原样（未清空）：%s", trade_date, exc.reason)
+        return 0
     with connect() as conn:
         conn.execute("DELETE FROM promotion_day WHERE date = %s", (trade_date,))
         if not rows:
-            log.warning("promotion_day %s：当日无晋级数据（真平静，清空）", trade_date)
+            log.info("promotion_day %s：当日无晋级数据（真平静，清空）", trade_date)
             return 0
         data = [(r["date"], r["layer"], r["promote_from"], r["promote_nominal"],
                  r["promote_exchange"], r["rate_nominal"], r["rate_exchange"],

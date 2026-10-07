@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 import pytest
@@ -132,16 +133,77 @@ class TestBoundary:
     """边界日 / 缺数据：返回空列表，不产出假数。"""
 
     def test_no_prev_trading_day(self, monkeypatch):
+        """★2026-10-07：日历失效是「算不出来」，**不是**「今天没晋级」。
+
+        原实现与「真平静」一样返回 `[]`，`persist` 由此把当日已有行 DELETE 掉。
+        现在抛 `PromotionSkipped`，`persist` 据此跳过删除。
+        """
         monkeypatch.setattr(promotion, "_prev_trading_day", lambda cur, d: None)
-        assert promotion_matrix(D, conn=_FakeConn()) == []
+        with pytest.raises(promotion.PromotionSkipped, match="无前一交易日"):
+            promotion_matrix(D, conn=_FakeConn())
 
     def test_today_bars_missing(self, monkeypatch):
+        """上游缺数同理：不得被当成「真平静」而清空当日行。"""
         monkeypatch.setattr(promotion, "_prev_trading_day", lambda cur, d: date(2023, 12, 29))
         monkeypatch.setattr(promotion, "_today_bar_count", lambda cur, d: 0)
-        assert promotion_matrix(D, conn=_FakeConn()) == []
+        with pytest.raises(promotion.PromotionSkipped, match="derived_bar 当日整体缺失"):
+            promotion_matrix(D, conn=_FakeConn())
 
     def test_no_yesterday_limit_up(self, monkeypatch):
+        """真平静：确实没有晋级对，仍返回 []（这是唯一允许 persist 清空的语义）。"""
         monkeypatch.setattr(promotion, "_prev_trading_day", lambda cur, d: date(2023, 12, 29))
         monkeypatch.setattr(promotion, "_today_bar_count", lambda cur, d: 100)
         monkeypatch.setattr(promotion, "_fetch_pairs", lambda cur, d, p: [])
         assert promotion_matrix(D, conn=_FakeConn()) == []
+
+
+class _RecordingConn:
+    """记录 execute() 的连接替身（`persist` 用 `with connect() as conn`）。"""
+
+    def __init__(self) -> None:
+        self.sql: list[str] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, sql, params=()) -> None:
+        self.sql.append(sql)
+
+
+class TestPersistDoesNotDestroyDataOnGuardHit:
+    """★2026-10-07 回归：`PromotionSkipped` 命中时**一条 SQL 都不许发**。
+
+    原实现的失效模式：`promotion_matrix` 对「日历失效」和「上游缺数」也返回 `[]`，
+    `persist` 只看 `if not rows` ⇒ 无条件 `DELETE FROM promotion_day WHERE date=%s`
+    并提交，日志写「真平静，清空」；而 `daily.py` 不消费 persist 的返回值，
+    步骤照样标 `DONE`。**数据被删 + 步骤是绿的 + 零告警**。
+    """
+
+    def _stub(self, monkeypatch, rows_or_exc):
+        conn = _RecordingConn()
+        monkeypatch.setattr(promotion, "connect", lambda: conn)
+        monkeypatch.setattr(promotion, "promotion_matrix",
+                            lambda *a, **k: (_ for _ in ()).throw(rows_or_exc)
+                            if isinstance(rows_or_exc, Exception) else rows_or_exc)
+        return conn
+
+    def test_guard_hit_sends_no_sql(self, monkeypatch):
+        conn = self._stub(monkeypatch,
+                          promotion.PromotionSkipped(D, "derived_bar 当日整体缺失"))
+        assert promotion.persist(D) == 0
+        assert conn.sql == [], f"守卫命中仍发了 SQL，数据会被清空：{conn.sql}"
+
+    def test_guard_hit_logs_error_not_warning(self, monkeypatch, caplog):
+        self._stub(monkeypatch, promotion.PromotionSkipped(D, "无前一交易日"))
+        with caplog.at_level(logging.ERROR, logger="emotion_core.algorithms.promotion"):
+            promotion.persist(D)
+        assert "保持原样（未清空）" in caplog.text
+
+    def test_genuine_quiet_day_still_deletes(self, monkeypatch):
+        """「真平静」仍要清空——否则源修正后的幽灵层会一直残留。"""
+        conn = self._stub(monkeypatch, [])
+        assert promotion.persist(D) == 0
+        assert any("DELETE FROM promotion_day" in s for s in conn.sql)
