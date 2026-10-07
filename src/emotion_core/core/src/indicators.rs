@@ -16,13 +16,20 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 /// 涨跌幅千分比（主板 100 = 10.0%，创业/科创 200 = 20%，北交所 300 = 30%）。
+///
+/// ⚠️ 2026-10-07 修：北交所分支补 `"92"`。
+/// 北交所 2023-04 起对新上市公司启用 **920xxx** 号段，而本分支原来只认 `4`/`8`，
+/// 于是 920xxx 落到 else 拿到主板 10% —— 涨停/跌停价直接算错三成。
+/// Python 唯一实现 `utils/price.board_pct_milli` 一直写的是 `("4","8","92")`
+/// （其注释即「唯一实现不该有已知错分支」），Rust 侧是漏抄。
+/// 现由 tests/oracle/test_price_rust_vs_python.py 逐板块对等钉住。
 fn board_pct_milli(code: &str) -> i64 {
     if code.starts_with("bj") {
         300 // 北交所 30%（akshare symbol 格式）
     } else if code.starts_with("30") || code.starts_with("68") {
         200 // 创业板/科创板 20%
-    } else if code.starts_with('4') || code.starts_with('8') {
-        300 // 北交所 30%（纯代码格式）
+    } else if code.starts_with('4') || code.starts_with('8') || code.starts_with("92") {
+        300 // 北交所 30%（纯代码格式 43/83/87/88/920）
     } else {
         100 // 主板 10%
     }

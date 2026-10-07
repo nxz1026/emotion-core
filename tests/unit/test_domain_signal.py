@@ -10,7 +10,6 @@ from emotion_core.domain.signal import (
     SignalSource,
 )
 
-
 D = date(2024, 1, 2)
 
 
@@ -72,7 +71,13 @@ class TestChecklist:
         assert cl.passed is True
 
     def test_all_none(self):
-        """全 None → passed 为 True（没有 False）。"""
+        """全 None → passed 为 True：UNKNOWN 不否决，是显式契约而非空真 bug。
+
+        口径与 `entry.passed_of`（docstring：过滤 None 后全 True 才算过，与回测一致）
+        及 Rust `entry::passed_of` 三边一致；卖出信号的 checklist 六项恒 UNKNOWN，
+        tests/oracle/test_exit_rust_vs_python.py:89 断言的就是这一条。
+        不可核验的第三态由上层表达（diagnose_service 给 None → 前端「不可核验」）。
+        """
         cl = Checklist(
             c1_uniqueness=None,
             c2_exchange=None,

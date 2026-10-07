@@ -26,6 +26,8 @@ import logging
 import sys
 from datetime import date
 
+from emotion_core.utils.dates import today_sh
+
 log = logging.getLogger("emotion_core.pool")
 
 
@@ -61,7 +63,10 @@ def main(argv: list[str] | None = None) -> int:
         days = _trading_days(end, 1)
     else:
         n = args.last or 1
-        days = _trading_days(date.today(), n)
+        # ⚠️ 2026-10-07：原为 `date.today()`。机器时区 Etc/UTC ⇒ 北京时间 00:00~08:00
+    # 之间少一天，同 strategy.py。口径统一走 `utils.dates.today_sh()`
+    # （algorithms/entry.py:266 的 P1-3：禁止隐式 date.today()）。
+    days = _trading_days(today_sh(), n)
     if not days:
         print("未能确定交易日", file=sys.stderr)
         return 1

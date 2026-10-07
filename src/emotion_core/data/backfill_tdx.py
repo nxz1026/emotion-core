@@ -23,7 +23,6 @@ from datetime import date
 
 import pandas as pd
 
-from emotion_core.data.providers.base import BAR_COLS
 from emotion_core.data.providers.pytdx_provider import _tdx, _tdx_all_bars
 from emotion_core.data.sync import upsert_daily_bars
 from emotion_core.utils.db import query_df
@@ -52,14 +51,21 @@ def fetch_code(code: str) -> list[tuple]:
         return []
     raw = pd.DataFrame(bars)
     raw["date"] = pd.to_datetime(raw["datetime"].str[:10]).dt.date
-    raw = raw[(raw["date"] >= START) & (raw["date"] <= END)]
-    if raw.empty:
-        return []
+    # ⚠️ 2026-10-07 修：与 providers/pytdx_provider.fetch_daily_bars 同一个错。
+    # TDX 降序返回（见 _tdx_all_bars docstring），原实现先按区间过滤、再在降序帧
+    # 上 shift(1)，于是 pre_close 取到的是**次日**收盘价（未来价）。涨停判定基准
+    # 反向，且此类错误在库里不报错、只在数值上看不出来。
+    raw = raw.sort_values("date", kind="stable")
     raw = raw.rename(columns={"vol": "volume"})
     raw["volume"] = pd.to_numeric(raw["volume"], errors="coerce")
     raw["amount"] = pd.to_numeric(raw.get("amount"), errors="coerce")
+    # 在区间过滤**之前**播种：_tdx_all_bars 按 UNTIL=2026-09-27 翻页，实测单页
+    # 800 根即回溯到约 2023-06，覆盖 START=2024-01-01 之前，区间首行有 pre_close。
     raw["pre_close"] = raw["close"].astype(float).shift(1)
     raw["turnover_rate"] = None
+    raw = raw[(raw["date"] >= START) & (raw["date"] <= END)]
+    if raw.empty:
+        return []
     rows = []
     for r in raw.itertuples():
         rows.append((

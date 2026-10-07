@@ -8,7 +8,6 @@ import pytest
 
 from emotion_core.data.providers.base import (
     BAR_COLS,
-    DailyBarProvider,
     ProviderError,
     normalize_frame,
     valid_frame,
@@ -46,6 +45,35 @@ class TestNormalizeFrame:
         df = pd.DataFrame({"date": ["2024-06-15"], "open": [10.0]})
         with pytest.raises(ValueError, match="缺少列"):
             normalize_frame(df, "600519")
+
+    def test_code_column_is_not_required(self):
+        """★2026-10-07 回归：`code` 是本函数**自己补**的（out["code"] = code），
+        把它算进必需列是自相矛盾的。
+
+        原实现如此，导致任何不带 code 列的 provider 恒定抛「缺少列: code」——
+        PytdxProvider 因此从未成功返回过一行，只是被 test_tencent.py 里 mock 掉的
+        normalize_frame 掩盖了。
+        """
+        df = pd.DataFrame({
+            "date": ["2024-06-15"],
+            "open": [10.0], "high": [11.0], "low": [9.5], "close": [10.5],
+            "volume": [1000.0], "amount": [10000.0], "turnover_rate": [1.0],
+        })
+        assert "code" not in df.columns, "本测试的前提就是输入没有 code 列"
+        result = normalize_frame(df, "600519")
+        assert list(result.columns) == BAR_COLS
+        assert result["code"].iloc[0] == "600519"
+
+    def test_existing_code_column_is_overwritten_by_argument(self):
+        """调用方自带的 code 必须被参数覆盖，不能两条 code 列并存。"""
+        df = pd.DataFrame({
+            "code": ["WRONG"],
+            "date": ["2024-06-15"],
+            "open": [10.0], "high": [11.0], "low": [9.5], "close": [10.5],
+            "volume": [1000.0], "amount": [10000.0], "turnover_rate": [1.0],
+        })
+        result = normalize_frame(df, "600519")
+        assert result["code"].tolist() == ["600519"]
 
     def test_pre_close_auto_fill(self):
         df = pd.DataFrame({

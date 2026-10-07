@@ -1,9 +1,8 @@
 """通达信 pytdx 备源：主机解析、分页逻辑、Provider 行为。"""
 from __future__ import annotations
 
-import threading
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -111,3 +110,92 @@ class TestPytdxProvider:
 
         with pytest.raises(ProviderError, match="pytdx"):
             provider.fetch_daily_bars("000001", date(2026, 9, 20), date(2026, 9, 25))
+
+
+# 降序帧：TDX 的真实返回顺序（_tdx_all_bars 的 docstring 明写「最新在前」）。
+# 收盘价刻意用 30/20/10，任何 shift 方向搞反都会立刻显形。
+_DESC = [
+    {"datetime": "2026-09-25 15:00", "open": 30.0, "high": 31.0, "low": 29.0,
+     "close": 30.0, "vol": 1000.0, "amount": 30000.0},
+    {"datetime": "2026-09-24 15:00", "open": 20.0, "high": 21.0, "low": 19.0,
+     "close": 20.0, "vol": 2000.0, "amount": 40000.0},
+    {"datetime": "2026-09-23 15:00", "open": 10.0, "high": 11.0, "low": 9.0,
+     "close": 10.0, "vol": 3000.0, "amount": 30000.0},
+]
+
+
+class TestPreCloseDirection:
+    """★2026-10-07 回归：pre_close 必须取**前一**交易日收盘，不能取次日。
+
+    原实现在降序帧上直接 `shift(1)`，每行拿到的是**未来价**。
+    pre_close 是涨停判定基准（caliber C2），取未来价会让涨跌幅/涨停整体反向，
+    而库里不报错——只能靠这个测试钉住。
+    """
+
+    def test_provider_pre_close_is_previous_day_close(self, monkeypatch):
+        provider = pytdx_provider.PytdxProvider()
+        monkeypatch.setattr(pytdx_provider, "_tdx_all_bars", lambda m, c, u: list(_DESC))
+
+        frame = provider.fetch_daily_bars("000001", date(2026, 9, 20), date(2026, 9, 25))
+        got = dict(zip(frame["date"], frame["pre_close"], strict=True))
+
+        # 09-24 的昨收 = 09-23 的 10.0；09-25 的昨收 = 09-24 的 20.0。
+        # 「取到次日」这个错法会让 09-24 拿到 20.0，两条断言一起把它排除。
+        assert got[date(2026, 9, 24)] == 10.0
+        assert got[date(2026, 9, 25)] == 20.0
+
+    def test_provider_seeds_first_in_range_row_from_before_start(self, monkeypatch):
+        """区间首行的 pre_close 要由 start 之前那根播种，不能恒为 NaN。"""
+        provider = pytdx_provider.PytdxProvider()
+        monkeypatch.setattr(pytdx_provider, "_tdx_all_bars", lambda m, c, u: list(_DESC))
+
+        frame = provider.fetch_daily_bars("000001", date(2026, 9, 24), date(2026, 9, 25))
+        first = frame[frame["date"] == date(2026, 9, 24)].iloc[0]
+        assert pd.notna(first["pre_close"]), "区间首行 pre_close 为空"
+        assert first["pre_close"] == 10.0
+
+    def test_provider_output_is_ascending(self, monkeypatch):
+        provider = pytdx_provider.PytdxProvider()
+        monkeypatch.setattr(pytdx_provider, "_tdx_all_bars", lambda m, c, u: list(_DESC))
+
+        frame = provider.fetch_daily_bars("000001", date(2026, 9, 20), date(2026, 9, 25))
+        assert list(frame["date"]) == sorted(frame["date"])
+
+
+class TestBackfillTdxPreClose:
+    """回填脚本与 provider 是两份独立实现（都手写 shift），各自都要有守卫。"""
+
+    _BACKFILL_DESC = [
+        {"datetime": "2024-01-05 15:00", "open": 30.0, "high": 31.0, "low": 29.0,
+         "close": 30.0, "vol": 1000.0, "amount": 30000.0},
+        {"datetime": "2024-01-04 15:00", "open": 20.0, "high": 21.0, "low": 19.0,
+         "close": 20.0, "vol": 2000.0, "amount": 40000.0},
+        {"datetime": "2024-01-03 15:00", "open": 10.0, "high": 11.0, "low": 9.0,
+         "close": 10.0, "vol": 3000.0, "amount": 30000.0},
+    ]
+
+    def test_fetch_code_pre_close_is_previous_day_close(self, monkeypatch):
+        from emotion_core.data import backfill_tdx
+
+        monkeypatch.setattr(backfill_tdx, "_tdx_all_bars",
+                            lambda m, c, u: list(self._BACKFILL_DESC))
+
+        rows = backfill_tdx.fetch_code("000001")
+        # 回填行序：(code, date, open, high, low, close, pre_close, volume, amount, turnover)
+        got = {r[1]: r[6] for r in rows}
+        assert got[date(2024, 1, 4)] == 10.0
+        assert got[date(2024, 1, 5)] == 20.0
+
+    def test_fetch_code_respects_range_and_seeds_first_row(self, monkeypatch):
+        """区间首行要用区间**外**那根播种，pre_close 不能是 None。"""
+        from emotion_core.data import backfill_tdx
+
+        monkeypatch.setattr(backfill_tdx, "_tdx_all_bars",
+                            lambda m, c, u: list(self._BACKFILL_DESC))
+        # 把区间起点推到 01-04，让 01-03 那根落在区间外，专门验证「区间外播种」
+        monkeypatch.setattr(backfill_tdx, "START", date(2024, 1, 4))
+
+        rows = backfill_tdx.fetch_code("000001")
+        assert {r[1] for r in rows} == {date(2024, 1, 4), date(2024, 1, 5)}
+        got = {r[1]: r[6] for r in rows}
+        assert got[date(2024, 1, 4)] == 10.0, "区间首行没拿到区间外的播种值"

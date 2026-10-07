@@ -11,7 +11,8 @@
 """
 from __future__ import annotations
 
-import threading
+# TDX 服务器列表（可通过环境变量 TDX_HOSTS 覆盖，格式 "host:port,host:port"）
+import os as _os
 import threading
 from datetime import date
 
@@ -19,14 +20,11 @@ import pandas as pd
 
 from emotion_core.data.providers.base import (
     DailyBarProvider,
-    DataError,
     ProviderError,
     normalize_frame,
 )
 from emotion_core.utils.fetch import retry_fetch
 
-# TDX 服务器列表（可通过环境变量 TDX_HOSTS 覆盖，格式 "host:port,host:port"）
-import os as _os
 
 def _parse_tdx_hosts() -> list:
     env_raw = _os.environ.get("TDX_HOSTS", "").strip()
@@ -104,11 +102,22 @@ class PytdxProvider:
                 return pd.DataFrame(columns=[])
             raw = pd.DataFrame(bars)
             raw["date"] = pd.to_datetime(raw["datetime"].str[:10]).dt.date
-            raw = raw[(raw["date"] >= start) & (raw["date"] <= end)]
+            # ⚠️ 2026-10-07 修：必须**先升序**再 shift(1)。
+            # `_tdx_all_bars` 的 docstring 明写「TDX 返回降序（最新在前）」，而原实现
+            # 直接在降序帧上 shift(1) —— 于是每一行取到的都是**下一交易日**的收盘价，
+            # 即未来价。代码与自己的 docstring 相矛盾，且没有任何测试覆盖。
+            #
+            # pre_close 是涨停判定的基准（caliber C2：禁止用 LAG(close) 现算，除权日会错），
+            # 取到未来价会让 derive 的涨跌幅/涨停判定整体反向。
+            raw = raw.sort_values("date", kind="stable")
             raw = raw.rename(columns={"vol": "volume"})
             raw["volume"] = pd.to_numeric(raw["volume"], errors="coerce")
+            # shift 在**区间过滤之前**做：`_tdx_all_bars(market, code, start)` 已经
+            # 翻到 start 之前，用那几根给区间首行播种 pre_close，否则区间第一天恒为
+            # NaN。参照 backfill_sina.FETCH_START 的同一手法。
             raw["pre_close"] = raw["close"].astype(float).shift(1)
             raw["turnover_rate"] = None
+            raw = raw[(raw["date"] >= start) & (raw["date"] <= end)]
             return normalize_frame(raw, code)
         except ProviderError:
             raise

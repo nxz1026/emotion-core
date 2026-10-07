@@ -17,8 +17,17 @@ fail-fast：任何一步抛异常即刻返回 1，后面的步骤根本不执行
 
 - 幂等：同一问题靠 `alerts.record_dedup`（按 source+detail）去重，不重复轰炸；
 - 只读 + 写 alert：跑它不碰 daily_bar / derived_bar / signal 等业务表；
-- 退出码：**检出断档返回 1**，让 systemd 把本次运行标红，`systemctl --failed` 立刻可见
-  （这是"监控自己也要可被监控"的前提）。0 = 全部检查通过。
+- 退出码：**存在未确认的 health 断档告警即返回 1**，让 systemd 把本次运行标红，
+  `systemctl --failed` 立刻可见（这是"监控自己也要可被监控"的前提）。
+  0 = 无未确认的 health 断档。
+
+  ⚠️ 2026-10-07 修正：原判据是 `health.push()` 的**新入队条数 n > 0**。而
+  `push` 内部先经 `record_once` 按 `(source, 归一化 detail)` 去重——同一个**还没被
+  修复、也没被 ack** 的断档，第二天起 `n` 恒为 0，于是 watchdog 每次都退 0、systemd
+  一路绿灯，**恰恰在故障持续期间宣布一切正常**。去重是为了不重复轰炸告警表，不是为了
+  让退出码失效；退出码必须看「现在还有没有未解决断档」，而非「这一轮有没有新发现」。
+  代价是：只要断档未被 ack，unit 会一直红——这正是期望行为（红色 ⇒ 待处理），
+  处理完 `--ack` 才转绿。非 health 来源的告警（如 sync/review）不算断档，不影响退出码。
 
 ## 用法
 
@@ -68,11 +77,18 @@ def main() -> None:
 
     # 复用 health.push：检查→去重入队→推送。日志由 logging 统一出。
     n = health.push(args.date)
-    pending = alerts.pending(30)
-    if n:
-        log.error("watchdog 新入队 %d 条断档；当前未确认告警 %d 条", n, len(pending))
+    # 判未确认断档的口径与 health.record_once 的去重视窗一致（都用 200），否则
+    # 这里数出来的条数会和入队时的判重集合对不上。
+    pending = alerts.pending(200)
+    gaps = [a for a in pending if a["source"] == "health"]
+    if gaps:
+        log.error("watchdog 检出 %d 条未确认断档（本轮新入队 %d 条）；"
+                  "修好后用 --ack <id> 出队才会转绿", len(gaps), n)
+        for a in gaps[:5]:
+            log.error("  [%s] %s", a["id"], a["detail"])
         sys.exit(1)
-    log.info("watchdog 全部检查通过（未确认告警 %d 条）", len(pending))
+    log.info("watchdog 全部检查通过（本轮新入队 %d 条，其他来源未确认告警 %d 条）",
+             n, len(pending))
 
 
 if __name__ == "__main__":

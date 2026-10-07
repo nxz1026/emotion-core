@@ -35,8 +35,15 @@ class DailyBarProvider(Protocol):
 
 
 def normalize_frame(frame: pd.DataFrame, code: str) -> pd.DataFrame:
-    """校准字段、类型、排序，并按前一收盘价补齐缺省 pre_close。"""
-    required = [col for col in BAR_COLS if col != "pre_close"]
+    """校准字段、类型、排序，并按前一收盘价补齐缺省 pre_close。
+
+    ⚠️ 2026-10-07 修：`code` **不在**必需列里——本函数下一行就是 `out["code"] = code`，
+    要求调用方自带 code 是自相矛盾的。原先把 `code` 算进 `required`，导致任何不带
+    code 列的 provider 恒定抛 `缺少列: code`：`PytdxProvider`（TDX 返回体没有 code）
+    与 `TencentProvider` 都因此**从未成功返回过一行**，只是被测试里 mock 掉的
+    `normalize_frame` 掩盖了。pre_close 同理是「缺失时自动补」，不进必需列。
+    """
+    required = [col for col in BAR_COLS if col not in ("code", "pre_close")]
     missing = [col for col in required if col not in frame.columns]
     if missing:
         raise ValueError(f"缺少列: {','.join(missing)}")
