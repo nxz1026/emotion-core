@@ -1,9 +1,9 @@
 {
-  "ruff_check_errors": 279,
+  "ruff_check_errors": 276,
   "ruff_format_files": 226,
   "by_rule": {
     "E501": 76,
-    "F401": 74,
+    "F401": 72,
     "I001": 45,
     "B905": 11,
     "E741": 2,

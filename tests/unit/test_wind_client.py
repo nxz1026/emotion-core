@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
 from unittest.mock import patch
 
 import pytest
@@ -45,12 +45,23 @@ def test_availability_cli_missing():
     assert "wind_cli_missing" in reason
 
 
-def test_availability_key_missing(tmp_path, monkeypatch):
-    """API Key 缺失时不可用。"""
+def test_availability_key_missing(tmp_path):
+    """API Key 缺失时不可用。
+
+    ⚠️ 2026-10-07 修：原实现只覆盖 `config_path`，让 `cli_script` 落到
+    `DEFAULT_CLI_SCRIPT`（开发机上是一个 `/home/ubuntu/...` 绝对路径）。
+    而 `availability()` **先**判 CLI 文件存在再判密钥，所以只要这台机器没有那个
+    wind CLI，就先返回 `wind_cli_missing:` —— 断言 `wind_api_key_missing` 必然失败。
+    也就是说这条测试能不能过，取决于**跑测试的机器上装没装 wind**，
+    在 CI runner 上必红（实测已红）。
+    修法与 `test_availability_ok` 同形：两个路径都显式给。
+    """
+    cli = tmp_path / "cli.mjs"
+    cli.write_text("// fake", encoding="utf-8")
     # 写一个不含 WIND_API_KEY 的配置
     cfg = tmp_path / "config"
     cfg.write_text("# empty config\n", encoding="utf-8")
-    client = WindClient(config_path=cfg)
+    client = WindClient(cli_script=cli, config_path=cfg)
     ok, reason = client.availability()
     assert not ok
     assert "wind_api_key_missing" in reason

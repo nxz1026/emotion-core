@@ -117,8 +117,21 @@ class AlertsStub:
 
 @pytest.fixture
 def db(monkeypatch) -> FakeQuery:
+    """health 模块的**全部**外部依赖替身。
+
+    ★2026-10-07 补 `_pipeline_mod.failures`：CHECKS 里的 `pipeline` 项调的是
+    `algorithms/pipeline.py::failures()`，那是**另一个模块自己的** `query_df`，
+    原 fixture 只 patch 了 `health.query_df`，没覆盖到。于是走 `health.run()` 的
+    测试（`TestRun::test_collects_in_checks_order_filtering_none`）会真去连
+    Postgres —— 生产机能过，CI runner 上必红（实测 `ConnectionTimeout`）。
+    这是隔离洞，不是环境问题：断档检查本该是 DB-free 的纯逻辑测试。
+
+    要驱动「pipeline 停在 FAILED」的场景的测试，自己 monkeypatch（见
+    `TestCheckPipelineFailed`），不要在这里改成真调用。
+    """
     q = FakeQuery()
     monkeypatch.setattr(health, "query_df", q)
+    monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [])
     return q
 
 

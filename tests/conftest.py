@@ -26,11 +26,14 @@ import pytest
 from emotion_core.core import available
 
 # 传递依赖 Rust 的模块：core 是产物本身；dragon_env 在模块级持有 `_rust`；
-# ecosystem_service 又 import dragon_env。
+# ecosystem_service 又 import dragon_env；daily 的 `_run_step("ecosystem")`
+# 会 import ecosystem_service —— 它是**函数内**的延迟 import，AST 扫 import 语句
+# 看不见，只能在这里显式登记（这正是本文件唯一需要手工维护的清单）。
 _RUST_DEPENDENT = (
     "emotion_core.core",
     "emotion_core.algorithms.dragon_env",
     "emotion_core.services.ecosystem_service",
+    "emotion_core.orchestration.daily",
 )
 
 _announced = False
