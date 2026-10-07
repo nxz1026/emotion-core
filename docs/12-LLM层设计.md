@@ -46,101 +46,49 @@
 
 ## 3. 抽象层：`llm/base.py`
 
+⚠️ 2026-10-07：本章原先内嵌 45 行 `LLMClient` / `NullClient` 源码。
+**文档里抄一份代码必然过期**——下面的接口签名是契约，实现请直接读源文件。
+
 ```python
-"""LLM 抽象层：任何 LLM 实现都实现这个接口。
-
-设计：填入 prompt，输出信息。不关心 LLM 是什么、怎么调、怎么计费。
-默认关闭：主链不依赖 LLM；LLM 层是可选的。
-"""
-from __future__ import annotations
-from typing import Protocol, runtime_checkable
-
-
-@runtime_checkable
+# src/emotion_core/llm/base.py
 class LLMClient(Protocol):
-    """LLM 客户端接口。填入 prompt，输出信息。"""
+    def complete(self, prompt: str, *, system: str | None = None,
+                 temperature: float = 0.0, max_tokens: int = 2048) -> str: ...
 
-    def complete(
-        self,
-        prompt: str,
-        *,
-        system: str | None = None,
-        temperature: float = 0.0,
-        max_tokens: int = 2048,
-    ) -> str:
-        """填入 prompt，输出信息。
+class LLMNotEnabledError(RuntimeError): ...      # 主链捕获后跳过 LLM 增强
+class NullClient:                                  # 默认实现，未启用时抛上面那个错
+    def complete(self, prompt: str, **kwargs) -> str: ...
 
-        Args:
-            prompt: 用户 prompt（可含模板变量）
-            system: 系统提示（可选）
-            temperature: 温度（0=确定性，1=随机）
-            max_tokens: 最大输出 token 数
-        Returns:
-            LLM 输出的文本
-        """
-        ...
-
-
-class LLMNotEnabledError(RuntimeError):
-    """LLM 未启用时抛出。主链应捕获此错误并跳过 LLM 增强。"""
-
-
-class NullClient:
-    """空实现：LLM 未启用时使用。抛出 LLMNotEnabledError。"""
-
-    def complete(self, prompt: str, **kwargs) -> str:
-        raise LLMNotEnabledError("LLM 未启用；设置 LLM_PROFILE=agnes 启用")
+def get_client(profile: str | None = None) -> LLMClient: ...
 ```
 
 **关键**：
-- `LLMClient` 是 **Protocol**（结构化子类型），任何实现 `complete()` 的对象都是合法客户端
-- `NullClient` 是默认实现，LLM 未启用时使用
-- 主链捕获 `LLMNotEnabledError` 并跳过 LLM 增强
+- `LLMClient` 是 **Protocol**（结构化子类型），任何实现 `complete()` 的对象都合法；
+- `NullClient` 是默认实现，`get_client()` 在未启用时返回它；
+- 主链捕获 `LLMNotEnabledError` 并跳过 LLM 增强——**主链不依赖 LLM**。
 
 ---
 
 ## 4. Agnes 实现：`llm/agnes.py`
 
-**复用 lkl 的 Agnes**（`agnes-3.0-flash`）。
+⚠️ 2026-10-07：本章原内嵌 33 行 `AgnesClient` 草图，**已与代码不符**——
+真实实现已是**多 profile 链**，不再是「一个 AgnesClient 读 AGNES_API_KEY」的单体。
+实现请读 `src/emotion_core/llm/agnes.py`。
 
-```python
-"""Agnes LLM 实现：复用 lkl 的 agnes-3.0-flash。
+| 事实 | 值 | 出处 |
+|---|---|---|
+| profile 表 | `LLM_PROFILES`（default / agnes / …，每档带 model/base_url/timeout…） | `agnes.py` |
+| 密钥来源（按优先级） | 环境变量 → `~/.llmkey` / `.secrets/llmkey` → `~/.env` | `resolve_key()` / `LLM_KEY_FILES` / `LLM_ENV_FILES` |
+| 各 profile 的密钥环境变量名 | `LLM_PROFILE_KEY_ENV = {"agnes": "AGNES_API_KEY", ...}` | `agnes.py` |
+| 通用密钥环境变量 | `LKL_LLM_API_KEY` | `LLM_KEY_ENV` |
+| 参数装配 | `LLMParams` / `resolve_params(profile)` | `agnes.py` |
+| 返回值清洗 | `strip_fence()` 去掉模型偶发的 ``` 围栏 | `agnes.py` |
+| 未配置密钥 | 抛 `LLMNotConfigured` | `agnes.py` |
 
-lkl 的 strategy/runner.py 已用 Agnes 做 LLM 策略观察，
-配置和调用方式直接复用，不重写。
-"""
-from __future__ import annotations
-import os
-
-
-class AgnesClient:
-    """Agnes LLM 客户端（复用 lkl 的 agnes-3.0-flash）。"""
-
-    def __init__(self, *, profile: str = "agnes", api_key: str | None = None):
-        self.profile = profile
-        self.api_key = api_key or os.environ.get("AGNES_API_KEY")
-        self.model = "agnes-3.0-flash"
-
-    def complete(
-        self,
-        prompt: str,
-        *,
-        system: str | None = None,
-        temperature: float = 0.0,
-        max_tokens: int = 2048,
-    ) -> str:
-        """填入 prompt，输出信息。复用 Agnes API。"""
-        if not self.api_key:
-            raise LLMNotEnabledError("未设置 AGNES_API_KEY")
-        # 调用 Agnes API（复用 lkl 的调用方式）
-        # ...
-        return "LLM 输出"
-```
-
-**Agnes 的配置**（复用 lkl）：
-- 模型：`agnes-3.0-flash`
-- API Key：`AGNES_API_KEY` 环境变量
-- 调用方式：复用 lkl 的 `llm.py` 的 `LLMClient` 抽象
+**真实的启用开关是 `LKL_LLM_ENABLED` 环境变量**（`services/llm.py` 读它，取值
+`1`/`true`/`yes` 之一才算开）。`CONFIG.LLM_PROFILE` 只是**代码内**的默认值
+（`None`=关、`"agnes"`=开），**不是环境变量** —— 本文档此前把它写成
+「设 `LLM_PROFILE=agnes` 启用」是错的，已更正。
 
 ---
 
@@ -210,7 +158,10 @@ class AgnesClient:
 | **个股诊断** | `stock.md` | `/stock/<code>` | 关 |
 | **策略观察** | `llm/strategies/*.yaml`（15 个） | 编排层 | 关 |
 
-**所有场景默认关闭**。前 4 个场景的启用方式：设置环境变量 `LLM_PROFILE=agnes`。
+**所有场景默认关闭**。前 4 个场景的启用方式：设置环境变量 **`LKL_LLM_ENABLED=1`**
+（⚠️ 2026-10-07 更正——此前写「`LLM_PROFILE=agnes`」，但 `LLM_PROFILE` 是 `CONFIG`
+的代码内默认值、**不从环境变量读**；真正的总闸是 `services/llm.py` 读
+`LKL_LLM_ENABLED`，取值 `1`/`true`/`yes`）。
 
 **策略观察例外**：它多一道独立门 `EC_STRATEGY_ENABLED`（见 §6.1），
 `LLM_PROFILE` 只决定用哪个后端，不决定开关。
@@ -336,5 +287,5 @@ Agnes
 | **L1** | LLM 抽象层用 `LLMClient` Protocol + `NullClient` 默认？ | **确认** |
 | **L2** | Agnes 复用 lkl 的 `agnes-3.0-flash` + `AGNES_API_KEY`？ | **确认** |
 | **L3** | 5 个使用场景（情绪/推荐/报告/个股/策略）？ | **确认** |
-| **L4** | 默认关闭，`LLM_PROFILE=agnes` 启用？ | **确认** |
+| **L4** | 默认关闭，`LKL_LLM_ENABLED=1` 启用？ | **确认**（2026-10-07 更正：原文写的 `LLM_PROFILE=agnes` 不是环境变量） |
 | **L5** | LLM 层是**增强**（主链不依赖）？ | **确认** |
