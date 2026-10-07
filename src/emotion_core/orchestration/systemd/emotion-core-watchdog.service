@@ -13,10 +13,12 @@ WorkingDirectory=/home/ubuntu/DSH/emotion-core
 ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.orchestration.watchdog
 Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
 Environment=DB_CONFIG=/home/ubuntu/.dbconfig
-# webhook 地址走环境变量（notify._cfg），可在 drop-in 里补：
-#   /etc/systemd/system/emotion-core-watchdog.service.d/webhook.conf
-#   [Service]
-#   Environment=EMOTION_LKL_WEBHOOK_URL=https://qyapi.weixin.qq.com/...
+# webhook 地址走环境变量（notify._cfg 读 EMOTION_LKL_WEBHOOK_URL）。
+# ⚠️ 2026-10-07：此前注释建议「在 drop-in 里补」，但 drop-in 不在仓内 ⇒ 换机部署
+# 必然漏配，而漏配的表现是**告警只进本机、推不出去**（health.push 静默返回 False）。
+# 改为写进仓内、由 daemon-reload 统一生效；`deploy/env/*.env` 被 .gitignore 排除。
+# 前缀 `-` 表示文件缺失时不报错（未配 webhook 时静默跳过推送，与 notify 语义一致）。
+EnvironmentFile=-/home/ubuntu/DSH/emotion-core/deploy/env/emotion-core.env
 # 不放仓库：它是部署期密配置，与策略配置正交（改 CONFIG 会改 config_hash()）。
 StandardOutput=journal
 StandardError=journal

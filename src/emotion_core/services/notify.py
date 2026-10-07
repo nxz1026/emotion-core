@@ -37,18 +37,52 @@ def _cfg(name: str, default: str) -> str:
 
 
 def _guess_channel(url: str) -> str:
-    if "qyapi.weixin" in url: return "wecom"
-    if "oapi.dingtalk" in url: return "dingtalk"
+    """按 URL 判定渠道。⚠️ 认不出就退 generic，而各家的报文格式并不通用——
+    见 `_payload`：格式猜错时推送会**静默失败**（对方返回 200 + 错误体）。"""
+    if "qyapi.weixin" in url:
+        return "wecom"
+    if "oapi.dingtalk" in url:
+        return "dingtalk"
+    if "open.feishu.cn" in url or "larksuite.com" in url:
+        return "feishu"
     return "generic"
 
 
 def _payload(channel: str, text: str) -> dict:
+    """各渠道的报文格式。
+
+    ⚠️ 2026-10-07 补飞书：原实现只认 wecom / dingtalk，其余一律 generic 发
+    `{"text": ...}`。**飞书自定义机器人不接受这个格式**，它要
+    `{"msg_type": "text", "content": {"text": ...}}` ⇒ 配了飞书地址会静默失败
+    （HTTP 200 但 body 里是 `{"code": 19001, ...}`），看起来像推送成功。
+    """
     if channel == "wecom":
         return {"msgtype": "markdown", "markdown": {"content": text[:4000]}}
     if channel == "dingtalk":
-        return {"msgtype": "markdown", "markdown": {"title": "龙空龙复盘",
-                                                    "text": text[:18000]}}
+        return {
+            "msgtype": "markdown",
+            "markdown": {"title": "龙空龙复盘", "text": text[:18000]},
+        }
+    if channel == "feishu":
+        return {"msg_type": "text", "content": {"text": text[:4000]}}
     return {"text": text}
+
+
+def _resp_ok(channel: str, resp) -> bool:
+    """渠道级成功判定。
+
+    飞书在报文非法时仍返回 **HTTP 200**，真正的成败在 body 的 `code` 字段
+    （0 = 成功）。只看状态码会把「格式错」判成「已送达」——而这正是本函数
+    存在的理由：`push` 的返回值决定调用方记不记成功日志。
+    """
+    if resp.status_code != 200:
+        return False
+    if channel == "feishu":
+        try:
+            return int(resp.json().get("code", -1)) == 0
+        except Exception:  # noqa: BLE001 —— body 不是 JSON 就算没送达
+            return False
+    return True
 
 
 def _summary(md: str, limit: int = 600) -> str:
@@ -68,11 +102,19 @@ def push(md: str, trade_date) -> bool:
     if not text:
         log.warning("摘要提取为空，推送跳过")
         return False
+    channel = _guess_channel(url)
     try:
         import requests
-        resp = requests.post(url, json=_payload(_guess_channel(url), text), timeout=10)
-        ok = resp.status_code == 200
-        log.info("webhook 推送 %s：HTTP %s", trade_date, resp.status_code)
+
+        resp = requests.post(url, json=_payload(channel, text), timeout=10)
+        ok = _resp_ok(channel, resp)
+        if not ok and channel == "feishu" and resp.status_code == 200:
+            log.warning(
+                "飞书返回 HTTP 200 但 body 非成功码（多半是报文格式错）：%s",
+                resp.text[:120],
+            )
+        log.info("webhook 推送 %s（%s）：HTTP %s 成功=%s",
+                 trade_date, channel, resp.status_code, ok)
         return ok
     except Exception as exc:  # noqa: BLE001
         log.warning("webhook 推送失败（不影响报告落盘）：%s", exc)

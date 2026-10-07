@@ -19,6 +19,12 @@ reports/
 *.pem
 .env
 .env.*
+# ⚠️ `*.env` 不在上面两条里——`.env`/`.env.*` 只匹配那两种名字，
+# `deploy/env/emotion-core.env`（飞书 webhook）会被**照常提交**。
+# 这里显式挡整个目录内容，只放行 `.example` 模板（同 CPT 的做法）。
+!deploy/env/
+deploy/env/*
+!deploy/env/*.example
 
 # GraphFlow 知识图谱产物（本地重建，不进版本库）
 graphflow-out/

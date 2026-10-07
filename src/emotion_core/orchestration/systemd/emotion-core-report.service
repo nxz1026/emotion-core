@@ -23,6 +23,9 @@ Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
 Environment=DB_CONFIG=/home/ubuntu/.dbconfig
 # webhook 地址可经 drop-in 补（与 watchdog 同）：
 #   /etc/systemd/system/emotion-core-report.service.d/webhook.conf
+# ⚠️ 2026-10-07：改用仓内 env 文件（与 watchdog 共用），理由同 watchdog 单元——
+# drop-in 不在仓内，换机必然漏配，而漏配 = 报告推不出去。
+EnvironmentFile=-/home/ubuntu/DSH/emotion-core/deploy/env/emotion-core.env
 StandardOutput=journal
 StandardError=journal
 # 退出码 1 = 必需段渲染失败（数据缺口），保持失败态。publish 走

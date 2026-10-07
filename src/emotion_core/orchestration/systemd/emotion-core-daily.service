@@ -11,6 +11,9 @@ WorkingDirectory=/home/ubuntu/DSH/emotion-core
 ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.orchestration.daily
 Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
 Environment=DB_CONFIG=/home/ubuntu/.dbconfig
+# daily 的 health 步会走 alerts.push_pending_webhook ⇒ 同样需要 webhook 地址。
+# 与 watchdog / report 共用同一个 env 文件，理由见 watchdog 单元。
+EnvironmentFile=-/home/ubuntu/DSH/emotion-core/deploy/env/emotion-core.env
 StandardOutput=journal
 StandardError=journal
 
