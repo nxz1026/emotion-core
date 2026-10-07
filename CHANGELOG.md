@@ -68,6 +68,32 @@
   全偏小）。**改文档让它对**，现已 rc=0。
 - 静态债务棘轮基线下调：ruff check **291 → 279**，format 待格式化 226（持平）。
 
+### CI：第一次真正跑通
+
+`2026-10-07` 之前**这条 CI 从未绿过**。第一次去看日志才发现，连续三次 push 全红，
+`Unit and integration tests` 是 20 failed / 1489 passed / 2 errors。根因全在
+「干净 runner ≠ 生产机」，不是代码改动引入的：
+
+| # | 症状 | 根因 | 处理 |
+|---|---|---|---|
+| 1 | 18 条 `RuntimeError: 读不到 ~/.dbconfig` | `db.py` 在 `psycopg.connect` **之前**先读凭据；这批测试只 mock 了 connect，生产机能过**纯靠那台机器恰好有 `~/.dbconfig`** | CI 里起 Postgres service 并写 `~/.dbconfig` 指向它；不在 workflow 里另抄一份 DDL |
+| 2 | `test_health::TestRun` 真去连库 | CHECKS 的 pipeline 项调 `algorithms/pipeline.py::failures()`，那是**另一个模块自己的** `query_df`，原 fixture 只 patch 了 `health.query_df` | fixture 补 `_pipeline_mod.failures` 替身 |
+| 3 | `test_wind_client::test_availability_key_missing` | 只覆盖 `config_path`，`cli_script` 落到机器相关的默认路径；而 `availability()` 先判 CLI 存在 ⇒ 这条测试能否过取决于**跑测试的机器装没装 wind** | 两个路径都显式给（与 `test_availability_ok` 同形） |
+| 4 | 建表步骤绿灯但表不存在 | `connect()` 不开 autocommit，`create_all()` 也不自己提交 ⇒ 连接一关 DDL 被回滚 | 建表走 `transaction()` |
+
+**当前两套口径（别把它们混为一谈）**：
+
+- **CI（GitHub Actions）**：**1457 passed / 2 skipped**。起 Postgres 16、
+  用仓内 `schema.create_all()` 建 30 张表。**依赖 Rust 的测试整份跳过**
+  （oracle 对账 6 份 + `test_dragon_env` + `test_ecosystem_service` + `test_daily`）
+  —— `.so` 是 gitignore 的构建产物，而 CI 里没有 cargo 去编它。
+- **生产机 oracle**：**1901 passed / 2 skipped**（`.so` 在，Rust 对账全跑）。
+- 两者差额 **444** 就是那批 Rust 依赖测试。**Rust↔Python 对账目前只在生产机跑**
+  （`docs/06` §3.3：每次 `cargo build` 之后必须跑一遍）。
+
+> 想让 CI 也覆盖 Rust 对账，需在 workflow 里加 Rust 工具链 + `cargo build --release`
+> + 拷贝 `.so`。本机没有 Rust 工具链，**未经验证**，故没有写进去 —— 不写没验证过的步骤。
+
 ### 未修（需 owner 裁决，不是「修不好」）
 
 - **生产 `.so` 仍无 `92` 修复**：机器上没有 cargo，`src/core_lib/emotion_core_rust.so`
