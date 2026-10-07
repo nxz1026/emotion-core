@@ -247,7 +247,7 @@ LLM 配额 —— 该日候选池从 68 只降到 58 只，正好是 10 只 DT�
 跌停股排进前列。日后若要改「强势优先」，注意 DT 行的 `first_seal` 存的是**空串而非
 NULL**，需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌停股会被排到最前。
 
-**调度**：`deploy/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
+**调度**：`src/emotion_core/orchestration/systemd/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
 
 ```bash
