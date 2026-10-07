@@ -89,8 +89,8 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 
 | 单元 | 修之前：仓内 | 修之前：生产 | 2026-10-07 之后 |
 |---|---|---|---|
-| daily | ✅ | ✅（本体无时区，靠 `.timer.d/`） | ✅ 已同步（本体自带 `Asia/Shanghai`） |
-| pool / report / watchdog | ✅ | ✅（时区同样靠 drop-in） | ✅ 已同步（本体自带时区） |
+| daily | ✅ | ✅（本体无时区，靠 `.timer.d/`） | ✅ 已同步（本体自带 `Asia/Shanghai`，drop-in 已删） |
+| pool / report / watchdog | ✅ | ✅（时区同样靠 drop-in） | ✅ 已同步（本体自带时区，drop-in 已删） |
 | **dash** | ❌ 仓内没有 | ✅ 只有生产有 | ✅ **按生产原样收进仓库** |
 | **strategy** | ❌ 仓内没有 | ✅ 只有生产有 | ✅ **按生产原样收进仓库** |
 | **close** | ✅ 仓内有 | ❌ **根本没装** | 🚫 **已撤销**（见下） |
@@ -99,12 +99,13 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 
 **三个要点**：
 
-1. **生产 `.timer` 本体不带 `Asia/Shanghai`，时区是 drop-in 提供的。**
-   从 `systemctl list-timers` 的 LAST 列反推可见它**确实生效**：
-   daily LAST `09:20 UTC` = 17:20 北京、pool `09:46` = 17:46、strategy `09:50` = 17:50、
-   report `10:00` = 18:00、watchdog `00:51 UTC` = 08:51 —— 全部命中。
-   同步时若只换本体不处理 drop-in，两份真相源漂移的表现是
-   **排期静默偏 8 小时、没有任何报错**。
+1. **时区曾有两份真相源，现已合一。** 历史形态是：`.timer` 本体不带 `Asia/Shanghai`，
+   时区由 `.timer.d/10-timezone.conf` 提供（生产当时就是这么跑的，
+   `systemctl list-timers` 的 LAST 列反推可见 09:20 UTC = 17:20 北京等，全部命中）。
+   现在 **`Asia/Shanghai` 直接写在 `.timer` 本体里**，`/etc` 与仓内的
+   `.timer.d/` 已于 2026-10-07 一并删除（备份 `~/ec-systemd-backup-20261007-065933.tar.gz`）。
+   单一真相源的意义：两份都存在时，改了本体而忘了 drop-in（或反过来），
+   漂移的表现是**排期静默偏 8 小时、没有任何报错**。
 
 2. **`close` 单元已撤销。** 它原本用 `python -c "…; run_daily()"` 调起主链，
    **丢弃 run_daily 的返回码**（1=步骤崩溃、76=覆盖率拦截全被吞）、且不经 `main()`
