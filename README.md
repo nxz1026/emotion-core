@@ -72,9 +72,9 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 |---|---|---|
 | 阶段 2a Python 参考实现 | ✅ 完成 | 11 个算法模块 |
 | 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
-| 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` 加载 .so |
-| 阶段 4 数据层 | ✅ 已落地 | 24 张表 DDL；`daily_bar` 337.8 万行 / 663 交易日 / 5221 只；`derived_bar` 337.8 万行；`market_stat` 663 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
-| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 13 步（sync/coverage/hot/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health）；systemd：`emotion-core-daily.{timer,service}`、`emotion-core-dash.service`、`emotion-core-strategy.{timer,service}` |
+| 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` **惰性**加载 .so（首次访问符号时才加载；产物缺失时抛 `RustCoreUnavailable` 并给出编译指引，不再在导入期崩） |
+| 阶段 4 数据层 | ✅ 已落地 | 30 张表 DDL；`daily_bar` 337.8 万行 / 663 交易日 / 5221 只；`derived_bar` 337.8 万行；`market_stat` 663 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
+| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 13 步（sync/coverage/hot/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health）；仓内 systemd：`emotion-core-{daily,close,pool,report,watchdog}.{timer,service}` 共 10 个单元（**⚠️ 与 `/etc/systemd/system` 严重漂移，见下方「systemd 仓/生产漂移」）** |
 | 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 4 个 JSON 接口（另有 `/api/*` 兜底状态），端口 8098，nginx 前缀 `/emotion` |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
 | 阶段 8 上线 | ⏳ 进行中 |（2026-09-28 快照）日更链尚未成功跑通完整一轮：`signal` / `ladder_day` / `promotion_day` / `theme_tag` / `signal_outcome` 仍为 0 行。**2026-09-30 更新**：`signal` / `signal_outcome` 已各 162 行、全部 `source='replay'`、`source='live'`=0，日更链自 2026-09-29 起连续两日 `daily done`；`ladder_day` / `promotion_day` / `theme_tag` 未复核。详见 `docs/05` §P4 |
@@ -82,6 +82,38 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 > 数据现状决定了展示口径：只有 `daily_bar` / `derived_bar` / `market_stat` / `stock_basic`
 > 四张表有数据，所以个股诊断等功能的统计**全部从这四张表现算**（PIT 安全），
 > 等上述信号表落数后按同签名加增强分支即可。
+
+### ⚠️ systemd：仓与 `/etc/systemd/system` 严重漂移（2026-10-07 实测）
+
+**在把仓内 unit 同步到生产之前，先读完这一节。** 现状是两边**互有对方没有的东西**：
+
+| | 仓内 `src/emotion_core/orchestration/systemd/` | 生产 `/etc/systemd/system/` |
+|---|---|---|
+| daily | `.service` + `.timer`（本体已带 `Asia/Shanghai`） | ✅ 同名文件，但**本体仍无时区**，靠 `.timer.d/10-timezone.conf` 兜 |
+| close | `.service` + `.timer` | ❌ **根本没装** |
+| pool / report / watchdog | `.service` + `.timer` + `.timer.d/` | ✅ 已装（时区同样靠 drop-in） |
+| dash | ❌ 仓内没有 | ✅ 只有生产有 `emotion-core-dash.service` |
+| strategy | ❌ 仓内没有 | ✅ 只有生产有 `emotion-core-strategy.{service,timer}` |
+
+三个要点：
+
+1. **生产 `.timer` 本体没有 `Asia/Shanghai` 后缀**，时区是 drop-in 提供的。
+   仓内已于 2026-10-07 把后缀直接写进本体——所以**同步时必须本体与 drop-in 一起处理**，
+   否则会出现「本体已带时区 + drop-in 仍在」或反向的错配，而错配的表现是
+   **排期静默偏 8 小时、没有任何报错**。
+2. 仓内 `emotion-core-close.{service,timer}` 从未部署过。它原本用
+   `python -c "…; run_daily()"` 调起主链，**丢弃 run_daily 的返回码**（1=步骤崩溃、
+   76=覆盖率拦截全被吞）、且不经 `main()` 没有 `basicConfig`；2026-10-07 已改为
+   `-m emotion_core.orchestration.daily`。契约由
+   `tests/architecture/test_systemd_units.py` 钉住（禁 `python -c`、校验 `-m` 目标
+   真有 `main()`、`OnCalendar` 必须自带时区、drop-in 不得与本体矛盾）。
+3. **仓内没有任何单元处于 enabled/active**（`emotion-core-daily.timer` /
+   `strategy.timer` 均 inactive+disabled），真正在跑的是 CPT 的 crontab 与
+   `emotion-core-dash`。因此 emotion-core 的 7 张共享表**在 Oracle 上没有任何东西会写**。
+
+> `docs/08-编排层合并方案.md` §4.2 把 `emotion-core-close.timer` 定为「收盘对账（交易桥）」，
+> `docs/13` §目录树列了 `orchestration/close.py`——但**该文件从未存在**，close 单元实际
+> 跑的是完整 13 步 daily，与 17:20 的 daily.timer 全量重复。属于待 owner 裁决的设计问题。
 
 设计文档（阶段 0~1 全部定稿）：
 

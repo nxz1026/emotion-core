@@ -4,6 +4,93 @@
 
 ---
 
+## [Unreleased] — 2026-10-07（以层为单位审计的收口：零告警三成因 + 三道新门禁）
+
+本节所有修复都经**变异验证**（把修复改回原样，确认对应测试真的会红）。
+生产全量基线：**1901 passed / 2 skipped**（修前 1857 passed / 2 skipped）。
+
+### 修复 · 监控自噬链（这三条叠加 = 2026-10-06~07 的零告警）
+
+- **断档日历从被监控对象派生**：`algorithms/health.py::_recent_trading_days` 原来查
+  `SELECT DISTINCT date FROM daily_bar` —— 日历是行情自己的投影，于是 `daily_bar`
+  一停写，断档天数同步变小，**恰好在最该报警时沉默**。改用独立的 `trade_calendar`
+  （生产实测覆盖 1990-12-19~2026-12-31，不退化成 `weekday()` 降级）；
+  日历读不到时返回 `[]` 并记 error，而不是拿坏日历算出一个偏多的「应到未到」。
+- **watchdog 退出码只认新入队**：`health.push()` 内部先按 `(source, 归一化 detail)`
+  去重 ⇒ 同一个**没修复也没 ack** 的断档，第二天起新入队数恒为 0，watchdog 每次退 0，
+  systemd 一路绿灯。改判「仍有未确认的 health 断档」，取数窗口与判重视窗同为 200。
+- **`emotion-core-close.service` 丢弃返回码**：`python -c "…; run_daily()"` 把
+  `run_daily` 的返回值丢在地上 ⇒ 失败码 1 / 覆盖率拦截 76 全被吞；且不经 `main()`
+  ⇒ 无 `basicConfig`，journal 里没有进度。改走 `-m emotion_core.orchestration.daily`。
+
+### 修复 · 行情口径
+
+- **TDX `pre_close` 取到未来价**：`pytdx_provider._tdx_all_bars` 的 docstring 明写
+  「TDX 返回降序」，而 `PytdxProvider.fetch_daily_bars` 与 `backfill_tdx.fetch_code`
+  都在**降序帧**上直接 `shift(1)` ⇒ 每行拿到的是**次日**收盘价。pre_close 是涨停判定
+  基准（caliber C2），取未来价会让涨跌幅/涨停整体反向。改为先 `sort_values("date")`
+  再 shift，且 shift 放在区间过滤**之前**，用区间外那根给首行播种。
+- **`normalize_frame` 自相矛盾**：`code` 被算进必需列，可函数下一行就是
+  `out["code"] = code`。⇒ `PytdxProvider` / `TencentProvider` 恒定抛「缺少列: code」，
+  **从未成功返回过一行**；之所以没人发现，是 `test_tencent.py` 把 `normalize_frame`
+  整个 mock 掉了。
+- **Rust `board_pct_milli` 漏北交所 `92` 号段**：北交所 2023-04 起对新上市公司启用
+  920xxx，Python 判据一直是 `("4","8","92")`，Rust 只抄了 `4`/`8` ⇒ 920xxx 按主板 10%
+  算涨停价。（生产影响为零：C7 已把北交所排除在判据层之外。）
+
+### 修复 · 环境时区与可导入性
+
+- `orchestration/strategy.py` / `pool.py` 的 `date.today()` → `today_sh()`。机器时区是
+  Etc/UTC，北京时间 00:00~08:00 之间会少一天（`entry.py:266` 的 P1-3 明文禁止隐式
+  `date.today()`）。
+- **`core/__init__.py` 改惰性加载**（PEP 562）。`.so` 是 `.gitignore` 的构建产物、仓里
+  没有编译它的 CI 步骤 ⇒ 干净环境下 `import emotion_core.core` 在**模块导入期**就崩
+  （`AttributeError: 'NoneType' object has no attribute 'loader'`），连带
+  `tests/oracle/*_rust_vs_python.py`、`test_dragon_env.py`、`test_ecosystem_service.py`
+  在收集阶段即报错 —— **CI 的 `pytest tests` 从未真正跑通过**。
+- **新增 `tests/conftest.py`**（本仓首个 conftest）：产物缺失时把依赖 Rust 的测试整份
+  skip 并在 stderr 说明原因。判据用 **AST 解析 import**（不是文本搜索，否则
+  `test_dependency_direction.py` 里注释提到的 `dragon_env` 会被误伤）。
+
+### 门禁
+
+- **新增 `tests/architecture/test_systemd_units.py`（31 例）**：禁 `python -c` 入口、
+  校验 `-m` 目标真有 `main()`、`OnCalendar` 必须自带时区、drop-in 的生效值不得与
+  本体矛盾、`Requires=` 指向的 service 必须存在。
+- **`tests/caliber/test_price_unique_impl.py` 扫描范围扩到 `.rs`**：此前只扫 `*.py`，
+  于是 Rust 侧可以自由长出第二套板块比例而无人拦阻。新增「Rust↔Python 板块前缀
+  对等」断言（**源码级**，不需要 cargo —— 生产机上没有 cargo，无法就地重建 `.so`，
+  等 `.so` 重编前这是唯一能立刻发现分歧的东西）。
+  该断言首版按 Rust 的 `starts_with` 过滤、Python 侧实为 `startswith`，导致断言恒绿；
+  已修，并补 `test_python_board_prefix_extraction_is_not_vacuous` 钉住「提取器不许空转」。
+- `scripts/check_doc_numbers.py` 此前 rc=1，抓到 9 处真实计数错误
+  （`README.md` DDL 声明 24 实为 30；`docs/15-实施追踪.md` 完成度总览 8 个层的文件数
+  全偏小）。**改文档让它对**，现已 rc=0。
+- 静态债务棘轮基线下调：ruff check **291 → 279**，format 待格式化 226（持平）。
+
+### 未修（需 owner 裁决，不是「修不好」）
+
+- **生产 `.so` 仍无 `92` 修复**：机器上没有 cargo，`src/core_lib/emotion_core_rust.so`
+  无法就地重建（当前 md5 `44ebfc09…`、mtime 2026-09-30 01:47:57 UTC）。须在别处
+  `cargo build --release` 后拷回，并按 `docs/06` §3.3 跑 `pytest tests/oracle` 对账。
+- **systemd 仓/生产严重漂移**：`emotion-core-close.*` 根本没装；`dash` / `strategy`
+  只存在于 `/etc`；生产 `.timer` 本体**没有** `Asia/Shanghai`，时区靠 `.timer.d/` 兜。
+  详见 README 新增的「systemd 仓/生产漂移」小节。同步时**本体与 drop-in 必须一起处理**，
+  否则排期会静默偏 8 小时且无任何报错。
+- **`close` 单元职责存疑**：`docs/08` §4.2 / `docs/13` 把它定为「收盘对账（交易桥）」、
+  列了 `orchestration/close.py`，但该文件从未存在；close 实际跑的是完整 13 步 daily，
+  与 17:20 的 daily **全量重复**。需要 owner 定：补 close.py，还是撤掉重复调度。
+- **`doctor._check_provider_consistency` 四个出口全 `True`**：模块 docstring 写明是
+  照搬 lkl 的降级分支、偏差只进 `log.warning`。结果是双源比对**永不失败**，doctor
+  输出里看不出偏差。改它会破坏「逐字照搬 lkl」的既定契约，故留给 owner。
+- **`Checklist.passed` 全 None 返回 True** 核实为**有意契约**（UNKNOWN 不否决，
+  Python/Rust/回测三边一致，`tests/oracle/test_exit_rust_vs_python.py:89` 断言），
+  已补 docstring 说明，不改行为。
+- **`docs/15-实施追踪.md:8-18` vs `:464-485`** 两处同名「部署状态」段互相打架；
+  `README.md` 阶段 8 标 `⏳ 进行中` 而 `docs/15` 完成度总览标 `✅ 100%`。
+
+---
+
 ## [Unreleased] — 2026-09-30 (cron 看门狗修复 + 文档口径同步)
 
 ### 修复
