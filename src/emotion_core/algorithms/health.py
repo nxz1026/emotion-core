@@ -22,10 +22,11 @@
    升序）未随本轮迁入——`emotion_core.utils.dates.recent_trading_days(n)` 签名/语义不同
    （无日期上界）；本轮范围限定只新增 health.py + test_health.py 两文件，公共 util 不在
    范围内，故本模块内自持 `_recent_trading_days(d, n)`，SQL 与 lkl 逐字
-   （`SELECT DISTINCT date FROM daily_bar WHERE date <= %s ORDER BY date DESC LIMIT %s`，
-   再 `sorted`）。**已知 gap**：待公共 util 补齐日期上界后应改回
-   dates.recent_trading_days，两处调用点（_trading_gap 的 60、check_outcome_stale 的
-   OUTCOME_STALE_DAYS+1）不变。
+   （`SELECT date FROM trade_calendar WHERE is_open AND date <= %s ORDER BY date DESC
+   LIMIT %s`，再 `sorted`）。**2026-10-07 已改**：原先查的是 `SELECT DISTINCT date FROM
+   daily_bar`，即**从被监控对象自己派生日历** ⇒ 监控自噬，详见
+   `_recent_trading_days` 的 docstring。语义与参数不变，两个调用点
+   （_trading_gap 的 60、check_outcome_stale 的 OUTCOME_STALE_DAYS+1）也无需改动。
 3. `dates.today_sh()` 已在 emotion_core.utils.dates 就位，调用点保持
    `from emotion_core.utils import dates` / `dates.today_sh()` 与 lkl 同形。
 4. alerts 路径 `lkl.services.alerts` → `emotion_core.algorithms.alerts`（pending /
@@ -61,10 +62,33 @@ POOL_STALE_DAYS = 2          # 东财三池：落后衍生层 1 个交易日即�
 
 
 def _recent_trading_days(d: date, n: int) -> list[date]:
-    """d 及之前最近 n 个已入库交易日（升序）——lkl dates.recent_trading_days 语义。"""
-    df = query_df(
-        "SELECT DISTINCT date FROM daily_bar WHERE date <= %s"
-        " ORDER BY date DESC LIMIT %s", (d, n))
+    """d 及之前最近 n 个**交易日**（升序）。
+
+    ⚠️ 2026-10-07：原来这里查的是 ``SELECT DISTINCT date FROM daily_bar``，
+    即**从被监控对象自己派生日历**。后果是**监控自噬**：
+    ``daily_bar`` 一停写，派生日历同步变短 ⇒ 断档天数变小 ⇒ 低于
+    ``DATA_GAP_DAYS`` ⇒ **恰好在最该报警的时候沉默**。
+
+    2026-10-07 现场：上游 pipeline 停摆、共享表停在 2026-09-30 已 8 天，
+    而这与 watchdog 的退出码缺陷、close.service 丢弃返回码三者叠加，零告警。
+
+    改用 ``trade_calendar``（独立于行情数据；生产实测覆盖
+    1990-12-19 ~ 2026-12-31，含 2026 国庆假与 10-08 之后的交易日），
+    因此**不会**退化成 ``data/trade_calendar.py`` 的 ``weekday()`` 降级。
+    语义与参数不变，两个调用点（``_trading_gap`` 的 60、
+    ``check_outcome_stale`` 的 ``OUTCOME_STALE_DAYS+1``）无需改动。
+
+    ⚠️ 读不到日历时返回**空列表并记 error**，而不是让上层拿着一个坏日历
+    算出偏多的「应到未到」。宁可让断档检查说「我算不出来」，
+    也不要给一个看似确定的错结论。
+    """
+    try:
+        df = query_df(
+            "SELECT date FROM trade_calendar WHERE is_open AND date <= %s"
+            " ORDER BY date DESC LIMIT %s", (d, n))
+    except Exception as exc:  # noqa: BLE001
+        log.error("交易日历读取失败，断档检查给不出可信结论：%s: %s", type(exc).__name__, exc)
+        return []
     return sorted(df["date"])
 
 
