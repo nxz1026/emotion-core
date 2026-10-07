@@ -68,6 +68,16 @@ jobs:
           # utils/db.py 把 dbname 写死为 emotion_core、user 写死为 postgres
           PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -c 'CREATE DATABASE emotion_core;'
 
+      # 空库不行：那批展示层测试会真发 SELECT，缺表直接 UndefinedTable。
+      # 用仓里自己的 schema 建表（幂等），保证 CI 跑的库结构与生产同源，
+      # 而不是另抄一份 SQL 到 workflow 里（抄的那份迟早会过期）。
+      - name: Create schema in the CI database
+        env:
+          PYTHONPATH: src
+        run: |
+          python -c "from emotion_core.utils.db import connect; from emotion_core.data.schema import create_all; \
+                     print('tables:', create_all(connect()))"
+
       - name: Unit and integration tests
         env:
           PYTHONPATH: src
