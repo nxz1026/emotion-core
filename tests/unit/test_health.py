@@ -32,7 +32,7 @@ class FakeQuery:
         self.report = None          # review_report max(date)
         self.data = None            # derived_bar max(date)
         self.outcome = None         # signal LEFT JOIN signal_outcome
-        self.trading = None         # daily_bar（_recent_trading_days）
+        self.trading = None         # trade_calendar（_recent_trading_days）
         self.pool = None            # limit_pool_em max(date)（check_pool_stale）
 
     @staticmethod
@@ -52,7 +52,10 @@ class FakeQuery:
         if "FROM signal s" in sql:
             return self.outcome if self.outcome is not None else pd.DataFrame(
                 columns=["confirm_date", "code"])
-        if "FROM daily_bar" in sql:
+        if "FROM trade_calendar" in sql:
+            # ⚠️ 2026-10-07：日历源从 daily_bar 改为 trade_calendar（治监控自噬）。
+            # 这里**不**给 daily_bar 留分支 —— 一旦留了，日历又可以从被监控
+            # 对象自己派生，而 FakeQuery 会照单全收，把自噬悄悄放回去。
             return self._frame(self.trading, "date")
         if "FROM limit_pool_em" in sql:
             return self._frame(self.pool, "d")
@@ -169,12 +172,28 @@ class TestTradingGap:
 
 class TestRecentTradingDays:
     def test_sql_locked_and_sorted_ascending(self, db):
+        """SQL 锁在 **trade_calendar**，不是 daily_bar。
+
+        ⚠️ 2026-10-07 改的。原来锁的是 ``SELECT DISTINCT date FROM
+        daily_bar`` —— **从被监控对象自己派生日历**，构成监控自噬：
+        daily_bar 一停写，日历同步变短 ⇒ 断档天数变小 ⇒ 低于阈值 ⇒
+        恰好在最该报警时沉默。现场：上游停摆 8 天、零告警。
+
+        所以这条测试**继续存在且继续锁 SQL**，只是锁的内容变了 ——
+        它是「别再改回自噬版本」的护栏。若将来要换日历源，
+        先读 health.py 里 ``_recent_trading_days`` 的 docstring。
+        """
         db.trading = [D0, date(2026, 9, 24), date(2026, 9, 23)]
         assert health._recent_trading_days(D0, 3) == [
             date(2026, 9, 23), date(2026, 9, 24), D0]
         sql, params = db.calls[0]
-        assert "SELECT DISTINCT date FROM daily_bar" in sql
-        assert "WHERE date <= %s" in sql
+        # ⚠️ 必须来自独立于行情的日历表
+        assert "FROM trade_calendar" in sql
+        assert "is_open" in sql
+        assert "daily_bar" not in sql, (
+            "断档检查又改回从被监控表派生日历了 ⇒ 监控自噬"
+        )
+        assert "WHERE is_open AND date <= %s" in sql
         assert "ORDER BY date DESC LIMIT %s" in sql
         assert params == (D0, 3)
 
