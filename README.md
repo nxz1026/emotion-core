@@ -173,10 +173,10 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 - 判定 `algorithms/stock.py`（纯计算：零 SQL、零 LLM）→ 档位 `BUY` 可参与 / `LOW` 只做低吸回踩 /
   `WATCH` 观察 / `AVOID` 不建议参与；市场 `buy_window=NONE`、`force_liquidate`、ST、跌停为硬约束
 - 服务 `services/stock_service.py`（组装 + 可选 LLM；**整链路只读**，不写任何库表）
-- 三段式诊断 `services/diagnose_service.py`（**A 现在 / B 过去 / C 值不值**）：已接入 `/api/stock`，
-  payload 新增 `diagnose` 键（既有键名全部不变），昂贵统计由 `stock_service` TTL 缓存注入
-- 展示 `presentation/templates/stock.html` + `static/stock.js`（三张诊断卡 `#diagnose-a-card` /
-  `#diagnose-b-card` / `#diagnose-c-card`，`renderDiagnose()`，无数据显示「暂无」）
+- 三段式诊断 `services/diagnose_service.py`：已接入 `/api/stock`，payload 新增 `diagnose`
+  键（既有键名全部不变），昂贵统计由 `stock_service` TTL 缓存注入
+- 展示 `presentation/templates/stock.html` + `static/stock.js`（三张诊断卡
+  `#diagnose-a-card` / `#diagnose-b-card` / `#diagnose-c-card`，`renderDiagnose()`，无数据显示「暂无」）
 - API：`GET /emotion/api/stock?code=601811`（规则层，首次 ~2s 全表聚合、缓存后 ~0.15s；
   响应新增 `diagnose` 段：A/B/C 三段式）；
   `GET /emotion/api/stock/llm?code=601811`（AI 解读，4~6s，前端异步取，失败不影响规则层结论）
