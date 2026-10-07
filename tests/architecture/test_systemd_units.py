@@ -26,14 +26,15 @@
    表现是「排期静默偏 8 小时」，没有任何报错。本测试只要求**一致**，
    不强制某种结构：本体没写时区就靠 drop-in 兜底是完全合法的。
 
-同时钉住两条小的：`-m` 指向的模块必须有 `main()`（否则 unit 起不来）；
-timer 的 `Requires=` 必须指向仓内真实存在的 service（防拼错单元名）。
+同时钉住两条小的：`-m` 指向的模块必须真有入口（`main()` 或 `__main__` 守卫，
+否则 `python -m` 跑完什么都不做、退出 0）；timer 的 `Requires=` / `After=` /
+`Wants=` 必须指向仓内真实存在的单元（防拼错单元名）。
 
-⚠️ 已知未覆盖：生产 `/etc/systemd/system/` 里的
-`emotion-core-dash.service` / `emotion-core-strategy.{service,timer}`
-**不在本仓**，而仓内的 `emotion-core-close.{service,timer}` **没装到生产**。
-本测试只管仓内文件，管不到这层漂移——同步动作见
-`docs/06-上线后工作手册.md` 的 systemd 部署小节。
+⚠️ 2026-10-07 更新：仓内原先只有 10 个单元，而 `/etc/systemd/system` 有 11 个 ——
+`emotion-core-dash.service` 与 `emotion-core-strategy.{service,timer}` **只存在于生产**，
+而仓内的 `emotion-core-close.{service,timer}` **从未装到生产**。本轮已把前者按生产
+原样收进仓库、后者撤销（close 实际跑的是完整 13 步 daily，与 daily.timer 全量重复，
+详见 README「systemd 仓/生产漂移」小节）。现在两边都是 11 个单元。
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ def test_unit_dir_is_not_empty():
 
 
 class TestExecStart:
-    """入口必须是模块级 `main()`，不能是 `python -c`。"""
+    """入口必须真有事可做：`-m` 模块或脚本，不能是 `python -c`。"""
 
     @pytest.mark.parametrize("path", _SERVICES, ids=lambda p: p.name)
     def test_no_inline_python_c(self, path: Path):
@@ -106,10 +107,15 @@ class TestExecStart:
 
     @pytest.mark.parametrize("path", _SERVICES, ids=lambda p: p.name)
     def test_module_target_defines_main(self, path: Path):
-        """`-m foo.bar` 要求 `foo/bar.py` 存在且定义 `main()`。
+        """`-m foo.bar` 必须真的有事可做。
 
-        `python -m` 找不到 `main` 时是「跑完模块什么都不做、退出 0」，
-        同样属于 unit 假装成功的形态。
+        `python -m` 找到模块、而模块里既没有 `main()` 也没有 `__main__` 守卫时，
+        是「跑完什么都不做、退出 0」——unit 假装成功，与吞退出码属同一类故障。
+
+        两种合法形态都接受：`def main(`（走 main()）或 `if __name__ == "__main__":`
+        （模块自带入口）。`presentation/server.py` 属后者（导出 `run_server()`）。
+        首版只认 `def main(`，会把 dash 这类单元判红——**门禁比约定更严不是更安全**，
+        是没人愿意维护它。
         """
         cmd = _exec_start(path.read_text(encoding="utf-8"))
         match = re.search(r"-m\s+([A-Za-z_][\w.]*)", cmd)
@@ -117,8 +123,12 @@ class TestExecStart:
         module = match.group(1)
         py = SRC / Path(*module.split(".")).with_suffix(".py")
         assert py.exists(), f"{path.name} 指向的模块不存在：{module}（{py}）"
-        assert re.search(r"^def main\(", py.read_text(encoding="utf-8"), re.M), (
-            f"{path.name} 指向 {module}，但该模块没有 `def main(`——`python -m` 会静默跑完就退出 0"
+        src = py.read_text(encoding="utf-8")
+        has_main = re.search(r"^def main\(", src, re.M)
+        has_guard = re.search(r'^if __name__ == ["\']__main__["\']:', src, re.M)
+        assert has_main or has_guard, (
+            f"{path.name} 指向 {module}，但该模块既没有 `def main(` 也没有 "
+            f'`if __name__ == "__main__":` 守卫——`python -m` 会静默跑完就退出 0'
         )
 
     @pytest.mark.parametrize("path", _SERVICES, ids=lambda p: p.name)
@@ -178,16 +188,21 @@ class TestTimerTimezone:
 class TestUnitReferences:
     """单元互相引用不能拼错。"""
 
-    @pytest.mark.parametrize("path", _TIMERS, ids=lambda p: p.name)
-    def test_requires_points_to_an_existing_service(self, path: Path):
-        known = {p.name for p in _SERVICES}
+    @pytest.mark.parametrize("path", _TIMERS + _SERVICES, ids=lambda p: p.name)
+    def test_references_point_to_existing_units(self, path: Path):
+        """`Requires` / `Wants` / `After` / `Before` 的目标必须在仓内存在。
+
+        注意**不能只认 `.service`**：`emotion-core-strategy.timer` 的
+        `After=emotion-core-daily.timer` 指向的是另一个 timer。首版把已知集合
+        取成只有 service，于是这条合法的排序依赖被判成「拼错单元名」。
+        """
+        known = {p.name for p in (*_SERVICES, *_TIMERS)}
         for key, value in _directives(path.read_text(encoding="utf-8")):
-            if key not in ("Requires", "Wants", "After", "Before"):
+            if key not in ("Requires", "Wants", "After", "Before", "Unit"):
                 continue
             for unit in value.split():
                 if not unit.startswith("emotion-core-"):
                     continue  # network.target / postgresql.service 等系统单元
                 assert unit in known, (
-                    f"{path.name} 的 {key}= 指向仓内不存在的 {unit}\n"
-                    f"  仓内 service：{sorted(known)}"
+                    f"{path.name} 的 {key}= 指向仓内不存在的 {unit}\n  仓内单元：{sorted(known)}"
                 )

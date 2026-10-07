@@ -8,6 +8,7 @@ providers 经参数注入（无模块级 import）。
 IO 全部桩掉（query_df / CONFIG / cwd / trade 目录探针 / halt 停机开关 /
 providers 函数），真实库对账另跑（编排者阶段）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,12 +23,9 @@ import pandas as pd
 from emotion_core.algorithms import doctor
 
 # lkl 原句（断言到 SQL 文本与参数元组一级，锁住谓词口径）
-DB_SQL = ("SELECT count(*) n FROM information_schema.tables"
-          " WHERE table_schema='public'")
-CAL_SQL = ("SELECT min(date) a, max(date) b,"
-           " count(distinct date) n FROM daily_bar")
-SAMPLE_SQL = ("SELECT code, max(date) AS date FROM daily_bar GROUP BY code"
-              " ORDER BY code LIMIT %s")
+DB_SQL = "SELECT count(*) n FROM information_schema.tables WHERE table_schema='public'"
+CAL_SQL = "SELECT min(date) a, max(date) b, count(distinct date) n FROM daily_bar"
+SAMPLE_SQL = "SELECT code, max(date) AS date FROM daily_bar GROUP BY code ORDER BY code LIMIT %s"
 
 
 def stub_query(monkeypatch, fn) -> list[tuple[str, tuple]]:
@@ -51,6 +49,7 @@ def stub_config(monkeypatch, **kw) -> SimpleNamespace:
 
 # ────────────────────────── _check_db ──────────────────────────
 
+
 class TestCheckDb:
     def test_ten_tables_ready(self, monkeypatch):
         seen = stub_query(monkeypatch, lambda sql, p: pd.DataFrame({"n": [10]}))
@@ -70,8 +69,9 @@ class TestCheckDb:
         assert note == "public 下 9 张表（≥10 为就绪）"
 
     def test_connection_error(self, monkeypatch):
-        stub_query(monkeypatch, lambda sql, p: (_ for _ in ()).throw(
-            RuntimeError("could not connect")))
+        stub_query(
+            monkeypatch, lambda sql, p: (_ for _ in ()).throw(RuntimeError("could not connect"))
+        )
         ok, note = doctor._check_db()
         assert ok is False
         assert note.startswith("连接失败：")
@@ -80,30 +80,38 @@ class TestCheckDb:
 
 # ────────────────────────── _check_calendar ──────────────────────────
 
+
 class TestCheckCalendar:
     def test_empty_daily_bar(self, monkeypatch):
-        seen = stub_query(monkeypatch, lambda sql, p: pd.DataFrame(
-            {"a": [None], "b": [None], "n": [0]}))
+        seen = stub_query(
+            monkeypatch, lambda sql, p: pd.DataFrame({"a": [None], "b": [None], "n": [0]})
+        )
         ok, note = doctor._check_calendar()
         assert ok is False
-        assert note == "daily_bar 空——先跑 lkl fetch backfill"    # 文案照搬（含 lkl）
+        assert note == "daily_bar 空——先跑 lkl fetch backfill"  # 文案照搬（含 lkl）
         assert seen == [(CAL_SQL, ())]
 
     def test_normal_range(self, monkeypatch):
-        stub_query(monkeypatch, lambda sql, p: pd.DataFrame(
-            {"a": [date(2026, 1, 5)], "b": [date(2026, 9, 25)], "n": [180]}))
-        assert doctor._check_calendar() == (
-            True, "2026-01-05 ~ 2026-09-25 共 180 个交易日")
+        stub_query(
+            monkeypatch,
+            lambda sql, p: pd.DataFrame(
+                {"a": [date(2026, 1, 5)], "b": [date(2026, 9, 25)], "n": [180]}
+            ),
+        )
+        assert doctor._check_calendar() == (True, "2026-01-05 ~ 2026-09-25 共 180 个交易日")
 
     def test_query_error(self, monkeypatch):
-        stub_query(monkeypatch, lambda sql, p: (_ for _ in ()).throw(
-            ValueError("relation \"daily_bar\" does not exist")))
+        stub_query(
+            monkeypatch,
+            lambda sql, p: (_ for _ in ()).throw(ValueError('relation "daily_bar" does not exist')),
+        )
         ok, note = doctor._check_calendar()
         assert ok is False
         assert note.startswith("查询失败：")
 
 
 # ────────────────────────── _check_tz ──────────────────────────
+
 
 class TestCheckTz:
     def test_always_ok_note_shape(self):
@@ -112,30 +120,31 @@ class TestCheckTz:
         assert note.startswith("Asia/Shanghai 当前 ")
         assert "（与 UTC 日期差=" in note
         assert note.endswith("）")
-        stamp = note[len("Asia/Shanghai 当前 "):note.index("（")]
+        stamp = note[len("Asia/Shanghai 当前 ") : note.index("（")]
         _, hhmm = stamp.split(" ")
         assert len(stamp[:10].split("-")) == 3 and len(hhmm) == 5  # %Y-%m-%d %H:%M
-        assert note.rstrip("）").endswith(("True", "False"))       # utc_date_diff 为 bool
+        assert note.rstrip("）").endswith(("True", "False"))  # utc_date_diff 为 bool
 
 
 # ────────────────────────── _check_trade_dir ──────────────────────────
+
 
 class TestCheckTradeDir:
     def test_creates_dir_and_leaves_no_probe(self, monkeypatch, tmp_path):
         target = tmp_path / "trade"
         stub_config(monkeypatch, TRADE_DIR=str(target))
-        monkeypatch.setitem(sys.modules, "emotion_core.trade", None)   # halt 层未就位
+        monkeypatch.setitem(sys.modules, "emotion_core.trade", None)  # halt 层未就位
         ok, note = doctor._check_trade_dir()
         assert ok is True
         assert note == f"{target} 可写"
         assert "HALTED" not in note
         assert target.is_dir()
-        assert not (target / ".doctor_probe").exists()                 # 探针写删
+        assert not (target / ".doctor_probe").exists()  # 探针写删
 
     def test_unwritable_path(self, monkeypatch, tmp_path):
         blocker = tmp_path / "afile"
         blocker.write_text("x", encoding="utf-8")
-        target = blocker / "trade"                                     # 父路径是文件
+        target = blocker / "trade"  # 父路径是文件
         stub_config(monkeypatch, TRADE_DIR=str(target))
         ok, note = doctor._check_trade_dir()
         assert ok is False
@@ -173,11 +182,11 @@ class TestCheckTradeDir:
 
 # ────────────────────────── _check_reports ──────────────────────────
 
+
 class TestCheckReports:
     def test_missing_reports_dir(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
-        assert doctor._check_reports() == (
-            True, "reports/ 尚未创建（首次 review 时自动建）")
+        assert doctor._check_reports() == (True, "reports/ 尚未创建（首次 review 时自动建）")
 
     def test_counts_md_only(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
@@ -185,35 +194,42 @@ class TestCheckReports:
         reports.mkdir()
         (reports / "2026-09-25.md").write_text("# a", encoding="utf-8")
         (reports / "2026-09-26.md").write_text("# b", encoding="utf-8")
-        (reports / "notes.txt").write_text("x", encoding="utf-8")      # 不计
+        (reports / "notes.txt").write_text("x", encoding="utf-8")  # 不计
         assert doctor._check_reports() == (True, "reports/ 2 份 MD")
 
 
 # ────────────────────────── _check_optional ──────────────────────────
 
+
 class TestCheckOptional:
     def test_defaults_off(self, monkeypatch):
         stub_config(monkeypatch, LLM_PROFILE=None, LKL_WEBHOOK_URL="")
         assert doctor._check_optional() == (
-            True, "LLM=关（默认）；webhook=未配置（默认关）（均默认不参与主链）")
+            True,
+            "LLM=关（默认）；webhook=未配置（默认关）（均默认不参与主链）",
+        )
 
     def test_llm_profile_on(self, monkeypatch):
         stub_config(monkeypatch, LLM_PROFILE="agnes", LKL_WEBHOOK_URL="")
         assert doctor._check_optional() == (
-            True, "LLM=开；webhook=未配置（默认关）（均默认不参与主链）")
+            True,
+            "LLM=开；webhook=未配置（默认关）（均默认不参与主链）",
+        )
 
     def test_webhook_configured(self, monkeypatch):
         stub_config(monkeypatch, LLM_PROFILE="agnes", LKL_WEBHOOK_URL="https://hook/x")
-        assert doctor._check_optional() == (
-            True, "LLM=开；webhook=已配置（均默认不参与主链）")
+        assert doctor._check_optional() == (True, "LLM=开；webhook=已配置（均默认不参与主链）")
 
     def test_empty_webhook_env_value_is_off(self, monkeypatch):
         stub_config(monkeypatch, LLM_PROFILE=None, LKL_WEBHOOK_URL=None)
         assert doctor._check_optional() == (
-            True, "LLM=关（默认）；webhook=未配置（默认关）（均默认不参与主链）")
+            True,
+            "LLM=关（默认）；webhook=未配置（默认关）（均默认不参与主链）",
+        )
 
 
 # ────────────────────────── _check_provider_consistency ──────────────────────────
+
 
 class ProviderError(Exception):
     """Provider 错误同形替身。"""
@@ -226,6 +242,7 @@ def make_providers(monkeypatch, *, main: dict | Exception, backup: dict | Except
     provider.fetch_daily_bars(code, start, end) — 3 参数
     返回 (fetch_daily_bars_fn, get_provider_fn, provider_error_fn)。
     """
+
     def fetch(code, start, end):
         if isinstance(backup, Exception):
             raise backup
@@ -250,22 +267,20 @@ class TestCheckProviderConsistency:
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=[])
         seen = stub_query(monkeypatch, lambda sql, p: pd.DataFrame())
         assert doctor._check_provider_consistency() == (True, "日线备源链关闭")
-        assert seen == []                                              # 关链不读库
+        assert seen == []  # 关链不读库
 
     def test_chain_missing_key_defaults_off(self, monkeypatch):
-        stub_config(monkeypatch)                                       # CONFIG 无该键
+        stub_config(monkeypatch)  # CONFIG 无该键
         assert doctor._check_provider_consistency() == (True, "日线备源链关闭")
 
     def test_providers_absent_skips(self, monkeypatch):
         """无注入 → 静默跳过（离线诊断不强制依赖 services）。"""
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
-        assert doctor._check_provider_consistency() == (
-            True, "日线双源未注入，跳过备源体检")
+        assert doctor._check_provider_consistency() == (True, "日线双源未注入，跳过备源体检")
 
     def test_no_sample(self, monkeypatch):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=7)
-        fetch_fn, get_prov_fn, err_fn = make_providers(
-            monkeypatch, main={}, backup={})
+        fetch_fn, get_prov_fn, err_fn = make_providers(monkeypatch, main={}, backup={})
         seen = stub_query(monkeypatch, lambda sql, p: pd.DataFrame(columns=["code", "date"]))
         assert doctor._check_provider_consistency(
             fetch_daily_bars_fn=fetch_fn,
@@ -275,28 +290,88 @@ class TestCheckProviderConsistency:
         assert seen == [(SAMPLE_SQL, (7,))]
 
     def test_deviation_alert_threshold(self, monkeypatch, caplog):
+        """★2026-10-07：偏差超阈值必须让本项**失败**。
+
+        原实现照搬 lkl，四个出口全 `True`，偏差只 `log.warning` ⇒
+        `doctor.run()` 里「日线双源」永远显示通过 = 没有检查。
+        现在只有「没得查」（链关闭/未注入/无样本/依赖不可用）才返回 True。
+        """
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
         fetch_fn, get_prov_fn, err_fn = make_providers(
             monkeypatch,
             main={"000001": 10.0, "600000": 10.0, "000002": 10.0},
-            backup={"000001": 10.0, "600000": 10.04, "000002": 10.06})
-        sample = pd.DataFrame({"code": ["000001", "600000", "000002"],
-                               "date": [date(2026, 9, 25)] * 3})
+            backup={"000001": 10.0, "600000": 10.04, "000002": 10.06},
+        )
+        sample = pd.DataFrame(
+            {"code": ["000001", "600000", "000002"], "date": [date(2026, 9, 25)] * 3}
+        )
         seen = stub_query(monkeypatch, lambda sql, p: sample)
         with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
-            assert doctor._check_provider_consistency(
+            ok, note = doctor._check_provider_consistency(
                 fetch_daily_bars_fn=fetch_fn,
                 get_provider_fn=get_prov_fn,
                 provider_error_fn=err_fn,
-            ) == (True, "抽样 3 只，比较 3 组，告警 1 组")
+            )
+        assert ok is False, "双源偏差超 0.5% 却判通过 = 这项检查等于没有"
+        assert note == ("抽样 3 只，比较 3 组，1 组偏差 >0.5%：000002 pytdx偏差0.60%")
         assert seen == [(SAMPLE_SQL, (5,))]
         assert [r.getMessage() for r in caplog.records] == [
-            "日线双源偏差告警：000002 pytdx偏差0.60%"]
+            "日线双源偏差告警：000002 pytdx偏差0.60%"
+        ]
+
+    def test_all_within_threshold_passes(self, monkeypatch):
+        """全部在 0.5% 以内 → 通过。
+
+        ⚠️ 取 10.04（0.4%）而不是 10.05：浮点上 `10.05/10.0 - 1` 是
+        `0.005000000000000004`，**大于** 0.005。拿边界值写断言，等于把测试
+        绑在浮点表示上，换个平台/编译器就翻。阈值语义（>0.5% 才算偏差）
+        由 `test_deviation_alert_threshold` 的 0.60% 那条守住。
+        """
+        stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch,
+            main={"000001": 10.0, "600000": 10.0},
+            backup={"000001": 10.04, "600000": 10.0},
+        )
+        sample = pd.DataFrame({"code": ["000001", "600000"], "date": [date(2026, 9, 25)] * 2})
+        stub_query(monkeypatch, lambda sql, p: sample)
+        assert doctor._check_provider_consistency(
+            fetch_daily_bars_fn=fetch_fn,
+            get_provider_fn=get_prov_fn,
+            provider_error_fn=err_fn,
+        ) == (True, "抽样 2 只，比较 2 组，告警 0 组")
+
+    def test_note_lists_offenders_when_multiple(self, monkeypatch):
+        """多组偏差时 note 要能看到是哪些票，且**只列前 5 条**但报总数。
+
+        doctor 的 note 是给人看的：既要点名，又不能刷屏；总数必须保留，
+        否则「列了 5 条」会被误读成「只有 5 条」。
+        """
+        stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=9)
+        codes = [f"{i:06d}" for i in range(1, 8)]
+        fetch_fn, get_prov_fn, err_fn = make_providers(
+            monkeypatch,
+            main={c: 10.0 for c in codes},
+            backup={c: (10.20 if i < 6 else 10.0) for i, c in enumerate(codes)},
+        )
+        sample = pd.DataFrame({"code": codes, "date": [date(2026, 9, 25)] * len(codes)})
+        stub_query(monkeypatch, lambda sql, p: sample)
+        ok, note = doctor._check_provider_consistency(
+            fetch_daily_bars_fn=fetch_fn,
+            get_provider_fn=get_prov_fn,
+            provider_error_fn=err_fn,
+        )
+        assert ok is False
+        assert note.startswith("抽样 7 只，比较 7 组，6 组偏差 >0.5%…（共 6 组）：")
+        assert "000001 pytdx偏差2.00%" in note  # 前 5 条里第 1 条
+        assert "000005 pytdx偏差2.00%" in note  # 前 5 条里最后一条
+        assert "000006" not in note  # 第 6 条不列，但计数保留
 
     def test_backup_provider_error_skips_code(self, monkeypatch, caplog):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
         fetch_fn, get_prov_fn, err_fn = make_providers(
-            monkeypatch, main={"000001": 10.0}, backup=ProviderError("503"))
+            monkeypatch, main={"000001": 10.0}, backup=ProviderError("503")
+        )
         sample = pd.DataFrame({"code": ["000001"], "date": [date(2026, 9, 25)]})
         stub_query(monkeypatch, lambda sql, p: sample)
         with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
@@ -310,7 +385,8 @@ class TestCheckProviderConsistency:
     def test_main_provider_error_skips_row(self, monkeypatch, caplog):
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["pytdx"], INGEST_DOCTOR_SAMPLE=5)
         fetch_fn, get_prov_fn, err_fn = make_providers(
-            monkeypatch, main=ProviderError("boom"), backup={"000001": 10.0})
+            monkeypatch, main=ProviderError("boom"), backup={"000001": 10.0}
+        )
         sample = pd.DataFrame({"code": ["000001"], "date": [date(2026, 9, 25)]})
         stub_query(monkeypatch, lambda sql, p: sample)
         with caplog.at_level(logging.WARNING, logger="emotion_core.doctor"):
@@ -325,7 +401,8 @@ class TestCheckProviderConsistency:
         """备源链含未注册名字 → providers.get 为 None 跳过（不报错）。"""
         stub_config(monkeypatch, INGEST_FALLBACK_CHAIN=["nosuch"], INGEST_DOCTOR_SAMPLE=5)
         fetch_fn, get_prov_fn, err_fn = make_providers(
-            monkeypatch, main={"000001": 10.0}, backup={})
+            monkeypatch, main={"000001": 10.0}, backup={}
+        )
         sample = pd.DataFrame({"code": ["000001"], "date": [date(2026, 9, 25)]})
         stub_query(monkeypatch, lambda sql, p: sample)
         assert doctor._check_provider_consistency(
@@ -337,17 +414,35 @@ class TestCheckProviderConsistency:
 
 # ────────────────────────── CHECKS / run ──────────────────────────
 
+
 class TestChecksAndRun:
     def test_run_shape(self, monkeypatch):
-        monkeypatch.setattr(doctor, "CHECKS", [
-            ("甲", lambda: (True, "a")),
-            ("乙", lambda: (False, "b")),
-        ])
+        monkeypatch.setattr(
+            doctor,
+            "CHECKS",
+            [
+                ("甲", lambda: (True, "a")),
+                ("乙", lambda: (False, "b")),
+            ],
+        )
         assert doctor.run() == [("甲", True, "a"), ("乙", False, "b")]
 
     def test_real_checks_seven_in_lkl_order(self):
         assert [name for name, _ in doctor.CHECKS] == [
-            "数据库", "交易日历", "时区", "trade 目录", "报告目录", "可选功能", "日线双源"]
+            "数据库",
+            "交易日历",
+            "时区",
+            "trade 目录",
+            "报告目录",
+            "可选功能",
+            "日线双源",
+        ]
         assert [fn.__name__ for _, fn in doctor.CHECKS] == [
-            "_check_db", "_check_calendar", "_check_tz", "_check_trade_dir",
-            "_check_reports", "_check_optional", "_check_provider_consistency"]
+            "_check_db",
+            "_check_calendar",
+            "_check_tz",
+            "_check_trade_dir",
+            "_check_reports",
+            "_check_optional",
+            "_check_provider_consistency",
+        ]

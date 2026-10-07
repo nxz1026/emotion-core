@@ -77,43 +77,51 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 13 步（sync/coverage/hot/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health）；仓内 systemd：`emotion-core-{daily,close,pool,report,watchdog}.{timer,service}` 共 10 个单元（**⚠️ 与 `/etc/systemd/system` 严重漂移，见下方「systemd 仓/生产漂移」）** |
 | 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 4 个 JSON 接口（另有 `/api/*` 兜底状态），端口 8098，nginx 前缀 `/emotion` |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
-| 阶段 8 上线 | ⏳ 进行中 |（2026-09-28 快照）日更链尚未成功跑通完整一轮：`signal` / `ladder_day` / `promotion_day` / `theme_tag` / `signal_outcome` 仍为 0 行。**2026-09-30 更新**：`signal` / `signal_outcome` 已各 162 行、全部 `source='replay'`、`source='live'`=0，日更链自 2026-09-29 起连续两日 `daily done`；`ladder_day` / `promotion_day` / `theme_tag` 未复核。详见 `docs/05` §P4 |
+| 阶段 8 上线 | ✅ 已完成 | 2026-10-07 实测：`emotion-core-dash` 常驻（:8098 HTTP 200，basic auth 经 `/emotion/`）；五个 timer 全部 `enabled + active`，`emotion-core-daily.timer` 于 2026-10-06 17:20 北京成功执行、`pipeline_state` 13 步全 `OK`（`for_date=2026-09-30`，因 10-01~10-07 国庆休市，交易日守卫正常跳过，下一交易日 10-08 自动接上）；`signal`/`signal_outcome` 各 162 行全 `source='replay'`；`theme_group` 仍 0 行 |
 
 > 数据现状决定了展示口径：只有 `daily_bar` / `derived_bar` / `market_stat` / `stock_basic`
 > 四张表有数据，所以个股诊断等功能的统计**全部从这四张表现算**（PIT 安全），
 > 等上述信号表落数后按同签名加增强分支即可。
 
-### ⚠️ systemd：仓与 `/etc/systemd/system` 严重漂移（2026-10-07 实测）
+### ⚠️ systemd：仓与 `/etc/systemd/system` 曾严重漂移（2026-10-07 已对齐）
 
-**在把仓内 unit 同步到生产之前，先读完这一节。** 现状是两边**互有对方没有的东西**：
+**同步仓内 unit 到生产前，先读完这一节。** 2026-10-07 审计时实测发现两边**互有对方没有的东西**：
 
-| | 仓内 `src/emotion_core/orchestration/systemd/` | 生产 `/etc/systemd/system/` |
-|---|---|---|
-| daily | `.service` + `.timer`（本体已带 `Asia/Shanghai`） | ✅ 同名文件，但**本体仍无时区**，靠 `.timer.d/10-timezone.conf` 兜 |
-| close | `.service` + `.timer` | ❌ **根本没装** |
-| pool / report / watchdog | `.service` + `.timer` + `.timer.d/` | ✅ 已装（时区同样靠 drop-in） |
-| dash | ❌ 仓内没有 | ✅ 只有生产有 `emotion-core-dash.service` |
-| strategy | ❌ 仓内没有 | ✅ 只有生产有 `emotion-core-strategy.{service,timer}` |
+| 单元 | 修之前：仓内 | 修之前：生产 | 2026-10-07 之后 |
+|---|---|---|---|
+| daily | ✅ | ✅（本体无时区，靠 `.timer.d/`） | ✅ 已同步（本体自带 `Asia/Shanghai`） |
+| pool / report / watchdog | ✅ | ✅（时区同样靠 drop-in） | ✅ 已同步（本体自带时区） |
+| **dash** | ❌ 仓内没有 | ✅ 只有生产有 | ✅ **按生产原样收进仓库** |
+| **strategy** | ❌ 仓内没有 | ✅ 只有生产有 | ✅ **按生产原样收进仓库** |
+| **close** | ✅ 仓内有 | ❌ **根本没装** | 🚫 **已撤销**（见下） |
 
-三个要点：
+现在**两边都是 11 个单元**（6 service + 5 timer），仓内是唯一真相源。
 
-1. **生产 `.timer` 本体没有 `Asia/Shanghai` 后缀**，时区是 drop-in 提供的。
-   仓内已于 2026-10-07 把后缀直接写进本体——所以**同步时必须本体与 drop-in 一起处理**，
-   否则会出现「本体已带时区 + drop-in 仍在」或反向的错配，而错配的表现是
+**三个要点**：
+
+1. **生产 `.timer` 本体不带 `Asia/Shanghai`，时区是 drop-in 提供的。**
+   从 `systemctl list-timers` 的 LAST 列反推可见它**确实生效**：
+   daily LAST `09:20 UTC` = 17:20 北京、pool `09:46` = 17:46、strategy `09:50` = 17:50、
+   report `10:00` = 18:00、watchdog `00:51 UTC` = 08:51 —— 全部命中。
+   同步时若只换本体不处理 drop-in，两份真相源漂移的表现是
    **排期静默偏 8 小时、没有任何报错**。
-2. 仓内 `emotion-core-close.{service,timer}` 从未部署过。它原本用
-   `python -c "…; run_daily()"` 调起主链，**丢弃 run_daily 的返回码**（1=步骤崩溃、
-   76=覆盖率拦截全被吞）、且不经 `main()` 没有 `basicConfig`；2026-10-07 已改为
-   `-m emotion_core.orchestration.daily`。契约由
-   `tests/architecture/test_systemd_units.py` 钉住（禁 `python -c`、校验 `-m` 目标
-   真有 `main()`、`OnCalendar` 必须自带时区、drop-in 不得与本体矛盾）。
-3. **仓内没有任何单元处于 enabled/active**（`emotion-core-daily.timer` /
-   `strategy.timer` 均 inactive+disabled），真正在跑的是 CPT 的 crontab 与
-   `emotion-core-dash`。因此 emotion-core 的 7 张共享表**在 Oracle 上没有任何东西会写**。
 
-> `docs/08-编排层合并方案.md` §4.2 把 `emotion-core-close.timer` 定为「收盘对账（交易桥）」，
-> `docs/13` §目录树列了 `orchestration/close.py`——但**该文件从未存在**，close 单元实际
-> 跑的是完整 13 步 daily，与 17:20 的 daily.timer 全量重复。属于待 owner 裁决的设计问题。
+2. **`close` 单元已撤销。** 它原本用 `python -c "…; run_daily()"` 调起主链，
+   **丢弃 run_daily 的返回码**（1=步骤崩溃、76=覆盖率拦截全被吞）、且不经 `main()`
+   没有 `basicConfig`；2026-10-07 先改成了 `-m emotion_core.orchestration.daily`，
+   随即又发现更根本的问题：**它跑的就是完整 13 步 daily，与 17:20 的
+   `emotion-core-daily.timer` 全量重复**，而 `docs/08` §4.2 / `docs/13` 所说的
+   「收盘对账」模块 `orchestration/close.py` **从未存在**。重复调度已撤销
+   （`git rm`，历史可追回）。
+
+3. **五个 timer 全部 `enabled + active`，链路是活的。**
+   （2026-10-07 15:20 北京实测；此前本文件一度写成「全部 inactive/disabled」，
+   那是我按未核实的旧结论写下的，实测为误——`emotion-core-daily.timer` 于
+   2026-10-06 17:20 北京成功执行过一次。）
+
+> 契约由 `tests/architecture/test_systemd_units.py` 钉住：禁 `python -c`、
+> `-m` 目标必须真有入口、`OnCalendar` 必须自带时区、drop-in 生效值不得与本体矛盾、
+> `Requires`/`After`/`Wants`/`Unit` 指向的单元必须存在。
 
 设计文档（阶段 0~1 全部定稿）：
 

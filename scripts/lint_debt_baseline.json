@@ -1,6 +1,6 @@
 {
   "ruff_check_errors": 276,
-  "ruff_format_files": 226,
+  "ruff_format_files": 225,
   "by_rule": {
     "E501": 76,
     "F401": 72,

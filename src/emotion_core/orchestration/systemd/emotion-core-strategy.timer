@@ -1,0 +1,15 @@
+[Unit]
+Description=Emotion Core strategy observer: weekdays 17:50 Shanghai (after daily pipeline)
+After=emotion-core-daily.timer
+
+[Timer]
+# ⚠️ 时区是**显式**的（与其余四个 .timer 同纪律）：机器时区是 Etc/UTC，
+# 不写 Asia/Shanghai 后缀就会整体偏 8 小时。2026-10-07 从 /etc/systemd/system
+# 原样收进仓库时补的注释，原文件只写了时刻没写理由。
+# 17:50 北京时间：刻意晚于 daily（17:20），让策略观察看到当轮跑完的成果。
+OnCalendar=Mon..Fri *-*-* 17:50:00 Asia/Shanghai
+Persistent=true
+Unit=emotion-core-strategy.service
+
+[Install]
+WantedBy=timers.target

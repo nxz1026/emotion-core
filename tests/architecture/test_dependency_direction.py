@@ -80,7 +80,13 @@ def _layer_of(module_parts: list[str]) -> str | None:
 
 
 def _scan_violations() -> set[tuple[str, str, str]]:
-    """Return {(src_layer, dst_layer, src_file)} for every up-gradient import.
+    r"""Return {(src_layer, dst_layer, src_file)} for every up-gradient import.
+
+    ⚠️ 2026-10-07：`src_file` 一律用 `as_posix()`（正斜杠）。原先用 `str(rel)`，
+    在 Windows 上得到 `algorithms\ladder.py`，而 `_DEBT` 的键是在 Linux 上写的
+    `algorithms/ladder.py` ⇒ 同一对条目**同时**被判成「新增未登记违规」和
+    「已偿还可从 _DEBT 划掉」。两个测试互斥地失败，而 Linux / CI 全绿——
+    典型的「只在某一台机器上才炸的门禁」。
 
     使用 ast.walk 而非 iter_child_nodes：嵌套在函数/类里的惰性 import 同样是
     「直连 DB」，架构规则不区分顶层/嵌套。这与 docs §1「algorithms 不直连 DB」
@@ -119,7 +125,7 @@ def _scan_violations() -> set[tuple[str, str, str]]:
                 if dst_layer not in _LEVEL:
                     continue  # 未知层（如 emotion_core.trade 占位）→ 跳过，不误报
                 if _LEVEL[dst_layer] > _LEVEL[src_layer]:
-                    violations.add((src_layer, dst_layer, str(rel)))
+                    violations.add((src_layer, dst_layer, rel.as_posix()))
     return violations
 
 
@@ -217,7 +223,7 @@ def test_lazy_llm_imports_allowlisted():
             continue
         v = _Visitor()
         v.visit(tree)
-        if str(rel) not in _LAZY_LLM_ALLOWLIST and v.nested_imports:
+        if rel.as_posix() not in _LAZY_LLM_ALLOWLIST and v.nested_imports:
             bad.extend([(str(rel), ln) for _, ln in v.nested_imports])
     if bad:
         msg = "惰性 import llm 只许在 _LAZY_LLM_ALLOWLIST 中的文件：\n"

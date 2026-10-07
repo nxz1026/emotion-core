@@ -1,17 +1,24 @@
 """建表 DDL（幂等）。emotion-core 数据层 schema。
 
-27 张表，按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
+**30 张表**（2026-10-07 按 `len(DDL)` 实测更正；原文写「27」且下面的清单只列了
+23 个 —— 三个数互相对不上），按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
 新库直接建最新 schema，不需要 _MIGRATIONS。
 
-表清单：
-- 行情：daily_bar, stock_basic
-- 判据：derived_bar, limit_pool_em
-- 市场：market_stat, ladder_day, promotion_day
-- 信号：signal, signal_outcome, strategy_signal
-- 交易：position, trade_event
-- 报告：review_report, eval_result
-- 题材：theme_tag, theme_group
-- 运维：alert, llm_call_log, ingest_progress, hot_rank, pipeline_state, data_revision, watchlist
+表清单（以 `DDL` 字典的键为准）：
+- 行情：`stock_basic` `daily_bar`
+- 判据：`derived_bar` `limit_pool_em`
+- 市场：`market_stat` `promotion_day` `ladder_day` `trade_calendar`
+- 信号：`signal` `signal_outcome` `strategy_signal`
+- 交易：`position` `trade_event`
+- 报告：`review_report` `eval_result`
+- 题材：`theme_tag` `theme_group`
+- 运维：`alert` `llm_call_log` `ingest_progress` `hot_rank` `pipeline_state`
+  `data_revision` `watchlist` `ops_raw_manifest` `ops_quota_ledger`
+- 参考数据：`ref_limit_rule` `ref_security_status` `ref_dividend` `ref_rs`
+
+注：生产 `emotion_core` 库的 `public` schema 实测 **32 张** —— 30 张本仓 DDL 减去
+尚未建的 6 张（`ref_*` / `ops_*`），再加 CPT 共用的 8 张 `cpt_*`。**这不是矛盾**：
+「本仓定义几张」与「库里现有几张」是两个事实。
 - 日历：trade_calendar
 - 制度规则：ref_limit_rule（涨跌幅限制等交易所制度）
 - 安全状态：ref_security_status（ST/*ST 历史）

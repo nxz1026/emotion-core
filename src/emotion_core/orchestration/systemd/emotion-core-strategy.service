@@ -1,0 +1,18 @@
+[Unit]
+Description=Emotion Core Strategy Observer (LLM strategy run)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/DSH/emotion-core
+ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.orchestration.strategy
+Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+# 策略观察总闸：不开则 run_for_date 打一条「策略观察已关闭」后返回 0（空转）。
+Environment=EC_STRATEGY_ENABLED=true
+TimeoutStartSec=3600
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

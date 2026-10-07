@@ -30,8 +30,12 @@ SQL 文本与参数顺序全部照搬；只读检查，不修任何东西。
    函数体与它自身的 `except Exception` 降级分支（log.warning + (True, "日线双源不可用，
    静默跳过")）；providers 四处 import 写成函数内延迟 import（emotion_core.data.providers
    .base.ProviderError / .eastmoney / .pytdx_provider / .sina），使其落到同一条既有降级
-   分支，**未新增别的分支**；fallback 链经 `_cfg("INGEST_FALLBACK_CHAIN", [])`（空 → 走
-   既有 "日线备源链关闭" 分支），抽样数经 `_cfg("INGEST_DOCTOR_SAMPLE", 5)`。
+   分支；fallback 链经 `_cfg("INGEST_FALLBACK_CHAIN", [])`（空 → 走既有 "日线备源链关闭"
+   分支），抽样数经 `_cfg("INGEST_DOCTOR_SAMPLE", 5)`。
+   **⚠️ 2026-10-07 唯一一处有意偏离 lkl**：双源偏差 >0.5% 时本项返回 ok=False。
+   lkl 原实现四个出口全 True（偏差只 log.warning），在 emotion-core 的后果是
+   `doctor.run()` 里「日线双源」那一行**永远显示通过**——这不是「照搬」，
+   是「把一个不生效的检查一起搬了过来」。见该函数 docstring。
 """
 from __future__ import annotations
 
@@ -129,6 +133,14 @@ def _check_provider_consistency(
     """抽样比较 EM 与配置备源收盘价；不可用时仅 warning，不阻断 doctor。
 
     参数全部可选：由调用方注入 provider 函数；不注入时走既有降级分支。
+
+    ⚠️ 2026-10-07 **有意偏离 lkl**：双源偏差 >0.5% 时本项现在返回 **ok=False**。
+    原实现（照搬自 lkl）四个出口全是 `True`，偏差只 `log.warning` ⇒ 这一项
+    在 `doctor.run()` 的输出里**永远显示通过**，等于没有检查：备源悄悄返回错价，
+    主源与备源对不上，而「日线双源」那一行永远是 ✅。
+
+    现在「跳过」仍返回 True（备源链关闭 / 未注入 / 无样本 / 依赖不可用 —— 这些是
+    「没得查」，不是「查过没问题」），但**真查了且查出偏差**必须红。
     """
     if not _cfg("INGEST_FALLBACK_CHAIN", []):
         return (True, "日线备源链关闭")
@@ -170,7 +182,12 @@ def _check_provider_consistency(
                 continue
         for detail in alerts:
             log.warning("日线双源偏差告警：%s", detail)
-        return (True, f"抽样 {len(sample)} 只，比较 {checked} 组，告警 {len(alerts)} 组")
+        if alerts:
+            head = "、".join(alerts[:5])
+            more = f"…（共 {len(alerts)} 组）" if len(alerts) > 5 else ""
+            return (False, f"抽样 {len(sample)} 只，比较 {checked} 组，"
+                           f"{len(alerts)} 组偏差 >0.5%{more}：{head}")
+        return (True, f"抽样 {len(sample)} 只，比较 {checked} 组，告警 0 组")
     except Exception as exc:  # noqa: BLE001
         log.warning("日线双源体检跳过：%s", exc)
         return (True, "日线双源不可用，静默跳过")
