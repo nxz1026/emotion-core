@@ -135,8 +135,15 @@ class _Reply:
 
     def __init__(self, model: str = "fake-model") -> None:
         self.text = json.dumps(
-            {"action": "WATCH", "score": 60, "confidence": 0.7,
-             "reason": "测试用结论", "evidence": {"k": "v"}}, ensure_ascii=False)
+            {
+                "action": "WATCH",
+                "score": 60,
+                "confidence": 0.7,
+                "reason": "测试用结论",
+                "evidence": {"k": "v"},
+            },
+            ensure_ascii=False,
+        )
         self.model = model
 
 
@@ -150,8 +157,7 @@ def _who(content: str) -> tuple[str, str]:
 class _FakeClient:
     """按脚本回放的 LLMClient 替身；记录每次尝试的策略与代码。"""
 
-    def __init__(self, before_success: list | None = None,
-                 always: Exception | None = None) -> None:
+    def __init__(self, before_success: list | None = None, always: Exception | None = None) -> None:
         self.script = list(before_success or [])
         self.always = always
         self.attempts = 0
@@ -193,9 +199,11 @@ class _Snapshots:
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.merges: list[bool] = []
 
-    def __call__(self, trade_date, items, skipped):
+    def __call__(self, trade_date, items, skipped, *, merge: bool = False):
         self.calls.append((trade_date, list(items), list(skipped)))
+        self.merges.append(merge)
         return Path("/tmp/fake-strategy.json")
 
     @property
@@ -206,8 +214,7 @@ class _Snapshots:
 def _skills(names: list[str]) -> list:
     from emotion_core.services.strategy.loader import Skill
 
-    return [Skill(name=n, display_name=n.upper(), instructions=f"{n} 指令")
-            for n in names]
+    return [Skill(name=n, display_name=n.upper(), instructions=f"{n} 指令") for n in names]
 
 
 def _overrides(max_llm: int, cfg: dict) -> dict:
@@ -222,9 +229,23 @@ def _overrides(max_llm: int, cfg: dict) -> dict:
     return values
 
 
-def _wire(monkeypatch, *, skills, codes, store, client, snap,
-          max_llm=6, call_interval=0.0, max_attempts=3,
-          retry_base_delay=0.0, max_consecutive_failures=3, **cfg):
+def _wire(
+    monkeypatch,
+    *,
+    skills,
+    codes,
+    store,
+    client,
+    snap,
+    max_llm=6,
+    call_interval=0.0,
+    max_attempts=3,
+    retry_base_delay=0.0,
+    # 2026-10-09 日志巡检 D：补跑轮退避基数默认置 0，避免单测真的 sleep。
+    retry_round_delay=0.0,
+    max_consecutive_failures=3,
+    **cfg,
+):
     """装配一个不碰 DB / 网络 / 磁盘的 run_for_date 环境。"""
     import emotion_core.services.llm_backend as backend
 
@@ -233,6 +254,7 @@ def _wire(monkeypatch, *, skills, codes, store, client, snap,
     monkeypatch.setattr(runner, "CALL_INTERVAL", call_interval)
     monkeypatch.setattr(runner, "MAX_ATTEMPTS", max_attempts)
     monkeypatch.setattr(runner, "RETRY_BASE_DELAY", retry_base_delay)
+    monkeypatch.setattr(runner, "RETRY_ROUND_DELAY", retry_round_delay)
     monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
     monkeypatch.setattr(runner, "load_strategies", lambda _dir: skills)
     monkeypatch.setattr(runner, "build_universe", lambda _d: codes)
@@ -253,19 +275,30 @@ class TestStrategyRotation:
         旧实现按 skill 外层遍历，s1 独吞 6 个配额，s3 一次都轮不到。
         """
         client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1", "s2", "s3"]),
-              codes=["c1", "c2", "c3"], store=store, client=client,
-              snap=snap, max_llm=6)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1", "s2", "s3"]),
+            codes=["c1", "c2", "c3"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=6,
+        )
         runner.run_for_date(TRADE_DATE)
         called = {name for name, _ in client.called}
-        assert called == {"s1", "s2", "s3"}, (
-            f"仅 {sorted(called)} 拿到配额，其余策略被饿死")
+        assert called == {"s1", "s2", "s3"}, f"仅 {sorted(called)} 拿到配额，其余策略被饿死"
 
     def test_cap_not_exceeded(self, monkeypatch):
         client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1", "s2", "s3"]),
-              codes=["c1", "c2", "c3", "c4"], store=store, client=client,
-              snap=snap, max_llm=5)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1", "s2", "s3"]),
+            codes=["c1", "c2", "c3", "c4"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
         runner.run_for_date(TRADE_DATE)
         assert client.attempts == 5
         capped = [s for s in snap.skipped if s["reason"] == "达到LLM调用上限"]
@@ -276,8 +309,14 @@ class TestPromptHashUnification:
     """C：`_existing` 与 `_signal_row` 必须用同一个 prompt_hash。"""
 
     def test_signal_row_uses_item_prompt_hash(self):
-        item = {"code": "c1", "strategy": "s1", "prompt_hash": "HASH-X",
-                "action": "PASS", "score": 10, "confidence": 0.5}
+        item = {
+            "code": "c1",
+            "strategy": "s1",
+            "prompt_hash": "HASH-X",
+            "action": "PASS",
+            "score": 10,
+            "confidence": 0.5,
+        }
         assert runner._signal_row(TRADE_DATE, item)[3] == "HASH-X"
 
     def test_hash_is_prompt_digest_not_composite(self):
@@ -289,36 +328,55 @@ class TestPromptHashUnification:
         skill = _skills(["s1"])[0]
         _messages, prompt = runner._prompt(skill, "c1", "上下文")
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        composite = hashlib.sha256(
-            f"s1:c1:{TRADE_DATE.isoformat()}".encode()).hexdigest()
+        composite = hashlib.sha256(f"s1:c1:{TRADE_DATE.isoformat()}".encode()).hexdigest()
         assert digest != composite, "两种算法意外相同，测试前提失效"
-        item = {"code": "c1", "strategy": "s1", "prompt_hash": digest,
-                "action": "PASS", "score": 10, "confidence": 0.5}
+        item = {
+            "code": "c1",
+            "strategy": "s1",
+            "prompt_hash": digest,
+            "action": "PASS",
+            "score": 10,
+            "confidence": 0.5,
+        }
         assert runner._signal_row(TRADE_DATE, item)[3] == digest
 
     def test_rerun_does_not_recall_llm(self, monkeypatch):
         """去重生效的判据：同日重跑零 LLM 调用。"""
         client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1", "s2"]), codes=["c1", "c2"],
-              store=store, client=client, snap=snap, max_llm=4)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1", "s2"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=4,
+        )
         first = runner.run_for_date(TRADE_DATE)
         attempts_after_first = client.attempts
         second = runner.run_for_date(TRADE_DATE)
         assert first == 4
         assert second == 0
         assert client.attempts == attempts_after_first, (
-            "重跑又发起 LLM 调用：两侧 prompt_hash 不同源，_existing 恒 False")
+            "重跑又发起 LLM 调用：两侧 prompt_hash 不同源，_existing 恒 False"
+        )
 
 
 class TestRateLimitResilience:
     """B：429 退避重试、失败不占配额、熔断、失败数上报。"""
 
     def test_429_is_retried_then_succeeds(self, monkeypatch, caplog):
-        client = _FakeClient(before_success=[_http_status_error(429),
-                                            _http_status_error(429)])
+        client = _FakeClient(before_success=[_http_status_error(429), _http_status_error(429)])
         store, snap = _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1"]), codes=["c1"],
-              store=store, client=client, snap=snap, max_llm=1)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=1,
+        )
         with caplog.at_level(logging.WARNING):
             runner.run_for_date(TRADE_DATE)
         assert client.attempts == 3, "两次 429 后应重试至成功"
@@ -328,8 +386,15 @@ class TestRateLimitResilience:
     def test_non_retryable_error_is_not_retried(self, monkeypatch):
         client = _FakeClient(always=ValueError("boom"))
         store, snap = _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1"]), codes=["c1", "c2", "c3"],
-              store=store, client=client, snap=snap, max_llm=5)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2", "c3"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
         runner.run_for_date(TRADE_DATE)
         assert client.attempts == 3, "非瞬时错误不该重试，只触发熔断"
 
@@ -337,8 +402,15 @@ class TestRateLimitResilience:
         """1 次失败 + 后续成功：预算只被成功调用消耗。"""
         client = _FakeClient(before_success=[ValueError("boom")])
         store, snap = _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1"]), codes=["c1", "c2", "c3"],
-              store=store, client=client, snap=snap, max_llm=2)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2", "c3"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=2,
+        )
         runner.run_for_date(TRADE_DATE)
         assert len(store.items) == 2, "失败调用吃掉了配额"
         assert any(s["reason"].startswith("LLM调用失败") for s in snap.skipped)
@@ -347,9 +419,16 @@ class TestRateLimitResilience:
         """持续 429 时提前止损，不把 1020 个组合逐个耗尽。"""
         client = _FakeClient(always=_http_status_error(429))
         store, snap = _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1"]),
-              codes=[f"c{i}" for i in range(9)], store=store, client=client,
-              snap=snap, max_llm=50, max_consecutive_failures=2)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=[f"c{i}" for i in range(9)],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=50,
+            max_consecutive_failures=2,
+        )
         runner.run_for_date(TRADE_DATE)
         distinct = {code for _name, code in client.called}
         assert distinct == {"c0", "c1"}, "熔断前只应尝试前 2 个组合"
@@ -359,10 +438,16 @@ class TestRateLimitResilience:
     def test_summary_line_reports_failures(self, monkeypatch, caplog):
         client = _FakeClient(always=ValueError("boom"))
         store, snap = _FakeSignalStore(), _Snapshots()
-        _wire(monkeypatch, skills=_skills(["s1"]), codes=["c1"],
-              store=store, client=client, snap=snap, max_llm=1)
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=1,
+        )
         with caplog.at_level(logging.INFO):
             runner.run_for_date(TRADE_DATE)
-        summary = [r.getMessage() for r in caplog.records
-                   if "策略观察" in r.getMessage()]
+        summary = [r.getMessage() for r in caplog.records if "策略观察" in r.getMessage()]
         assert summary and "失败 1" in summary[-1], summary

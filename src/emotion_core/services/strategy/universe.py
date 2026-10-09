@@ -1,28 +1,17 @@
-"""策略观察候选池：仅读现有行情表，不触碰主链路。
+"""策略观察候选池：手动自选 + 热门池，不触碰主链路。
 
 Native emotion-core implementation.
 """
+
 from __future__ import annotations
 
-import os
+from collections.abc import Iterable
 from datetime import date
 
 import pandas as pd
 
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
-
-# 观察哪些 pool_type：ZT=涨停、ZB=炸板。DT=跌停被排除——本池语义是「当日涨停
-# 池」，跌停是相反的极端，混进来既与语义相悖，又白烧 LLM 配额（实测 2026-09-29
-# 该日 ZT 57 / DT 10 / ZB 8，即 13% 的候选被跌停股占据）。
-#
-# 放模块级常量而非 utils/config.py 的 Config：config_hash() 哈希 asdict(CONFIG)
-# 全字段，往 Config 里加键会让 pipeline_state / signal / eval_result 的策略指纹
-# 平白换代。env 同名 EC_STRATEGY_POOL_TYPES（逗号分隔，如 "ZT"）可覆盖。
-OBSERVED_POOL_TYPES: tuple[str, ...] = tuple(
-    item.strip().upper()
-    for item in os.environ.get("EC_STRATEGY_POOL_TYPES", "ZT,ZB").split(",")
-    if item.strip())
 
 
 def _codes(frame: pd.DataFrame) -> list[str]:
@@ -31,36 +20,49 @@ def _codes(frame: pd.DataFrame) -> list[str]:
     return [str(code).zfill(6) for code in frame["code"].dropna().tolist()]
 
 
-def build_universe(trade_date: date) -> list[str]:
-    """返回当日涨停/炸板池与热榜前 N 的主板去重候选。
+def filter_codes(codes: Iterable[object], *, limit: int | None = None) -> list[str]:
+    """按 ``BOARD_PREFIXES`` 过滤 + ``zfill(6)`` + 保序去重。
 
-    两条查询都必须给出**完全确定**的 ORDER BY。结果会被
-    ``STRATEGY_MAX_UNIVERSE`` 截断，而截断后的先后顺序直接决定 LLM 配额
-    先落在哪些票上（runner 按 ``(code, skill)`` 交错遍历，先到先烧额度）。
-    缺 ORDER BY 时 PostgreSQL 不保证返回顺序稳定，同一交易日重复运行会
-    得到不同的候选池，进而让「跑过哪些组合」不可复现。
-
-    排序主键取 ``code`` 而非业务强度（连板高度等）：``limit_pool_em`` 内
-    ``cont_days_em`` 只在涨停股上有意义，跌停行同样带值，按它排序会把跌停股
-    排进前列。真要改成「强势优先」，必须先按 ``pool_type`` 收窄（本函数已做）
-    并注意 DT 行的 ``first_seal`` 存的是空串而非 NULL，需 ``NULLIF(first_seal,'')``
-    才不会把空串当成最早封板时间排到最前。
+    ``limit`` 为 ``None`` 时不截断（显式补跑清单应全量保留，交多少跑多少）；
+    ``build_universe`` 则传 ``STRATEGY_MAX_UNIVERSE`` 做截断。
     """
-    pool = query_df(
-        "SELECT code FROM limit_pool_em WHERE date=%s AND pool_type = ANY(%s) "
-        "ORDER BY code",
-        (trade_date, list(OBSERVED_POOL_TYPES)))
-    hot = query_df(
-        "SELECT code FROM hot_rank WHERE date=%s ORDER BY rank, code LIMIT %s",
-        (trade_date, CONFIG.STRATEGY_HOT_N))
     allowed = tuple(CONFIG.BOARD_PREFIXES)
     seen: set[str] = set()
     result: list[str] = []
-    for code in _codes(pool) + _codes(hot):
+    for raw in codes:
+        code = str(raw).zfill(6)
         if not code.startswith(allowed) or code in seen:
             continue
         seen.add(code)
         result.append(code)
-        if len(result) >= CONFIG.STRATEGY_MAX_UNIVERSE:
+        if limit is not None and len(result) >= limit:
             break
     return result
+
+
+def build_universe(trade_date: date) -> list[str]:
+    """返回「手动自选 + 热门池」的主板去重候选，**自选优先**。
+
+    2026-10-09 日志巡检 C：用户拍板覆盖口径 = 手动自选
+    （``public.watchlist``，code 升序）+ 热门池（``public.hot_rank`` 当日
+    前 ``STRATEGY_HOT_N``，``ORDER BY rank, code``），**不再读
+    ``limit_pool_em``**（涨停/炸板池）。涨停池与热门池高度重叠，且用户
+    真正想看的票在自选表里，手动自选才是确定性输入。
+
+    顺序即优先级：``watchlist`` 的 code 全部排在 ``hot_rank`` 之前。
+    runner 按 ``(code, skill)`` 交错遍历、配额先烧到前面的 code，因此
+    自选永远先于热门池被 LLM 覆盖。
+
+    两条查询都必须给出**完全确定**的 ORDER BY。结果会被
+    ``STRATEGY_MAX_UNIVERSE`` 截断，而截断后的先后顺序直接决定 LLM 配额
+    先落在哪些票上。缺 ORDER BY 时 PostgreSQL 不保证返回顺序稳定，同一
+    交易日重复运行会得到不同候选池，让「跑过哪些组合」不可复现。
+    自选表按 ``code`` 升序；热门池按 ``rank, code``（rank 可并列，需
+    code 兜底，否则并列名次的返回顺序不稳定）。
+    """
+    watch = query_df("SELECT code FROM watchlist ORDER BY code", ())
+    hot = query_df(
+        "SELECT code FROM hot_rank WHERE date=%s ORDER BY rank, code LIMIT %s",
+        (trade_date, CONFIG.STRATEGY_HOT_N),
+    )
+    return filter_codes(_codes(watch) + _codes(hot), limit=CONFIG.STRATEGY_MAX_UNIVERSE)

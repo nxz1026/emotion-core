@@ -6,7 +6,54 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-09 运行日志巡检（emotion-core 侧 C/D/E/F）
+
+- **C 候选池口径（用户拍板）**：`services/strategy/universe.py::build_universe` 改为
+  「手动自选（`watchlist`，code 升序，优先）+ 热门池（`hot_rank` 当日按 `rank, code`
+  取 `STRATEGY_HOT_N`）」，**不再读 `limit_pool_em`**（涨停/炸板池与热门池高度重叠）；
+  删掉 `OBSERVED_POOL_TYPES`。汇总行改为带**跳过原因分布**
+  （`runner.py::_reason_distribution`，按次数降序）——此前「为什么只跑了 4 只票」在
+  DB 与日志里都不可见。
+  ⚠️ 算术：`STRATEGY_MAX_LLM=50` ÷ 15 个策略 = **每天只够 3.3 只票**；10-09
+  universe 79 codes ⇒ 配额仍是硬上限，覆盖到哪只票由候选顺序决定。是否上调配额、
+  或压 `STRATEGY_HOT_N`，待拍板。
+- **D 补跑能力**：`orchestration/strategy.py` 新增 `--codes 600825,000420`（显式候选，
+  跳过候选池，走 `filter_codes`：`BOARD_PREFIXES` 过滤 + zfill(6) + 保序去重、不截断），
+  用于补齐历史缺口；`run_for_date(trade_date, codes=None)` 主循环之后新增**自动补跑一轮**
+  （本轮 LLM 失败 / 输出契约失败的 `(skill, code)`，在配额与熔断有余量时按
+  `RETRY_ROUND_DELAY`（env `EC_STRATEGY_RETRY_DELAY`，默认 10s）重跑）。
+  `_snapshot(..., merge=True)`：补跑是局部运行，必须与旧快照按 `(code, strategy)` 合并，
+  否则会把当日完整快照（其余 code 的 items 与 skipped 分布）一起冲掉。
+  实跑：10-08 `600825` 补 2 行（`ma_golden_cross`/`shrink_pullback`，均 PASS 15）；
+  10-09 `000420` 首轮 `chan_theory` 失败 → 补跑轮后 15/15 入库。
+- **E pool 单元重启上限归位**：`StartLimitIntervalSec` / `StartLimitBurst` 从 `[Service]`
+  搬到 `[Unit]`（systemd 只认 `[Unit]` 里的新键名；放 `[Service]` 只打印 `Unknown key`
+  后按默认值生效 —— 表现为「写了等于没写」）。live
+  `/etc/systemd/system/emotion-core-pool.service` 已改（备份
+  `/root/emotion-core-pool.service.bak-20261009-130607`），`systemctl show` 实测
+  `StartLimitIntervalUSec=1h` / `StartLimitBurst=4`；`portal` 仓库快照同步。
+- **F pool 逐日硬超时（根因修正）**：下一节「`setdefaulttimeout(15)` 就算修好」的结论
+  **不成立** —— akshare 三池函数是 `requests.get(url, params=params)`，**不传 timeout**
+  会被 requests 解析成**显式 `None`**（`TimeoutSauce(connect=None, read=None)` →
+  `socket.create_connection(addr, None)` / `sock.settimeout(None)`），显式 None 是
+  **永久阻塞**；进程级 `setdefaulttimeout` 只在调用方根本没传 timeout
+  （`_GLOBAL_DEFAULT_TIMEOUT` 哨兵）时生效。实测 `requests.get(timeout=None)` 阻塞
+  3.00s，而 `timeout=0.5` 在 0.50s 抛 ReadTimeout。修法：`pool.py` 逐日
+  `SIGALRM`+`setitimer` 硬上限（`_DEFAULT_PER_DAY_TIMEOUT=180.0`，CLI
+  `--per-day-timeout`，`_DayTimeout(BaseException)` 以穿透 `except Exception`），
+  超时记 WARNING 后 `continue`，已写成功的天保留；`setdefaulttimeout(15)` 保留为
+  纵深防御。live 实跑 3 天：73/88/91 行、exit 0 —— 此前 10-08 卡死 600s 被 TERM，
+  当天池**完全没写库**，现 10-08 = 88 行 / 3 个池型。
+- **遗留（未修，待拍板）**：`strategy_signal` 唯一键是
+  `(trade_date, code, strategy, prompt_hash)` ⇒ 上下文变化后重跑会为同一
+  `(date, code, strategy)` **追加新版本行**，而
+  `presentation/trade_api.py::_query_signals`（`:43-52`）按 `trade_date + action` 取行、
+  **没有版本去重** ⇒ 重复行会以重复 decision 出现在 `/api/trade/decisions`。
+
 ### 修复 · emotion-core-pool 卡死（2026-10-09）
+
+> ⚠️ 本节对根因的描述已被上节 F 修正：`setdefaulttimeout(15)` 兜不住 akshare/requests
+> 的显式 `timeout=None`，真正的护栏是逐日 `SIGALRM` 硬超时。
 
 - **断 EM 接口挂死的根因**：`pool.py` 入口加 `socket.setdefaulttimeout(15)`。
   akshare 调东财接口走 `requests`，akshare **不传 timeout** 给底层 socket——EM
