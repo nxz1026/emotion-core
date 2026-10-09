@@ -6,7 +6,21 @@
 
 ## [Unreleased]
 
-_空占位：上线之后的变更追加在这里。_
+### 修复 · emotion-core-pool 卡死（2026-10-09）
+
+- **断 EM 接口挂死的根因**：`pool.py` 入口加 `socket.setdefaulttimeout(15)`。
+  akshare 调东财接口走 `requests`，akshare **不传 timeout** 给底层 socket——EM
+  接口挂死时进程无限等，靠 systemd `TimeoutStartSec=600` 兜底杀进程，但 service
+  标 `failed` 后 timer 不会自动重试。15s 上限后 retry_fetch 仍做 3 次指数退避
+  → 单池最坏 45s；3 天 × 3 池最坏 ~7min。DB 侧 `utils/db.py:_kwargs` 已显式
+  `connect_timeout=15`，与全局不冲突。
+- **service unit 自愈**：`emotion-core-pool.service` 加 `Restart=on-failure` +
+  `RestartSec=300` + `StartLimitIntervalSec=3600` + `StartLimitBurst=4`。
+  failed 不再僵死到下次 cron；明天 10-09 09:45 cron 触发时即使挂也只浪费
+  一次重启，不会爆 systemd。
+- **2026-10-08 实测触发链**：09:45 cron 启动 → 09-30 抓取卡死 → 09:55:48
+  systemd 杀（status=15/TERM）→ service failed → 14h 没人动。第二天 10-09
+  cron 自愈就是这一改。
 
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）
 
