@@ -23,8 +23,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import socket
 import sys
 from datetime import date
+
+# 全局 socket 超时（2026-10-09 实测 EM 接口挂死 → pool.service failed）：
+# 东财接口走 akshare → requests，akshare **不传 timeout** 给底层 socket，
+# EM 接口挂起时整个进程会无限等 → systemd TimeoutStartSec=600 兜底。
+# 15s 给任何外网 socket 一个挂死上限（包括请求 + chunk read）。
+# DB 侧已显式 connect_timeout=15（utils/db.py:_kwargs），与全局不冲突。
+# 用 `try/finally` 在 main 末尾还原（外部脚本不应被全局污染）。
+socket.setdefaulttimeout(15)
 
 from emotion_core.utils.dates import today_sh
 
