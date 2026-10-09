@@ -122,6 +122,8 @@ Content-Type: application/json
 
 ```nginx
 location /trade/ {
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/.htpasswd;
     proxy_pass http://127.0.0.1:8098/api/trade/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -135,7 +137,8 @@ location /trade/ {
 ## 安全
 
 - HTTPS 由 nginx 提供（Let's Encrypt 证书）
-- basic auth 由 nginx 层处理
+- **basic auth 已强制**（2026-10-09 补；此前 `/trade/` 无鉴权，`/trade/health` 匿名可读、`/trade/decisions` 匿名可取决策）。凭据与 `/cpt/`、`/emotion/` 共用 `/etc/nginx/.htpasswd`；LKL-Trade 客户端必须带 `Authorization: Basic …`（`curl -u <user>:<pass>`），否则一律 401。
+- 直连 `:8098` 的旁路不可达：宿主 iptables INPUT 只放行 443/80/22/ICMP/lo，其余 REJECT（2026-10-09 实测）。
 - `client_max_body_size 64k` 限制请求体大小
 
 ## 部署
@@ -144,9 +147,10 @@ location /trade/ {
 # 重启服务（systemd 重启一律 sudo -n，避免非交互会话被 polkit 拒；见 docs/06 §3.4）
 sudo -n systemctl restart emotion-core-dash
 
-# 验证
-curl -k https://140.83.62.161/trade/health
-curl -k https://140.83.62.161/trade/decisions?date=2026-09-30
+# 验证（不带凭据应得 401）
+curl -k -o /dev/null -w '%{http_code}\n' https://140.83.62.161/trade/health   # 401
+curl -k -u admin:**** https://140.83.62.161/trade/health                      # {"ok": true, ...}
+curl -k -u admin:**** "https://140.83.62.161/trade/decisions?date=2026-09-30"
 ```
 
 ## 代码位置
