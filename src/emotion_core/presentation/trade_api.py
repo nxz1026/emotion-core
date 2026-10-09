@@ -41,12 +41,26 @@ def _save_state(state: dict):
 
 
 def _query_signals(for_date: date) -> list[dict]:
-    """Query strategy_signal BUY signals for a given date."""
+    """Query strategy_signal BUY signals for a given date — **每只票只出一条**。
+
+    2026-10-09 日志巡检（用户拍板「修」）：``strategy_signal`` 的唯一键是
+    ``(trade_date, code, strategy, prompt_hash)``，同一 ``(code, strategy)``
+    在上下文变化后重跑会**追加新版本行**（版本行本身是设计），同一只票还可能
+    有多条策略同时给 BUY ⇒ 原来直接按 ``score DESC`` 取全部行，会让同一 code
+    出现多次，被 LKL-Trade 当成多笔 ``OPEN_POS``（2026-10-09 的缓存里就是
+    13 条 action / 5 个 code）。
+
+    这里按 **code 去重**：同一只票只取它当日分数最高的一条 BUY；同分取
+    ``created_at DESC`` 的最新版本，再同则用 ``prompt_hash DESC`` 兜底，保证
+    重复查询结果确定。外层再按 ``score DESC, code`` 排序。
+    """
     df = _query_df(
-        "SELECT code, strategy, action, score, confidence, reason "
-        "FROM strategy_signal "
-        "WHERE trade_date=%s AND action=%s "
-        "ORDER BY score DESC",
+        "SELECT code, strategy, action, score, confidence, reason FROM ("
+        "  SELECT DISTINCT ON (code) code, strategy, action, score, confidence, reason,"
+        "         created_at, prompt_hash "
+        "  FROM strategy_signal WHERE trade_date=%s AND action=%s "
+        "  ORDER BY code, score DESC, created_at DESC, prompt_hash DESC"
+        ") AS best ORDER BY score DESC, code",
         (for_date, "BUY"),
     )
     return df.to_dict("records")
@@ -80,9 +94,19 @@ def handle_trade_decisions(query_str: str) -> tuple[dict, int]:
             return {"batch_id": "", "for_date": for_date_str, "actions": []}, 200
 
         actions = []
+        seen_codes: set[str] = set()
         for row in signals:
+            code = str(row["code"]).zfill(6)
+            if code in seen_codes:
+                # 兜底：_query_signals 已按 code 去重；这里再拦一层，
+                # 防止将来有人改查询时同一只票又变成两笔 OPEN_POS。
+                log.warning(
+                    "duplicate BUY signal for %s on %s, keeping the first", code, for_date_str
+                )
+                continue
+            seen_codes.add(code)
             actions.append({
-                "code": str(row["code"]).zfill(6),
+                "code": code,
                 "action": "BUY",
                 "exec": "OPEN_POS",
                 "volume": 100,

@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-09 巡检拍板落实（配额 300 / 决策去重 / SSE 超时 / strategy 单元 2h）
+
+- **上调配额（拍板 ①）**：`utils/config.py` 的 `STRATEGY_MAX_LLM` 默认 `50` → **`300`**
+  （20 只 × 15 策略）。实测每次 LLM 调用约 7.2s（10-09 `09:50:01`→`09:56:01` = 50 次 /
+  6min01s）⇒ 300 次约 36min，故 live `emotion-core-strategy.service` 的
+  `TimeoutStartSec` `3600` → **`7200`**（备份
+  `/etc/systemd/system/emotion-core-strategy.service.bak-20261009-153349`；`systemctl show`
+  实测 `TimeoutStartUSec=2h`），`portal` 仓快照同步。
+- **决策按 code 去重（拍板 ④）**：`presentation/trade_api.py::_query_signals` 改为
+  `DISTINCT ON (code)`（同一只票取分数最高；同分取 `created_at DESC`，再同取
+  `prompt_hash DESC`，保证结果确定），`handle_trade_decisions` 再加 `seen_codes` 兜底 +
+  WARNING。**根因**：`strategy_signal` 唯一键含 `prompt_hash`，上下文变化后重跑会追加版本行
+  （版本行本身是设计）⇒ 同一 `(code, strategy)` 的多版本会同时命中，被 LKL-Trade 当成多笔
+  `OPEN_POS`。线上实证：旧缓存批次 `fbc43162` = **13 条 action / 5 个 code（含重复）**，且该
+  批次**从未被消费**（无 `results_*` 回执）⇒ 备份 `/home/ubuntu/trade/state.json.bak-20261009-152842`
+  后清掉当日缓存，重启后新批次 `7ff2725c` = **4 条 action / 4 个 code / 无重复**
+  （`000420`/`000546`/`000736`/`000710`），`state.json` 落盘同样去重。
+- **SSE 超时（拍板 ②）**：`/plugins/events`（前端 `EventSource`）原先没有独立 location，落到
+  `location /` 继承 `proxy_read_timeout 300s` ⇒ nginx 每 5 分钟切一次连接并记一条
+  `upstream timed out (110)`（功能正常，纯日志噪声）。新增
+  `location = /plugins/events`（`proxy_buffering off; proxy_cache off; proxy_read_timeout 3600s;
+  proxy_send_timeout 3600s`，同 `/dsh-bottom-terminal/` 的先例），备份
+  `/etc/nginx/sites-enabled/dsh-web.bak-20261009-153349`。实测：改前 error.log 每 300s 一条
+  （13:31:32 / 13:36:35 / 13:41:39），改后单条连接撑过 330s
+  （`curl --max-time 330` → `code=200 time=330.00 exit=28`，即被测试自己的上限切断，而不是
+  nginx 的 300s）。
+- 新增测试 `tests/unit/test_trade_api_decisions.py`（5 例：SQL 形与参数、查询返回重复 code 时
+  每 code 只出一条且落盘缓存去重、同日二次调用走缓存、无 BUY 不落缓存、非法日期 400）。
+  红→绿已证：把 `trade_api.py` 还原到 HEAD 复跑有 2 例失败。
+
 ### 修复 · 2026-10-09 运行日志巡检（emotion-core 侧 C/D/E/F）
 
 - **C 候选池口径（用户拍板）**：`services/strategy/universe.py::build_universe` 改为
@@ -15,8 +45,8 @@
   （`runner.py::_reason_distribution`，按次数降序）——此前「为什么只跑了 4 只票」在
   DB 与日志里都不可见。
   ⚠️ 算术：`STRATEGY_MAX_LLM=50` ÷ 15 个策略 = **每天只够 3.3 只票**；10-09
-  universe 79 codes ⇒ 配额仍是硬上限，覆盖到哪只票由候选顺序决定。是否上调配额、
-  或压 `STRATEGY_HOT_N`，待拍板。
+  universe 79 codes ⇒ 配额仍是硬上限，覆盖到哪只票由候选顺序决定。**2026-10-09 已拍板抬到
+  300（见上一节），本节保留当时的口径。**
 - **D 补跑能力**：`orchestration/strategy.py` 新增 `--codes 600825,000420`（显式候选，
   跳过候选池，走 `filter_codes`：`BOARD_PREFIXES` 过滤 + zfill(6) + 保序去重、不截断），
   用于补齐历史缺口；`run_for_date(trade_date, codes=None)` 主循环之后新增**自动补跑一轮**
