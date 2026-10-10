@@ -46,6 +46,7 @@ _SHARED = {"domain"}      # 全员可 import，不视为违规
 # 信号链路禁止 import llm（§4）：这些文件惰性 import llm 是已知例外。
 _LAZY_LLM_ALLOWLIST = {
     "services/stock_service.py",      # use_llm=True 时才惰性 import llm.render
+    "services/notify.py",             # R58-5：_humanize_alert 函数内惰性 import llm.agnes
 }
 
 # ── 历史欠账：登记的是「现状违规」的精确位置，只许减少。────────────────────
