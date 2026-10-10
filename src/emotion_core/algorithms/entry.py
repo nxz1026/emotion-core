@@ -140,6 +140,33 @@ def _c3_secondary(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
                   "不要求昨日最高组唯一幸存）")
 
 
+def c3_loose(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
+    """R58-4：RECOMMEND 用——候选在昨日最高组幸存集里（不必唯一）。
+
+    主版 c3 要求「幸存集 == {候选}」——集合等值校验。昨日组若有 2 只幸存
+    而只有 1 只今日换手涨停，主版就败。本版放宽为「候选 ∈ 幸存集」：候选
+    只要是昨日最高组里的幸存者之一即可，保留「昨日组有竞争且候选在其中」
+    的过滤，但不再要求唯一幸存。
+
+    与 _c3_secondary 的区别：_c3_secondary 看的是「昨日 N-1 板身位」（降档
+    候选的同梯队），c3_loose 看的是「昨日最高组」（与 BUY 同一身位，只把
+    「唯一」改成「其中之一」）。所以 c3_loose 实质是「BUY 的 c3 放宽版」，
+    而不是「SECONDARY 的另一种降档」。
+    """
+    if not REQUIRE_YESTERDAY_COMPETITION:
+        return True, "R2 关闭：不要求昨日竞争"
+    g, s = ctx["y_comp"]
+    if not (g >= 2 and s >= 1):
+        return False, f"昨日最高板组{g}只→今日幸存{s}只(要求≥2竞争且≥1幸存)"
+    y_codes, survivors = ctx["y_surv"]
+    if cand.code not in y_codes:
+        return False, (f"候选({_field(cand, ctx, 'name', '')})不在昨日最高组内——"
+                       "新插队高标，淘汰赛身份不成立")
+    if cand.code not in survivors:
+        return False, "候选不在昨日组幸存者中（昨日组中其它幸存者今日未延续）"
+    return True, f"昨日最高板组{g}只→幸存{s}只，候选在其中（不要求唯一幸存）"
+
+
 def c4_min_days(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
     md = ctx.get("min_days", MIN_LEADER_DAYS)
     return cand.cont_days >= md, f"{cand.cont_days}板 >= 门槛{md}"
@@ -189,6 +216,17 @@ _SECONDARY_CONDITIONS: tuple[tuple[Cond, str, str], ...] = (
     (c1_uniqueness, "c1_uniqueness", "c1 唯一换手高标"),
     (c2_exchange, "c2_exchange", "c2 换手板非一字"),
     (_c3_secondary, "c3_elimination", "c3 淘汰赛身份"),
+    (c4_min_days, "c4_min_days", "c4 最低板数门槛"),
+    (c5_strength_diverge, "c5_strength_diverge", "c5 强度与分歧补偿"),
+)
+
+# R58-4：RECOMMEND checklist——c3 放宽版（候选 ∈ 幸存集），其它与 BUY 一致。
+# 设计意图：BUY 失败 → RECOMMEND（仅放宽 c3） → SECONDARY（同时放宽 c3 与 c4/c5）
+# ——三档优先级递减，BUY 严格路径完全不动。
+_RECOMMEND_CONDITIONS: tuple[tuple[Cond, str, str], ...] = (
+    (c1_uniqueness, "c1_uniqueness", "c1 唯一换手高标"),
+    (c2_exchange, "c2_exchange", "c2 换手板非一字"),
+    (c3_loose, "c3_elimination", "c3 淘汰赛身份"),   # 沿用 c3_elimination 字段名
     (c4_min_days, "c4_min_days", "c4 最低板数门槛"),
     (c5_strength_diverge, "c5_strength_diverge", "c5 强度与分歧补偿"),
 )
@@ -412,27 +450,47 @@ def check_signal(trade_date: date,
     buy_window=NONE（禁买）日主信号恒不落库；但次级观察记录仍生成
     （check_secondary_signal 内已豁免 NONE 守卫）——见其次级 docstring。
     source 供 replay_service 回填打标（S3/R7），默认 live。
+
+    R58-4 链路优先级：BUY → RECOMMEND（c3 放宽） → SECONDARY。
+    - BUY 严格路径完全不动（_CONDITIONS 五条件全过）；
+    - BUY 未过时先尝试 RECOMMEND（仅放宽 c3 为「候选 ∈ 幸存集」）；
+    - RECOMMEND 也未过时再尝试 SECONDARY（同时放宽 c3 与 c4/c5 阈值）；
+    - 每档只在前一档失败时尝试，同一 confirm_date 不会同时落 BUY + RECOMMEND
+      或 RECOMMEND + SECONDARY——主推荐已落即代表更优，回退终止。
     """
     window = current_window(trade_date)
     if window == "NONE":
         log.info("%s buy_window=NONE，禁买（主信号）", trade_date)
-        check_secondary_signal(trade_date, source)   # 禁买日仍留观察线索（不导出）
+        # 禁买日仍留观察线索（不导出）：RECOMMEND 与 SECONDARY 都跑
+        check_recommend_signal(trade_date, source)
+        check_secondary_signal(trade_date, source)
         return None
     cand = ladder.sole_top(ladder.build(trade_date))
     if cand is None:
         log.info("%s 无唯一最高板候选", trade_date)
-        check_secondary_signal(trade_date, source)   # 次级门槛更低，可能仍有候选
+        # 无候选 → RECOMMEND/SECONDARY 都没意义，但跑一遍不抛错（无候选即返回 None）
+        check_recommend_signal(trade_date, source)
+        check_secondary_signal(trade_date, source)
         return None
     cl, rows = _evaluate(cand, window, min_days=MIN_LEADER_DAYS,
                          diverge_min=DIVERGE_MIN_TURNOVER)
+    # R58-4：name 仅 BUY 推送需要——直接走 _candidate_view 复用同 IO（与
+    # c1/c5 同源）；缺数按 None 落空（推送模板照「code()」也好看）。
+    cand_view = _candidate_view(cand)
     sig = Signal(code=cand.code, date=trade_date, action=Action.BUY,
-                 checklist=cl, source=source)
+                 checklist=cl, source=source,
+                 name=cand_view.get("name") or None,
+                 cont_days=cand.cont_days)   # R58-4：BUY 即时推送用
     if passed_of(cl):        # P1-1：与回测同一聚合器（UNKNOWN 不否决）
         _persist(sig, window, rows)
         return sig
     log.info("%s 候选 %s 未全过: %s", trade_date, cand.code,
              [n for n, ok, _ in rows if not ok])
-    # 主信号未通过：尝试次级推荐（放宽阈值），不影响主路径返回 None
+    # 主信号未通过：先尝试 RECOMMEND（仅放宽 c3）——比 SECONDARY 门槛高一档
+    rec_sig = check_recommend_signal(trade_date, source)
+    if rec_sig is not None:
+        return rec_sig
+    # RECOMMEND 也未过：再尝试 SECONDARY（同时放宽 c3 与 c4/c5 阈值）
     check_secondary_signal(trade_date, source)
     return None
 
@@ -500,12 +558,67 @@ def check_secondary_signal(trade_date: date,
     cl, rows = _evaluate(cand, window, min_days=SECONDARY_MIN_LEADER_DAYS,
                          diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
                          conditions=_SECONDARY_CONDITIONS, include_peer=True)
+    cand_view = _candidate_view(cand)
     sig = Signal(code=cand.code, date=trade_date, action=Action.SECONDARY,
-                 checklist=cl, source=source)
+                 checklist=cl, source=source,
+                 name=cand_view.get("name") or None,
+                 cont_days=cand.cont_days)
     if passed_of(cl):
         _persist(sig, window, rows)
         log.info("%s 次级推荐 %s 生成", trade_date, cand.code)
         return sig
     log.info("%s 次级候选 %s 未全过: %s", trade_date, cand.code,
+             [n for n, ok, _ in rows if not ok])
+    return None
+
+
+# ---- R58-4 次级推荐档（RECOMMEND）：c3 放宽版，独立落库，action='RECOMMEND' ----
+# 链路位置：BUY → RECOMMEND → SECONDARY。BUY 未过且 RECOMMEND 也未过时再
+# 尝试 SECONDARY；BUY 通过或 RECOMMEND 通过均终止回退，避免同一 confirm_date
+# 同 code 双 action 记录。RECOMMEND 是「准买入」观察信号——比 SECONDARY 门槛
+# 高（仍要 c1/c2/c4/c5 + 最低板数），但不进入交易导出，与 SECONDARY 同属
+# 观察性推荐；与 SECONDARY 的区别在身位（看最高组 vs 看 N-1 板身位）和
+# 阈值（仅放宽 c3 vs 同时放宽 c3+c4+c5）。
+#
+# 禁买日（buy_window=NONE）BUY 主路径已直接 return None，但 RECOMMEND 在
+# check_signal 链路里被调用前已先看 BUY——意味着 NONE 守卫其实挡住了
+# RECOMMEND。要让 NONE 日也出 RECOMMEND，需在 check_signal 开头 NONE 分支
+# 里也调用 check_recommend_signal（与 check_secondary_signal 同先例）。
+
+
+def check_recommend_signal(trade_date: date,
+                           source: SignalSource = SignalSource.LIVE) -> Signal | None:
+    """RECOMMEND 信号：BUY 同身位最高板 + 仅放宽 c3（候选 ∈ 幸存集）+ 其余 4 项通过。
+
+    - 与 BUY 的区别：c3 由「幸存集 == {候选}」放宽为「候选 ∈ 幸存集」——c1/c2/c4/c5
+      与 BUY 完全相同，MIN_LEADER_DAYS、DIVERGE_MIN_TURNOVER 也用 BUY 同值；
+      故实质是「BUY 的 c3 放宽版」，不是新的降档。
+    - 与 SECONDARY 的区别：SECONDARY 同时放宽 c3 与 c4/c5 阈值，并降 1 档身位；
+      RECOMMEND 只放宽 c3，身位与 BUY 一致。次级 vs 准买入的语义差在这里。
+    - 候选取 ladder.sole_top(MIN_LEADER_DAYS)（与 BUY 同门槛，不降档）。
+    """
+    window = current_window(trade_date)
+    if window == "NONE":
+        log.info("%s buy_window=NONE——RECOMMEND 仍生成（观察记录，不导出）",
+                 trade_date)
+    rows_today = ladder.build(trade_date)
+    cand = ladder.sole_top(rows_today, MIN_LEADER_DAYS)
+    if cand is None:
+        log.info("%s 无 RECOMMEND 唯一高标候选（min_days=%d）",
+                 trade_date, MIN_LEADER_DAYS)
+        return None
+    cl, rows = _evaluate(cand, window, min_days=MIN_LEADER_DAYS,
+                         diverge_min=DIVERGE_MIN_TURNOVER,
+                         conditions=_RECOMMEND_CONDITIONS)
+    cand_view = _candidate_view(cand)
+    sig = Signal(code=cand.code, date=trade_date, action=Action.RECOMMEND,
+                 checklist=cl, source=source,
+                 name=cand_view.get("name") or None,
+                 cont_days=cand.cont_days)
+    if passed_of(cl):
+        _persist(sig, window, rows)
+        log.info("%s RECOMMEND 推荐 %s 生成", trade_date, cand.code)
+        return sig
+    log.info("%s RECOMMEND 候选 %s 未全过: %s", trade_date, cand.code,
              [n for n, ok, _ in rows if not ok])
     return None

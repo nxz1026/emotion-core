@@ -21,6 +21,7 @@ from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, SignalSource
 from emotion_core.utils.config import config_hash
 from emotion_core.algorithms.entry import (
+    check_recommend_signal,
     check_secondary_signal,
     check_signal,
     checklist,
@@ -157,6 +158,54 @@ class TestConditions:
         ok, note = entry._c3_secondary(cand(cont=3), ctx(min_days=3, y_peer=2))
         assert ok and "次级降档" in note
         assert not entry._c3_secondary(cand(cont=3), ctx(min_days=3, y_peer=1))[0]
+
+    def test_c3_loose_accepts_multi_survivor_with_candidate_inside(self):
+        """R58-4：c3_loose——候选在昨日组幸存集里（不要求唯一幸存）。"""
+        # 昨日 3 只组，今日 2 只幸存；候选在幸存集里 → 过
+        surv = ({"000017", "600001", "600002"}, {"000017", "600001"})
+        ok, note = entry.c3_loose(cand(), ctx(y_comp=(3, 2), y_surv=surv))
+        assert ok and "不要求唯一幸存" in note
+
+    def test_c3_loose_rejects_no_competition(self):
+        """R58-4：昨日组只 1 只无竞争 → 拒（与主版 c3 同口径）。"""
+        ok, note = entry.c3_loose(cand(), ctx(y_comp=(1, 1)))
+        assert not ok and "≥2竞争" in note
+
+    def test_c3_loose_rejects_no_survivor(self):
+        """R58-4：昨日组≥2 但今日 0 幸存 → 拒（无胜出者）。"""
+        ok, note = entry.c3_loose(cand(), ctx(y_comp=(3, 0)))
+        assert not ok and "≥1幸存" in note
+
+    def test_c3_loose_rejects_newcomer_not_in_yesterday_group(self):
+        """R58-4：候选不在昨日最高组（新插队）→ 拒，与主版 c3 同。"""
+        new = ({"600001", "600002", "600003"}, {"600001"})
+        ok, note = entry.c3_loose(cand(), ctx(y_comp=(3, 1), y_surv=new))
+        assert not ok and "不在昨日最高组" in note
+
+    def test_c3_loose_rejects_candidate_not_in_survivors(self):
+        """R58-4：候选在昨日组但不在幸存集（昨日组里有其它票今日仍换手）→ 拒。"""
+        # 候选在昨日组，但今日幸存者是另一只 → 候选被淘汰
+        sit = ({"000017", "600001", "600002"}, {"600001"})
+        ok, note = entry.c3_loose(cand(), ctx(y_comp=(3, 1), y_surv=sit))
+        assert not ok and "候选不在昨日组幸存者中" in note
+
+    def test_c3_loose_r2_switch_off(self, monkeypatch):
+        """R58-4：R2 关闭时不要求昨日竞争。"""
+        monkeypatch.setattr(entry, "REQUIRE_YESTERDAY_COMPETITION", False)
+        ok, note = entry.c3_loose(cand(), ctx(y_comp=(1, 1)))
+        assert ok and "R2 关闭" in note
+
+    def test_c3_loose_distinguishes_from_main(self):
+        """R58-4：c3_loose 与 c3_elimination 的关键差异——双幸存时主版拒、宽松版过。"""
+        sit = ({"000017", "600001", "600002"}, {"000017", "600001"})
+        assert not entry.c3_elimination(cand(), ctx(y_comp=(3, 2), y_surv=sit))[0]
+        assert entry.c3_loose(cand(), ctx(y_comp=(3, 2), y_surv=sit))[0]
+
+    def test_recommend_conditions_uses_loose_c3(self):
+        """R58-4：_RECOMMEND_CONDITIONS 的 c3 是 c3_loose，不是 c3_elimination。"""
+        fns = [fn for fn, _, _ in entry._RECOMMEND_CONDITIONS]
+        assert entry.c3_loose in fns
+        assert entry.c3_elimination not in fns
 
     def test_w1_crowding_warns_but_never_vetoes(self):
         """警告恒 True（信息在说明里）：按值聚合的任何调用方都不会被警告否决。"""
@@ -314,6 +363,131 @@ class TestCheckSignal:
                             lambda d, source=None: tried.append(d) or None)
         assert check_signal(D) is None
         assert tried == [D]
+
+
+class TestCheckRecommendSignal:
+    """R58-4：次级推荐档（RECOMMEND）的链路与落库。"""
+
+    def test_generated_on_none_window(self, monkeypatch):
+        """禁买日 RECOMMEND 仍生成观察记录（不导出）。"""
+        calls = patch_io(monkeypatch, today=[cand(cont=4, code="000017")],
+                         prev=_prev_rows(), window="NONE",
+                         survivors={"000017"})
+        sig = entry.check_recommend_signal(D)
+        assert sig is not None and sig.action is Action.RECOMMEND
+        sql, params = calls["sql"][0]
+        assert params[:4] == (D, "000017", "RECOMMEND", "NONE")
+
+    def test_dual_survivor_passes_when_main_fails(self, monkeypatch):
+        """R58-4：双幸存场景主版 c3 拒、c3_loose 过 → RECOMMEND 落库。"""
+        calls = patch_io(monkeypatch,
+                         today=[cand(cont=4, code="000017")],
+                         prev=_prev_rows(),
+                         survivors={"000017", "600001"})   # 2 个幸存
+        sig = entry.check_recommend_signal(D)
+        # c3_loose 接受双幸存 + 候选 ∈ 幸存集 → 通过
+        assert sig is not None and sig.action is Action.RECOMMEND
+        sql, params = calls["sql"][0]
+        assert params[:4] == (D, "000017", "RECOMMEND", "STANDARD")
+
+    def test_signal_carries_name_and_cont_days(self, monkeypatch):
+        """R58-4：Signal 内存字段 name/cont_days 在 BUY/RECOMMEND/SECONDARY 都填充。"""
+        monkeypatch.setattr(entry, "_evaluate", lambda *a, **k: (
+            entry.Checklist(c1_uniqueness=True, c2_exchange=True, c3_elimination=True,
+                            c4_min_days=True, c5_strength_diverge=True, w1_crowding=True),
+            [("c1 唯一换手高标", True, "ok")],
+        ))
+        monkeypatch.setattr(entry, "_candidate_view",
+                            lambda c: {"name": "测试龙", "turnover_rate": 8.0})
+        sig = entry.check_recommend_signal(D)
+        assert sig is not None
+        assert sig.name == "测试龙"
+        assert sig.cont_days == 5
+
+    def test_uses_min_leader_days_not_secondary(self, monkeypatch):
+        """R58-4：RECOMMEND 候选取 ladder.sole_top(MIN_LEADER_DAYS)，不降档。"""
+        # 把 MIN_LEADER_DAYS=4 改成 3 仍能取到 4 板候选
+        called_with: list[int] = []
+        original = entry.ladder.sole_top
+
+        def spy(rows, min_days=None):
+            called_with.append(min_days)
+            return original(rows, min_days)
+        monkeypatch.setattr(entry.ladder, "sole_top", spy)
+        patch_io(monkeypatch, today=[cand(cont=4, code="000017")],
+                 prev=_prev_rows(), survivors={"000017"})
+        sig = entry.check_recommend_signal(D)
+        assert sig is not None
+        # sole_top 收到的 min_days 应该是 MIN_LEADER_DAYS(4)，不是 SECONDARY_MIN_LEADER_DAYS(3)
+        assert entry.MIN_LEADER_DAYS in called_with
+        assert entry.SECONDARY_MIN_LEADER_DAYS not in called_with
+
+
+class TestChainOrder:
+    """R58-4：BUY → RECOMMEND → SECONDARY 的链路优先级。"""
+
+    def test_buy_persists_skips_recommend_and_secondary(self, monkeypatch):
+        """主 BUY 通过 → RECOMMEND/SECONDARY 都不跑。"""
+        rec_called: list[date] = []
+        sec_called: list[date] = []
+        patch_io(monkeypatch, today=[cand(cont=4, code="600001")], prev=_prev_rows(),
+                 survivors={"600001"})
+        monkeypatch.setattr(entry, "check_recommend_signal",
+                            lambda d, source=None: rec_called.append(d) or None)
+        monkeypatch.setattr(entry, "check_secondary_signal",
+                            lambda d, source=None: sec_called.append(d) or None)
+        sig = check_signal(D)
+        assert sig is not None and sig.action is Action.BUY
+        assert rec_called == [] and sec_called == []
+
+    def test_buy_fails_recommend_passes_returns_recommend(self, monkeypatch):
+        """主 BUY 未过 → RECOMMEND 通过 → 返回 RECOMMEND（不再尝试 SECONDARY）。"""
+        sec_called: list[date] = []
+        patch_io(monkeypatch, today=[cand(cont=4, code="000017")], prev=_prev_rows(),
+                 survivors={"000017", "600001"})  # 双幸存 → 主版 c3 拒
+        # RECOMMEND 用宽松 c3：构造一个 mock 替 _evaluate 在 RECOMMEND 路径里返回过
+        rec_pass = entry.Checklist(c1_uniqueness=True, c2_exchange=True,
+                                    c3_elimination=True, c4_min_days=True,
+                                    c5_strength_diverge=True, w1_crowding=True)
+        rec_rows = [(lbl, True, "ok") for fn, _, lbl in entry._RECOMMEND_CONDITIONS] + \
+                   [("W1 同身位扎堆", True, "无同身位扎堆")]
+        monkeypatch.setattr(entry, "check_secondary_signal",
+                            lambda d, source=None: sec_called.append(d) or None)
+        # patch _evaluate: 主版(主评估路径) 走原逻辑失败，RECOMMEND 路径走宽松版通过
+        original = entry._evaluate
+        def fake_evaluate(cand, window, **kw):
+            conds = kw.get("conditions", entry._CONDITIONS)
+            if conds is entry._RECOMMEND_CONDITIONS:
+                return rec_pass, rec_rows
+            return original(cand, window, **kw)
+        monkeypatch.setattr(entry, "_evaluate", fake_evaluate)
+        sig = check_signal(D)
+        assert sig is not None and sig.action is Action.RECOMMEND
+        # RECOMMEND 通过时 SECONDARY 不应被调用
+        assert sec_called == []
+
+    def test_buy_and_recommend_both_fail_falls_through_to_secondary(self, monkeypatch):
+        """BUY 失败 + RECOMMEND 也失败 → 落 SECONDARY。"""
+        sec_called: list[date] = []
+        patch_io(monkeypatch, today=[cand(cont=3, code="000017")], prev=_prev_rows())
+        monkeypatch.setattr(entry, "check_secondary_signal",
+                            lambda d, source=None: sec_called.append(d) or None)
+        sig = check_signal(D)
+        assert sig is None
+        assert sec_called == [D]
+
+    def test_none_window_tries_recommend_and_secondary(self, monkeypatch):
+        """禁买日 → RECOMMEND 与 SECONDARY 都尝试（沿用 V14.1 观察纪律）。"""
+        rec_called: list[date] = []
+        sec_called: list[date] = []
+        patch_io(monkeypatch, today=[cand(cont=4, code="000017")], prev=_prev_rows(),
+                 window="NONE", survivors={"000017"})
+        monkeypatch.setattr(entry, "check_recommend_signal",
+                            lambda d, source=None: rec_called.append(d) or None)
+        monkeypatch.setattr(entry, "check_secondary_signal",
+                            lambda d, source=None: sec_called.append(d) or None)
+        assert check_signal(D) is None
+        assert rec_called == [D] and sec_called == [D]
 
 
 class TestCheckSecondarySignal:

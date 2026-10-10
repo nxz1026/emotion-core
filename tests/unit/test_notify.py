@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
@@ -279,3 +281,131 @@ class TestPushFeishu:
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
 
         assert notify.push("## ⓪ 速览\n\nx\n", None) is False
+
+
+class TestPushBuySignal:
+    """R58-4：BUY 即时推送——24h 内存节流、防重推、专注 BUY 信号简报。"""
+
+    @staticmethod
+    def _cl():
+        return SimpleNamespace(c1_uniqueness=True, c2_exchange=True,
+                               c3_elimination=True, c4_min_days=True,
+                               c5_strength_diverge=True, w1_crowding=True)
+
+    def test_first_push_attempts(self, monkeypatch):
+        import requests as real_requests
+        posted = []
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append((a, kw)) or _resp(200, {"code": 0}))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        ok = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                     self._cl(), date(2026, 10, 10))
+        assert ok is True
+        assert len(posted) == 1
+
+    def test_second_push_within_24h_skipped(self, monkeypatch):
+        import requests as real_requests
+        posted = []
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                self._cl(), date(2026, 10, 10))
+        ok2 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                     self._cl(), date(2026, 10, 10))
+        assert ok2 is False, "24h 内同 (date,code) 重推应被节流"
+        assert len(posted) == 1
+
+    def test_different_code_pushes_again(self, monkeypatch):
+        import requests as real_requests
+        posted = []
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                self._cl(), date(2026, 10, 10))
+        ok2 = notify.push_buy_signal("600001", "另一只", 5, "STANDARD",
+                                     self._cl(), date(2026, 10, 10))
+        assert ok2 is True, "不同 code 不应互相节流"
+        assert len(posted) == 2
+
+    def test_different_date_pushes_again(self, monkeypatch):
+        import requests as real_requests
+        posted = []
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                self._cl(), date(2026, 10, 10))
+        ok2 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                     self._cl(), date(2026, 10, 11))
+        assert ok2 is True, "不同 date 不应互相节流"
+        assert len(posted) == 2
+
+    def test_network_error_does_not_pollute_dedup(self, monkeypatch):
+        """R58-4：网络异常时不记节流——下次重试可推。"""
+        import requests as real_requests
+        posted = []
+        def mock_post(*a, **kw):
+            posted.append(1)
+            raise real_requests.ConnectionError("dns")
+        monkeypatch.setattr(real_requests, "post", mock_post)
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        ok1 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                     self._cl(), date(2026, 10, 10))
+        assert ok1 is False
+        # 修复后重试
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        ok2 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                     self._cl(), date(2026, 10, 10))
+        assert ok2 is True, "网络异常未污染 dedup，重试应能推"
+        assert len(posted) == 2
+
+    def test_no_url_skips_silently(self, monkeypatch):
+        monkeypatch.delenv("EMOTION_LKL_WEBHOOK_URL", raising=False)
+        notify.reset_buy_dedup()
+        assert notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                      self._cl(), date(2026, 10, 10)) is False
+
+    def test_payload_format_includes_checklist(self, monkeypatch):
+        import requests as real_requests
+        posted = []
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append((a, kw)) or _resp(200, {"code": 0}))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        notify.push_buy_signal("000017", "测试龙", 5, "ENHANCED",
+                                self._cl(), date(2026, 10, 10))
+        payload = posted[0][0][1]
+        assert payload["msg_type"] == "text"
+        body = payload["content"]["text"]
+        assert "000017" in body and "测试龙" in body and "5板" in body
+        assert "ENHANCED" in body
+        assert "✓ c1 唯一换手高标" in body
+        assert "✓ c3 淘汰赛身份" in body
+
+    def test_zero_cont_days_in_body(self, monkeypatch):
+        """cont_days 缺数（Signal 字段未填）→ 显示 0 板，不抛。"""
+        import requests as real_requests
+        posted = []
+        monkeypatch.setattr(real_requests, "post",
+                            lambda *a, **kw: posted.append((a, kw)) or _resp(200, {"code": 0}))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        notify.reset_buy_dedup()
+
+        notify.push_buy_signal("000017", "测试龙", 0, "STANDARD",
+                                self._cl(), date(2026, 10, 10))
+        body = posted[0][0][1]["content"]["text"]
+        assert "0板" in body

@@ -10,6 +10,12 @@ class Action(str, Enum):
     BUY = "BUY"
     SECONDARY = "SECONDARY"
     SELL = "SELL"
+    # R58-4（2026-10-10）：新加次级推荐档。BUY 五条件全过未达时，c3 由
+    # 「幸存集=={候选}」放宽为「候选 ∈ 幸存集」后的中间档——比 SECONDARY
+    # 门槛高（仍要 c1/c2/c4/c5 + 最低板数），但比 BUY 宽松（不强求唯一幸存）。
+    # 链路优先级：BUY → RECOMMEND → SECONDARY。RECOMMEND 仅作观察信号，不
+    # 进入交易导出；语义上「准买入」而非「次级观察」。
+    RECOMMEND = "RECOMMEND"
 
 
 class SignalSource(str, Enum):
@@ -58,3 +64,9 @@ class Signal:
     checklist: Checklist
     source: SignalSource
     status: str = "SUGGESTED"  # SUGGESTED / ADOPTED / EXPORTED
+    # R58-4（2026-10-10）：以下两字段仅在内存中使用（BUY 即时推送需要展示
+    # 股票名称与板数），**不入库**——`_persist` 只写 (date, code, action) +
+    # window + checklist，不存 name/cont_days。frozen dataclass 默认值必须
+    # 在末尾，旧字段次序保持不变。
+    name: str | None = None
+    cont_days: int | None = None
