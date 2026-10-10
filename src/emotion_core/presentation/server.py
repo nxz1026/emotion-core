@@ -152,6 +152,17 @@ def _load_intuitive_data(trade_date=None) -> dict:
     recommendations = [s for s in signals if s.get("action") == "BUY"]
     recommendation = recommendations[0] if recommendations else None
 
+    # R58-5：次级观察（SECONDARY / RECOMMEND）top 10，details 框点击展开
+    # 仅看当日（snapshot_date 同日）——`signals` loader 已按 confirm_date=trade_date 过滤
+    secondary_signals = [s for s in signals if s.get("action") == "SECONDARY"]
+    recommend_signals = [s for s in signals if s.get("action") == "RECOMMEND"]
+    # RECOMMEND 在前（语义更接近 BUY）、SECONDARY 在后；都按 created_at 升序
+    # （队列式阅读，最早落库的在最上、最新入队的在最下便于看最新）
+    observation_signals = sorted(
+        recommend_signals + secondary_signals,
+        key=lambda s: (s.get("action") != "RECOMMEND", s.get("created_at") or ""),
+    )[-10:]
+
     # 负期望披露：从 signal_outcome 聚合历史均值（P1-2 审计修复）
     neg_exp = _load_negative_expectation()
 
@@ -178,6 +189,7 @@ def _load_intuitive_data(trade_date=None) -> dict:
         "signal_count": len(signals),
         "recommendation": recommendation,
         "recommendations": recommendations,
+        "observation_signals": observation_signals,
         "dragon_env": dragon_env,
         "dragon_desc": dragon_desc,
         "accelerate": market.get("accelerate", False),

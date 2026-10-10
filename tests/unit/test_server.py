@@ -113,6 +113,26 @@ class TestLoadIntuitiveData:
         assert data["recommendation"]["code"] == "000001"
         assert len(data["recommendations"]) == 2
 
+    def test_observation_signals_filters_secondary_recommend(self, monkeypatch):
+        """R58-5：observation_signals 仅保留 SECONDARY + RECOMMEND，BUY 不混入。"""
+        signals = [
+            {"code": "000001", "action": "BUY"},
+            {"code": "000002", "action": "SECONDARY"},
+            {"code": "000003", "action": "RECOMMEND"},
+            {"code": "000004", "action": "WATCH"},
+        ]
+        monkeypatch.setattr(server.loaders, "load_market_snapshot", lambda d: {})
+        monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
+        monkeypatch.setattr(server.loaders, "load_signals", lambda d: signals)
+        monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
+        monkeypatch.setattr(server.loaders, "load_signal_counts",
+                            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+        data = server._load_intuitive_data()
+        codes = [s["code"] for s in data["observation_signals"]]
+        assert codes == ["000003", "000002"]   # RECOMMEND 在前，SECONDARY 在后
+        assert "000001" not in codes   # BUY 不混入
+        assert "000004" not in codes   # WATCH 排除
+
     def test_no_buy_signals(self, monkeypatch):
         signals = [{"code": "000001", "action": "WATCH"}]
         monkeypatch.setattr(server.loaders, "load_market_snapshot", lambda d: {})

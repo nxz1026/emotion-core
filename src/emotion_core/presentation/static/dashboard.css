@@ -163,6 +163,7 @@ tr:hover td { background: var(--bg-secondary); }
 .badge-danger { background: var(--danger-bg); color: var(--danger); }
 .badge-warning { background: var(--warning-bg); color: var(--warning); }
 .badge-neutral { background: var(--bg-tertiary); color: var(--text-secondary); }
+.badge-muted { background: var(--bg-tertiary); color: var(--text-secondary); }
 
 /* Lead paragraph */
 .lead { font-size: 18px; color: var(--text-secondary); margin-bottom: 16px; }
@@ -426,6 +427,36 @@ pre code {
   gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--border-muted); }
 .recommend-list a { color: var(--accent-primary); text-decoration: none; font-weight: 600; }
 .recommend-list a:hover { text-decoration: underline; }
+
+/* R58-5：次级观察（SECONDARY / RECOMMEND）top10，可点击展开 */
+.observation-list { list-style: none; padding: 0; margin: 0; }
+.observation-list > li { padding: 4px 0; border-bottom: 1px dashed var(--border-muted); }
+.observation-list details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 4px 0;
+}
+.observation-list details > summary::-webkit-details-marker { display: none; }
+.observation-list details[open] > summary { color: var(--accent-primary); }
+.observation-list details > summary code { font-weight: 600; }
+.observation-list .checklist {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 4px;
+}
+.observation-list .checklist-row {
+  display: flex; gap: 8px; align-items: center; padding: 2px 0; font-size: 13px;
+}
+.observation-list .checklist-mark {
+  display: inline-block; width: 18px; text-align: center; font-weight: 700;
+}
+.observation-list .mark-pass { color: var(--success); }
+.observation-list .mark-fail { color: var(--danger); }
+.observation-list .mark-unknown { color: var(--text-muted); }
+.observation-list .checklist-label { color: var(--text-secondary); }
 
 /* ── 快照日期提示条 + 历史快照日历 ───────────────── */
 .snapshot-bar { background: var(--bg-primary); border-bottom: 1px solid var(--border-color); }

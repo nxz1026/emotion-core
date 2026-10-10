@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -104,6 +105,8 @@ def push(md: str, trade_date) -> bool:
     if not text:
         log.warning("摘要提取为空，推送跳过")
         return False
+    # R58-5：先走一次 LLM 把摘要翻译成人话；LLM 不可用时回退原文
+    text = _humanize_alert(text, kind="daily")
     channel = _guess_channel(url)
     try:
         import requests
@@ -121,6 +124,76 @@ def push(md: str, trade_date) -> bool:
     except Exception as exc:  # noqa: BLE001
         log.warning("webhook 推送失败（不影响报告落盘）：%s", exc)
         return False
+
+
+# ---- R58-5 飞书报警走一次 LLM（人话） ----
+# daily 主链结尾的 `push(report_md)` 现在会先经本模块把摘要"说人话"再推。
+# 缓存键 (kind, md5(text)) 24h 内复用同一篇不重复调 LLM；LLM 不可用 / 解析失败 /
+# 任何阻断都回退原文（不影响日报落盘）。
+
+_HUMANIZE_DEDUP: dict[tuple[str, str], float] = {}
+_HUMANIZE_TTL = 86400  # 24h
+
+_HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。把下面这段龙空龙复盘系统的当日日报摘要，**用 2-3 句自然中文**讲清楚两件事：
+
+1. 今天的 A 股盘面现在在什么阶段、买入窗口是否打开；
+2. 今天产生了哪些信号（BUY 推荐几只、SECONDARY/RECOMMEND 观察几只）；没有信号也要说清楚为什么。
+
+风格要求：
+- 用「今天」「当前」开头的句子，第二人称省略；
+- 数字（涨停家数、最高档数、信号数）保留原文；
+- 如果有 BUY 推荐，第一句必须出现「BUY」字样；
+- 如果没 BUY，**不要**说「无信号」（那听起来像故障），改说「没有 BUY 是因为 ...」；
+- 不要写 markdown 标题或列表，只输出 2-3 句纯文本；
+- 不要复述任何 RAG/算法/字段名。
+
+摘要原文如下：
+"""
+
+
+def _humanize_alert(text: str, kind: str = "daily") -> str:
+    """把飞书推送的 markdown 摘要送 LLM 改写为人话；失败回退原文。
+
+    Args:
+        text: 已提取的速览段（_summary 输出）。
+        kind: "daily" / "buy" / "watchdog"——目前只对 daily 做改写。
+
+    Returns:
+        LLM 改写后的文本；LLM 不可用时回退原文，best-effort 不抛。
+    """
+    if not text:
+        return text
+    if kind != "daily":
+        return text  # 暂只对日报摘要 humanize，BUY 即时推送仍走结构化文本
+    cache_key = (kind, hashlib.md5(text.encode("utf-8")).hexdigest())
+    now = time.time()
+    cached = _HUMANIZE_DEDUP.get(cache_key)
+    if cached and now - cached[0] < _HUMANIZE_TTL:
+        return cached[1]
+    try:
+        from emotion_core.llm import agnes
+        client = agnes.AgnesClient()
+        out = client.complete(
+            prompt=_HUMANIZE_PROMPT + text,
+            temperature=0.3,
+            max_tokens=512,
+        )
+        out = (out or "").strip()
+        if not out:
+            log.debug("LLM 返回空文本，回退原文")
+            return text
+        _HUMANIZE_DEDUP[cache_key] = (now, out)
+        log.info("飞书推送 LLM 改写完成（%d→%d 字）", len(text), len(out))
+        return out
+    except Exception as exc:  # noqa: BLE001
+        # LLMNotEnabledError（无密钥）/ 网络异常 / 超时：均回退原文
+        log.debug("LLM humanize 失败（回退原文）：%s", exc)
+        return text
+
+
+def reset_humanize_dedup() -> None:
+    """测试用：清空 humanize 缓存。生产代码不应调用。"""
+    _HUMANIZE_DEDUP.clear()
 
 
 # ---- R58-4 BUY 即时推送：与日报摘要并行，专注 BUY 信号简报 ----

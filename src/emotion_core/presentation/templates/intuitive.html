@@ -51,6 +51,42 @@
         <button type="submit" class="btn btn-primary">个股诊断</button>
     </form>
     {% endif %}
+
+    {# R58-5：次级观察（SECONDARY / RECOMMEND）top10，点击 <details> 展开 checklist #}
+    {% if observation_signals %}
+    <h3 style="margin-top:1rem">次级观察 · TOP {{ observation_signals|length }}</h3>
+    <p class="muted" style="margin-top:0.25rem">RECOMMEND（准买入）排前，SECONDARY（观察）排后；点击行展开 5 条件 + buy_window。</p>
+    <ul class="observation-list">
+        {% for s in observation_signals %}
+        <li>
+            <details>
+                <summary>
+                    <span class="badge {% if s.action == 'RECOMMEND' %}badge-warning{% else %}badge-muted{% endif %}">{{ s.action }}</span>
+                    <a href="{{ base_path }}/stock?code={{ s.code }}&date={{ banner.selected_iso }}"><code>{{ s.code }}</code></a>
+                    <span class="muted">{{ s.name or "" }}{% if s.cont_days %} · {{ s.cont_days }}板{% endif %}</span>
+                    <span class="muted">· buy_window={{ s.buy_window or "—" }}</span>
+                </summary>
+                <div class="checklist">
+                    {% if s.checklist is mapping %}
+                        {% for label, ok in s.checklist.items() %}
+                            {% if label != 'w1_crowding' %}
+                                <div class="checklist-row">
+                                    <span class="checklist-mark {% if ok %}mark-pass{% elif ok is none %}mark-unknown{% else %}mark-fail{% endif %}">
+                                        {% if ok %}✓{% elif ok is none %}—{% else %}✗{% endif %}
+                                    </span>
+                                    <span class="checklist-label">{{ label }}</span>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <p class="muted">checklist 格式异常（{{ s.checklist.type()|default("未知") }}）</p>
+                    {% endif %}
+                </div>
+            </details>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
 </div>
 
 <div class="card">

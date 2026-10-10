@@ -414,3 +414,118 @@ class TestPushBuySignal:
                                 self._cl(), date(2026, 10, 10))
         body = posted[0]["kw"]["json"]["content"]["text"]
         assert "0板" in body
+
+
+class TestHumanizeAlert:
+    """R58-5：飞书推送前 LLM 改写为人话；失败回退原文（不破主链路）。"""
+
+    def test_empty_text_returned_as_is(self):
+        notify.reset_humanize_dedup()
+        assert notify._humanize_alert("", kind="daily") == ""
+
+    def test_non_daily_kind_passes_through(self):
+        """kind='buy' / 'watchdog' 暂不 humanize，直接返回原文。"""
+        text = "## ⓪ 速览\n**今日 BUY：000017 5板**"
+        assert notify._humanize_alert(text, kind="buy") == text
+        assert notify._humanize_alert(text, kind="watchdog") == text
+
+    def test_llm_failure_falls_back_to_original(self, monkeypatch):
+        """LLM 抛 LLMNotEnabledError / 网络异常 → 回退原文，不抛。"""
+        notify.reset_humanize_dedup()
+
+        class _StubAgnes:
+            def __init__(self):
+                raise RuntimeError("Agnes 未启用：mock 无密钥")
+
+        # 把 agnes 模块整个替成抛错 stub
+        import sys
+        sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
+        sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
+        sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
+
+        text = "## ⓪ 速览\n今日高潮，涨停 50。BUY 1 只。"
+        out = notify._humanize_alert(text, kind="daily")
+        assert out == text   # 回退原文
+
+    def test_llm_success_returns_humanized(self, monkeypatch):
+        """LLM 正常返回 → 用 LLM 输出而非原文。"""
+        notify.reset_humanize_dedup()
+
+        class _StubAgnes:
+            def __init__(self):
+                pass
+            def complete(self, *, prompt, temperature, max_tokens):
+                return "今天市场处于高潮阶段，涨停家数 50 较高。出现 1 只 BUY 推荐，可考虑逢低介入。"
+
+        import sys
+        sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
+        sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
+        sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
+
+        text = "## ⓪ 速览\n**今日高潮** BUY 1 只 涨停 50"
+        out = notify._humanize_alert(text, kind="daily")
+        assert "高潮" in out and "涨停" in out
+        assert out != text   # 真正被改写了
+
+    def test_llm_empty_output_falls_back(self, monkeypatch):
+        """LLM 返回空串 → 回退原文。"""
+        notify.reset_humanize_dedup()
+
+        class _StubAgnes:
+            def __init__(self):
+                pass
+            def complete(self, *, prompt, temperature, max_tokens):
+                return "   "
+
+        import sys
+        sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
+        sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
+        sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
+
+        text = "## ⓪ 速览\n**今日高潮**"
+        out = notify._humanize_alert(text, kind="daily")
+        assert out == text   # 空字符串回退
+
+    def test_llm_result_cached_for_24h(self, monkeypatch):
+        """同一段摘要第二次调用 LLM 走缓存（只调一次 LLM）。"""
+        notify.reset_humanize_dedup()
+        call_count = [0]
+
+        class _StubAgnes:
+            def __init__(self):
+                pass
+            def complete(self, *, prompt, temperature, max_tokens):
+                call_count[0] += 1
+                return f"LLM 输出 #{call_count[0]}"
+
+        import sys
+        sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
+        sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
+        sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
+
+        text = "## ⓪ 速览\n**今日高潮** BUY 1 只"
+        out1 = notify._humanize_alert(text, kind="daily")
+        out2 = notify._humanize_alert(text, kind="daily")
+        assert out1 == out2 == "LLM 输出 #1"
+        assert call_count[0] == 1   # 第二次走缓存
+
+    def test_different_text_triggers_new_llm_call(self, monkeypatch):
+        notify.reset_humanize_dedup()
+        call_count = [0]
+
+        class _StubAgnes:
+            def __init__(self):
+                pass
+            def complete(self, *, prompt, temperature, max_tokens):
+                call_count[0] += 1
+                return f"#{call_count[0]}"
+
+        import sys
+        sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
+        sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
+        sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
+
+        a = notify._humanize_alert("alpha 文本", kind="daily")
+        b = notify._humanize_alert("beta 文本", kind="daily")
+        assert a == "#1" and b == "#2"
+        assert call_count[0] == 2
