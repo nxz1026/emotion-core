@@ -52,16 +52,17 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Any, Callable
+from typing import Any
 
 from emotion_core.algorithms import ladder
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
 from emotion_core.utils.config import CONFIG, config_hash
-from emotion_core.utils.db import connect, transaction
 from emotion_core.utils.dates import prev_trading_day, today_sh
+from emotion_core.utils.db import connect, transaction
 
 log = logging.getLogger(__name__)
 
