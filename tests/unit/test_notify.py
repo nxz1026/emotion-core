@@ -292,11 +292,18 @@ class TestPushBuySignal:
                                c3_elimination=True, c4_min_days=True,
                                c5_strength_diverge=True, w1_crowding=True)
 
+    def _spy_post(self, posted):
+        """统一 spy：append {args, kw} dict 让 posted[i]['kw']['json'] 可读。"""
+        import requests as real_requests
+        def mock_post(*a, **kw):
+            posted.append({"args": a, "kw": kw})
+            return _resp(200, {"code": 0})
+        return mock_post
+
     def test_first_push_attempts(self, monkeypatch):
         import requests as real_requests
         posted = []
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append((a, kw)) or _resp(200, {"code": 0}))
+        monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
@@ -381,14 +388,13 @@ class TestPushBuySignal:
     def test_payload_format_includes_checklist(self, monkeypatch):
         import requests as real_requests
         posted = []
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append((a, kw)) or _resp(200, {"code": 0}))
+        monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
         notify.push_buy_signal("000017", "测试龙", 5, "ENHANCED",
                                 self._cl(), date(2026, 10, 10))
-        payload = posted[0][0][1]
+        payload = posted[0]["kw"]["json"]
         assert payload["msg_type"] == "text"
         body = payload["content"]["text"]
         assert "000017" in body and "测试龙" in body and "5板" in body
@@ -400,12 +406,11 @@ class TestPushBuySignal:
         """cont_days 缺数（Signal 字段未填）→ 显示 0 板，不抛。"""
         import requests as real_requests
         posted = []
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append((a, kw)) or _resp(200, {"code": 0}))
+        monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
         notify.push_buy_signal("000017", "测试龙", 0, "STANDARD",
                                 self._cl(), date(2026, 10, 10))
-        body = posted[0][0][1]["content"]["text"]
+        body = posted[0]["kw"]["json"]["content"]["text"]
         assert "0板" in body

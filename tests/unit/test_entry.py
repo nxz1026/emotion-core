@@ -370,43 +370,41 @@ class TestCheckRecommendSignal:
 
     def test_generated_on_none_window(self, monkeypatch):
         """禁买日 RECOMMEND 仍生成观察记录（不导出）。"""
-        calls = patch_io(monkeypatch, today=[cand(cont=4, code="000017")],
+        # 用 600001 候选——它在 _prev_rows() 默认 4 板组里，c3 才能通过
+        calls = patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
                          prev=_prev_rows(), window="NONE",
-                         survivors={"000017"})
+                         survivors={"600001"})
         sig = entry.check_recommend_signal(D)
         assert sig is not None and sig.action is Action.RECOMMEND
         sql, params = calls["sql"][0]
-        assert params[:4] == (D, "000017", "RECOMMEND", "NONE")
+        assert params[:4] == (D, "600001", "RECOMMEND", "NONE")
 
     def test_dual_survivor_passes_when_main_fails(self, monkeypatch):
         """R58-4：双幸存场景主版 c3 拒、c3_loose 过 → RECOMMEND 落库。"""
         calls = patch_io(monkeypatch,
-                         today=[cand(cont=4, code="000017")],
+                         today=[cand(cont=4, code="600001")],
                          prev=_prev_rows(),
-                         survivors={"000017", "600001"})   # 2 个幸存
+                         survivors={"600001", "600002"})   # 2 个幸存
         sig = entry.check_recommend_signal(D)
         # c3_loose 接受双幸存 + 候选 ∈ 幸存集 → 通过
         assert sig is not None and sig.action is Action.RECOMMEND
         sql, params = calls["sql"][0]
-        assert params[:4] == (D, "000017", "RECOMMEND", "STANDARD")
+        assert params[:4] == (D, "600001", "RECOMMEND", "STANDARD")
 
     def test_signal_carries_name_and_cont_days(self, monkeypatch):
-        """R58-4：Signal 内存字段 name/cont_days 在 BUY/RECOMMEND/SECONDARY 都填充。"""
-        monkeypatch.setattr(entry, "_evaluate", lambda *a, **k: (
-            entry.Checklist(c1_uniqueness=True, c2_exchange=True, c3_elimination=True,
-                            c4_min_days=True, c5_strength_diverge=True, w1_crowding=True),
-            [("c1 唯一换手高标", True, "ok")],
-        ))
+        """R58-4：Signal 内存字段 name/cont_days 在 RECOMMEND 也填充。"""
+        # 600001 是 _prev_rows 默认组里的候选 → c3 过
         monkeypatch.setattr(entry, "_candidate_view",
                             lambda c: {"name": "测试龙", "turnover_rate": 8.0})
+        calls = patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
+                         prev=_prev_rows(), survivors={"600001"})
         sig = entry.check_recommend_signal(D)
         assert sig is not None
         assert sig.name == "测试龙"
-        assert sig.cont_days == 5
+        assert sig.cont_days == 4   # cand(cont=4) 的 cont_days
 
     def test_uses_min_leader_days_not_secondary(self, monkeypatch):
         """R58-4：RECOMMEND 候选取 ladder.sole_top(MIN_LEADER_DAYS)，不降档。"""
-        # 把 MIN_LEADER_DAYS=4 改成 3 仍能取到 4 板候选
         called_with: list[int] = []
         original = entry.ladder.sole_top
 
@@ -414,8 +412,9 @@ class TestCheckRecommendSignal:
             called_with.append(min_days)
             return original(rows, min_days)
         monkeypatch.setattr(entry.ladder, "sole_top", spy)
-        patch_io(monkeypatch, today=[cand(cont=4, code="000017")],
-                 prev=_prev_rows(), survivors={"000017"})
+        # 600001 在 _prev_rows 里 → c3 过
+        patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
+                 prev=_prev_rows(), survivors={"600001"})
         sig = entry.check_recommend_signal(D)
         assert sig is not None
         # sole_top 收到的 min_days 应该是 MIN_LEADER_DAYS(4)，不是 SECONDARY_MIN_LEADER_DAYS(3)
