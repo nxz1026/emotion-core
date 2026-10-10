@@ -394,10 +394,11 @@ class TestCheckRecommendSignal:
     def test_signal_carries_name_and_cont_days(self, monkeypatch):
         """R58-4：Signal 内存字段 name/cont_days 在 RECOMMEND 也填充。"""
         # 600001 是 _prev_rows 默认组里的候选 → c3 过
-        monkeypatch.setattr(entry, "_candidate_view",
-                            lambda c: {"name": "测试龙", "turnover_rate": 8.0})
         calls = patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
                          prev=_prev_rows(), survivors={"600001"})
+        # patch_io 已经把 _candidate_view 桩成空 dict；这里**再**覆写一次带 name
+        monkeypatch.setattr(entry, "_candidate_view",
+                            lambda c: {"name": "测试龙", "turnover_rate": 8.0})
         sig = entry.check_recommend_signal(D)
         assert sig is not None
         assert sig.name == "测试龙"
