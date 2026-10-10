@@ -42,6 +42,12 @@ ignore = []
 # Rust 构建产物目录（260MB），不是 Python 源码
 "**/core/target/**" = ["ALL"]
 
+# UP042（class Foo(str, Enum) 是 Ruff 不推荐的旧写法）：本仓 Action /
+# SignalSource 是序列化到 DB signal.action 列（text 类型）的契约，需直接
+# 与字面量字符串 `"BUY"` / `"live"` 比较；改 StrEnum 是更大重构，与 R58-4
+# 工单范围无关。保留旧写法并明确豁免。
+"src/emotion_core/domain/signal.py" = ["UP042"]
+
 [tool.ruff.format]
 quote-style = "double"
 
