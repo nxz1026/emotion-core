@@ -17,6 +17,14 @@ LKL-Trade (client)  <--HTTPS-->  nginx (/trade/)  -->  emotion-core :8098/api/tr
 
 获取指定日期的交易决策。首次请求时从 `strategy_signal` 表生成 batch_id 并缓存；后续请求返回缓存版本。
 
+> ⚠️ **同一 `code` 只会出现一次**（2026-10-09 修）。`strategy_signal` 的唯一键是
+> `(trade_date, code, strategy, prompt_hash)`，同一 `(code, strategy)` 在上下文变化后重跑会
+> **追加版本行**（版本行本身是设计），原先按 `score DESC` 取全部行 ⇒ 同一只票可能出多条
+> `BUY`，客户端（LKL-Trade）会当成多笔 `OPEN_POS`。现在按 **code 去重**
+> （`DISTINCT ON (code)`：同一只票取分数最高，同分取 `created_at DESC`，再同取
+> `prompt_hash DESC`，结果确定），服务端另有 `seen_codes` 兜底。客户端**不应**假设同一
+> `code` 出现多次；若需要多策略的细节，走 `strategy_signal` 原始表而不是本端点。
+
 **请求：**
 ```
 GET /trade/decisions?date=2026-09-30

@@ -230,22 +230,40 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 | `EC_STRATEGY_MAX_ATTEMPTS` | `3` | `runner.py` | 单个组合的最大尝试次数（含首次） |
 | `EC_STRATEGY_RETRY_BASE_DELAY` | `2.0` | `runner.py` | 退避基数，第 n 次重试等待 `base × 2^(n-1)` 秒 |
 | `EC_STRATEGY_MAX_CONSECUTIVE_FAILURES` | `8` | `runner.py` | 连续失败达此数即熔断，其余组合记 `连续调用失败熔断` |
-| `EC_STRATEGY_POOL_TYPES` | `ZT,ZB` | `universe.py` | 收窄候选池 `pool_type`，逗号分隔 |
+| `EC_STRATEGY_RETRY_DELAY` | `10.0` | `runner.py` | 主循环后的失败补跑轮之前的等待秒数（2026-10-09 新增） |
 
 汇总日志形如 `策略观察 2026-09-29: 调用 50, 入库 18, 失败 3, 跳过 1002, 快照 ...`。
 `skipped` 里可区分 `达到LLM调用上限` / `连续调用失败熔断` / `LLM调用失败:<原因>`。
+2026-10-09 起汇总行还带**跳过原因分布**（`runner.py::_reason_distribution`，按次数降序）
+——此前「为什么只跑了 4 只票」在 DB 与日志里都不可见。
 
-**候选池口径**（`universe.py`，2026-09-30）：`limit_pool_em` 是东财**涨停池**表，
-但同表混含三种 `pool_type`（实测 2026-09-29：`ZT` 57 / `DT` 10 / `ZB` 8）。查询现按
-`pool_type = ANY(%s)` 收窄到 `OBSERVED_POOL_TYPES`（默认 `ZT,ZB`），跌停股不再占
-LLM 配额 —— 该日候选池从 68 只降到 58 只，正好是 10 只 DT。
+**失败补跑与局部补跑**（2026-10-09 新增）：`run_for_date()` 主循环之后自动补跑一轮 ——
+本轮 LLM 失败 / 输出契约失败的 `(skill, code)`，在配额与熔断有余量时按
+`RETRY_ROUND_DELAY`（env `EC_STRATEGY_RETRY_DELAY`，默认 10s）重跑。历史缺口用
+`--codes`（见下）局部补跑，它走 `filter_codes()`：`BOARD_PREFIXES` 板块前缀过滤 +
+`zfill(6)` + 保序去重、**不截断**。
+⚠️ 局部补跑必须让快照合并：`_snapshot(..., merge=explicit_codes)` 按 `(code, strategy)`
+把新结果与旧快照合并，否则会把当日完整快照（其余 code 的 items 与 skipped 分布）冲掉。
+⚠️ `strategy_signal` 的唯一键是 `(trade_date, code, strategy, prompt_hash)`：prompt_hash
+变化后重跑同一 `(code, strategy)` 会**追加新版本行**（不是 upsert），补跑后要查重复组并清理
+（2026-10-09 实测补 `000420` 一次产生 14 条重复行）。
 
-两条查询都强制 `ORDER BY`（`limit_pool_em` 用 `code`，`hot_rank` 用 `rank, code` 兜底）：
-票池会被 `STRATEGY_MAX_UNIVERSE` 截断，**截断后的顺序就是 LLM 配额的归属顺序**，
-缺 `ORDER BY` 时同一交易日重跑会得到不同票池，「跑过哪些组合」不可复现。
-排序主键取 `code` 而非连板高度，是因为 `cont_days_em` 在跌停行上同样有值，按它排会把
-跌停股排进前列。日后若要改「强势优先」，注意 DT 行的 `first_seal` 存的是**空串而非
-NULL**，需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌停股会被排到最前。
+**配额与超时**（2026-10-09 用户拍板）：`CONFIG.STRATEGY_MAX_LLM`（`utils/config.py`，env
+`EC_STRATEGY_MAX_LLM`）默认 `50` → **`300`**（20 只 × 15 策略；实测每次 LLM 调用约 7.2s
+⇒ 300 次约 36min）。因此 `emotion-core-strategy.service` 的 `TimeoutStartSec` 由 `3600`
+抬到 **`7200`** —— oneshot 跑到一半被 systemd 杀掉不会留任何告警，**再抬配额必须同步抬该超时**。
+
+**候选池口径**（`universe.py`，2026-10-09 改，用户拍板「覆盖手动输入和热门池就可以」）：
+`build_universe` = **手动自选 `watchlist`（`ORDER BY code`，优先）+ 当日热门池 `hot_rank`
+前 `STRATEGY_HOT_N` 条（默认 20，`ORDER BY rank, code`）**，**不再读 `limit_pool_em`**
+（涨停/炸板池与热门池高度重叠；且它混含 `ZT`/`ZB`/`DT`，按它收窄还要维护
+`OBSERVED_POOL_TYPES` —— 该常量与旋钮 `EC_STRATEGY_POOL_TYPES` 已随本次改动删除）。
+
+票池仍会被 `STRATEGY_MAX_UNIVERSE`（默认 80）截断，**截断后的顺序就是 LLM 配额的归属顺序**，
+所以两条查询都强制 `ORDER BY`：缺了它，同一交易日重跑会得到不同票池，「跑过哪些组合」不可
+复现。排序主键取 `code`（自选）与 `rank, code`（热门）而非连板高度，是可复现性优先。
+（历史提示：若日后重新引入 `limit_pool_em`，注意 `DT` 行的 `first_seal` 存的是**空串而非
+NULL**，排序需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌停股会被排到最前。）
 
 **调度**：`src/emotion_core/orchestration/systemd/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
@@ -254,6 +272,8 @@ NULL**，需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌�
 sudo -n systemctl start emotion-core-strategy.service   # systemd 重启/启动一律 sudo -n，见 docs/06 §3.4
 # 或
 PYTHONPATH=src .venv/bin/python -m emotion_core.orchestration.strategy --date 2026-09-29
+# 或局部补跑（绕过候选池，只跑指定 code；快照自动 merge，见上）：
+PYTHONPATH=src .venv/bin/python -m emotion_core.orchestration.strategy --date 2026-10-08 --codes 600825
 ```
 
 **输出**：只写 `strategy_signal` 表，主链不读它 —— 策略观察是旁路观察，不参与信号生成。

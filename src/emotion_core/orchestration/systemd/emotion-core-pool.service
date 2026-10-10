@@ -6,6 +6,13 @@ Description=Emotion Core EastMoney Limit Pool Sync
 After=network.target
 Wants=network-online.target
 
+# ★2026-10-09 日志巡检 E：这两行原在 [Service] —— systemd 只认 [Unit] 里的
+# StartLimitIntervalSec / StartLimitBurst，放在 [Service] 等于没设，实际吃默认
+# 值（5 次 / 10s）；而 RestartSec=300 让每次重启间隔 300s，永远落不进 10s 窗口
+# ⇒ 「一小时内最多 4 次」的护栏此前从未生效。搬回 [Unit] 才真正限流。
+StartLimitIntervalSec=3600
+StartLimitBurst=4
+
 [Service]
 Type=oneshot
 User=ubuntu
@@ -28,6 +35,15 @@ StandardError=journal
 # 挂起会一路传到 systemd，OnCalendar 定时任务被无限期占住。不设上限 = 定时器
 # 可能永远不再触发。600s 远超正常耗时（3 天 ×3 池 ≈ 20-60s），只用来兜住挂死。
 TimeoutStartSec=600
+
+# ★2026-10-09 补 Restart=on-failure：failed 不再僵死，等不到下次 cron。
+# 池 service 卡死在 systemd 600s 兜底杀 → failed 后 timer 不会重试（OnCalendar 才再触发）。
+# 重启 = 5min 一次、一小时内最多 4 次（防 EM 接口真挂时把 systemd 反复启动）。
+# pool.py 已补 socket.setdefaulttimeout(15)（EM 接口卡死的根因），
+# 故重启一般只是补抓最后一天；正常耗时 20-60s 内成功。
+Restart=on-failure
+RestartSec=300
+
 
 [Install]
 WantedBy=multi-user.target
