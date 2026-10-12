@@ -93,7 +93,17 @@ _SINA_HEADERS = {"User-Agent": "Mozilla/5.0",
 _SINA_SESSION_END_MIN = 15 * 60
 _SINA_TO_EM = {"code": "f12", "name": "f14", "open": "f17", "high": "f15",
                "low": "f16", "trade": "f2", "settlement": "f18",
-               "volume": "f5", "amount": "f6", "turnoverratio": "f8"}
+               "volume": "f5", "amount": "f6", "turnoverratio": "f8",
+               "mktcap": "f20", "nmc": "f21"}
+#: 新浪 → EM 的**单位**换算（EM 侧一律为 1）。这张表必须和 `_SINA_TO_EM` 成对看：
+#: 只加映射不改这里＝静默的量纲错误——数字都在，只是差 100 / 10000 倍，不报错。
+#: 2026-10-12 实测（新浪 hs_a 剔北交所 5223 条，mktcap 缺失 0 条）：600519
+#: mktcap=161010510.2088 万元 ÷ trade=1288.0 → 12.50 亿股（公开 12.56 亿）；
+#: 000001 mktcap=22763142.046254 万元 ÷ 11.73 → 194.06 亿股（公开 194.06 亿，
+#: 精确吻合）。故新浪市值单位确定为**万元**。
+_SINA_UNIT_SCALE = {"f5": 1 / 100.0,      # 股 → 手
+                    "f20": 10000.0,       # 万元 → 元（总市值）
+                    "f21": 10000.0}       # 万元 → 元（流通市值）
 
 
 
@@ -126,11 +136,13 @@ def _sina_clist(fields: list[str], page: int = 100,
     剔除 bj* 后 5221 条，与 EM _EM_FS_ALL_A（深主板+创业板+沪主板+科创板，
     本就不含北交所）的 total 完全一致——故此处过滤 bj*，不改变原股票池口径。
 
-    单位对齐（这是本回退最容易踩的坑）：新浪 volume 单位是「股」，EM f5 是
-    「手」——必须 /100，否则全市场成交量静默放大 100 倍，不报错、只是数字错。
-    三方实测 600519.SH 2026-09-23：新浪 3098122 股 = 腾讯 30981 手 =
-    Wind 3098122（Wind 元数据 unit=股）。新浪 amount 单位是「元」，与 EM f6
-    一致，不换算。
+    单位对齐（这是本回退最容易踩的坑，全部集中在 `_SINA_UNIT_SCALE`）：新浪
+    volume 单位是「股」，EM f5 是「手」——必须 /100，否则全市场成交量静默放大
+    100 倍，不报错、只是数字错；新浪 mktcap/nmc 单位是「万元」，EM f20/f21
+    （总市值 / 流通市值）是「元」——必须 ×10000，否则市值静默缩小一万倍，同样是
+    「不报错、只是数字错」。三方实测 600519.SH 2026-09-23：新浪 3098122 股 =
+    腾讯 30981 手 = Wind 3098122（Wind 元数据 unit=股）。新浪 amount 单位是
+    「元」，与 EM f6 一致，不换算。
     """
     want = [f for f in fields if f in _SINA_TO_EM.values()]
     src = {v: k for k, v in _SINA_TO_EM.items()}
@@ -145,11 +157,13 @@ def _sina_clist(fields: list[str], page: int = 100,
             if str(r.get("symbol") or "").startswith("bj"):
                 continue                      # 北交所不在原股票池口径内
             item = {f: r.get(src[f]) for f in want}
-            if item.get("f5") is not None:
+            for f, scale in _SINA_UNIT_SCALE.items():
+                if item.get(f) is None:
+                    continue
                 try:
-                    item["f5"] = float(item["f5"]) / 100.0     # 股 → 手
+                    item[f] = float(item[f]) * scale
                 except (TypeError, ValueError):
-                    item["f5"] = None
+                    item[f] = None
             out.append(item)
         if len(rows) < page or pn >= max_pages:
             if pn >= max_pages:

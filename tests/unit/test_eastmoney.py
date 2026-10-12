@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from emotion_core.data.providers import eastmoney
@@ -140,3 +141,58 @@ class TestEastmoneyProvider:
         monkeypatch.setattr(eastmoney, "em_data_date", lambda: date(2026, 9, 24))
         result = provider.fetch_daily_bars("000001", date(2026, 9, 25), date(2026, 9, 25))
         assert len(result) == 0
+
+
+class TestSinaClistUnits:
+    """新浪回退源的**量纲**换算（`_SINA_UNIT_SCALE`）。
+
+    这类错误不抛异常：数字都在，只是差 100 / 10000 倍。故每条口径都钉一个由
+    公开数据独立可验的等式（成交量三方对齐、市值 ÷ 价格反推股本）。
+    """
+
+    FIELDS = ["f12", "f2", "f5", "f6", "f20", "f21"]
+
+    def _one(self, monkeypatch, row: dict) -> dict:
+        monkeypatch.setattr(eastmoney, "retry_fetch", lambda *a, **k: [row])
+        return eastmoney._sina_clist(self.FIELDS).iloc[0].to_dict()
+
+    def test_volume_shares_to_lots_and_cap_wan_to_yuan(self, monkeypatch):
+        r = self._one(monkeypatch, {
+            "symbol": "sh600519", "code": "600519", "name": "贵州茅台", "trade": 1288.0,
+            "volume": "3098122", "amount": "570000000",
+            "mktcap": "161010510.2088", "nmc": "161010510.2088"})
+        assert r["f5"] == pytest.approx(30981.22)             # 股 → 手（3098122 = 30981 手）
+        assert r["f6"] == "570000000"                         # 元，不换算（原值透传）
+        assert r["f20"] == pytest.approx(1.610105102088e12)   # 万元 → 元
+        assert r["f21"] == pytest.approx(1.610105102088e12)
+
+    def test_cap_divides_back_to_public_share_count(self, monkeypatch):
+        """独立校验量纲：f20 ÷ f2 必须落在公开总股本量级（平安银行 194.06 亿股）。"""
+        r = self._one(monkeypatch, {
+            "symbol": "sz000001", "code": "000001", "name": "平安银行", "trade": 11.73,
+            "volume": "1", "amount": "1",
+            "mktcap": "22763142.046254", "nmc": "1821378.97"})
+        assert r["f20"] / r["f2"] == pytest.approx(1.9406e10, rel=1e-3)
+        assert r["f21"] / r["f2"] == pytest.approx(1.5529e9, rel=1e-3)   # 流通 ≈15.5 亿股
+
+    def test_missing_or_unparseable_values_become_none(self, monkeypatch):
+        r = self._one(monkeypatch, {
+            "symbol": "sh600519", "code": "600519", "name": "贵州茅台", "trade": 1288.0,
+            "volume": None, "amount": None, "mktcap": None, "nmc": "不是数"})
+        assert pd.isna(r["f5"]) and pd.isna(r["f21"])
+        assert pd.isna(r["f6"]) and pd.isna(r["f20"])
+
+    def test_bj_rows_filtered_out(self, monkeypatch):
+        monkeypatch.setattr(eastmoney, "retry_fetch", lambda *a, **k: [
+            {"symbol": "bj430047", "code": "430047", "trade": 10.0},
+            {"symbol": "sh600519", "code": "600519", "trade": 1288.0}])
+        assert eastmoney._sina_clist(self.FIELDS)["f12"].tolist() == ["600519"]
+
+    def test_unrequested_fields_stay_out_of_frame(self, monkeypatch):
+        """want 由调用方 fields 过滤 → 不加 f20/f21 的调用方（如 spot 快照）不受影响。"""
+        monkeypatch.setattr(eastmoney, "retry_fetch", lambda *a, **k: [
+            {"symbol": "sh600519", "code": "600519", "trade": 1288.0,
+             "volume": "100", "mktcap": "1"}])
+        df = eastmoney._sina_clist(["f12", "f2"])
+        assert set(df.columns) == {"f12", "f2"}
+        assert df.iloc[0]["f12"] == "600519"

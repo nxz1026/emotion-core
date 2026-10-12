@@ -212,6 +212,9 @@ PYTHONPATH=src .venv/bin/python -m emotion_core.services.replay_service --start 
 
 # 行业回填（运维入口；--only-missing 只补空值，抓一批写一批、可中断续跑）
 PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_industry --source cninfo --only-missing
+
+# 基础信息回填（运维入口；一次调用拿全市场 code/name/industry/market_cap/float_shares）
+PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_stock_basic
 ```
 
 ---
