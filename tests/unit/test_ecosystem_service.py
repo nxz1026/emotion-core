@@ -1,9 +1,9 @@
 """生态评级服务（services.ecosystem_service）：run 封装，不连库。"""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
-from types import SimpleNamespace
 
 from emotion_core.services import ecosystem_service
 
@@ -25,53 +25,57 @@ class TestUpdateMarketStatEcosystem:
 
 
 class TestRun:
-    def test_calls_rate_and_writes_to_db(self, monkeypatch):
+    def test_writes_rating_reasons_and_risks(self, monkeypatch):
+        """回归：原实现只写 dragon_env，把 rate() 的 goods/bads 丢掉，
+        dragon_env_reasons / dragon_env_risks 恒为 NULL。"""
         captured: dict = {}
 
         monkeypatch.setattr(ecosystem_service.accelerate, "detect",
                             lambda d: (True, "加速", 0.5))
         monkeypatch.setattr(ecosystem_service.dragon_env, "rate",
                             lambda d, a: {"rating": "FAVORABLE",
-                                         "goods": [], "bads": []})
+                                          "goods": [("G1 可交易高度扩张", True, "说明")],
+                                          "bads": [("B1 无量", False, "无成交")]})
 
-        class FakeConn:
-            def __init__(self):
-                self.calls = []
+        def fake_update(d, rating, reasons, risks):
+            captured.update(date=d, rating=rating, reasons=reasons, risks=risks)
+            return 1
 
-            def execute(self, sql, params):
-                self.calls.append((sql, params))
-
-        fake_conn = FakeConn()
-
-        class FakeTransaction:
-            def __enter__(self):
-                return fake_conn
-
-            def __exit__(self, *a):
-                pass
-
-        monkeypatch.setattr(ecosystem_service, "transaction",
-                            lambda: FakeTransaction())
+        monkeypatch.setattr(ecosystem_service, "_update_market_stat_ecosystem", fake_update)
         rating = ecosystem_service.run(date(2026, 9, 25))
         assert rating == "FAVORABLE"
-        assert any("UPDATE market_stat" in sql for sql, _ in fake_conn.calls)
-        assert any("FAVORABLE" in params for _, params in fake_conn.calls)
+        assert captured["date"] == date(2026, 9, 25)
+        assert captured["rating"] == "FAVORABLE"
+        assert json.loads(captured["reasons"]) == [
+            {"cond": "G1 可交易高度扩张", "ok": True, "note": "说明"}]
+        assert json.loads(captured["risks"]) == [
+            {"cond": "B1 无量", "ok": False, "note": "无成交"}]
+
+    def test_missing_goods_bads_does_not_raise(self, monkeypatch):
+        """rate() 只回 rating（缺 goods/bads）时照样落库，不 KeyError。"""
+        captured: dict = {}
+
+        monkeypatch.setattr(ecosystem_service.accelerate, "detect", lambda d: None)
+        monkeypatch.setattr(ecosystem_service.dragon_env, "rate",
+                            lambda d, a: {"rating": "UNFAVORABLE"})
+
+        def fake_update(d, rating, reasons, risks):
+            captured.update(rating=rating, reasons=reasons, risks=risks)
+            return 1
+
+        monkeypatch.setattr(ecosystem_service, "_update_market_stat_ecosystem", fake_update)
+        assert ecosystem_service.run(date(2026, 9, 25)) == "UNFAVORABLE"
+        assert json.loads(captured["reasons"]) == []
+        assert json.loads(captured["risks"]) == []
 
     def test_logs_result(self, monkeypatch, caplog):
         monkeypatch.setattr(ecosystem_service.accelerate, "detect",
                             lambda d: None)
         monkeypatch.setattr(ecosystem_service.dragon_env, "rate",
                             lambda d, a: {"rating": "UNFAVORABLE"})
+        monkeypatch.setattr(ecosystem_service, "_update_market_stat_ecosystem",
+                            lambda *a: 1)
 
-        class FakeTransaction:
-            def __enter__(self):
-                return SimpleNamespace(execute=lambda *a: None)
-
-            def __exit__(self, *a):
-                pass
-
-        monkeypatch.setattr(ecosystem_service, "transaction",
-                            lambda: FakeTransaction())
         with caplog.at_level(logging.INFO, logger="emotion_core.ecosystem_service"):
             ecosystem_service.run(date(2026, 9, 25))
         assert any("UNFAVORABLE" in r.getMessage() for r in caplog.records)

@@ -209,6 +209,9 @@ EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
 
 # 历史信号回填（运维入口；--dry-run 只预览区间与交易日数、不写库）
 PYTHONPATH=src .venv/bin/python -m emotion_core.services.replay_service --start 2024-01-01 --end 2026-09-30
+
+# 行业回填（运维入口；--only-missing 只补空值，抓一批写一批、可中断续跑）
+PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_industry --source cninfo --only-missing
 ```
 
 ---
@@ -239,7 +242,7 @@ emotion-core/
 ├── src/emotion_core/
 │   ├── core/          Rust 算法核心（.so）
 │   ├── algorithms/    Python 算法外壳（PyO3）+ 个股判定
-│   ├── data/          数据层（DB + 同步 + 清理 + 独立交易日历）
+│   ├── data/          数据层（DB + 同步 + 回填 + 清理 + 独立交易日历）
 │   ├── orchestration/ 编排层（daily.py 13 步 + systemd）
 │   ├── presentation/  展示层（直观/逻辑/算法/策略/个股 5 页 + 4 个 JSON 接口）
 │   ├── services/      服务层（覆盖率门槛/校准/LLM/个股诊断/历史信号回填 CLI）
