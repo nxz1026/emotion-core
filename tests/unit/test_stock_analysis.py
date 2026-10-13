@@ -81,6 +81,22 @@ def test_attach_volume_ratio_per_bar():
     assert series[-1].get("vol_ratio5") is None  # 不改原对象
 
 
+def test_attach_volume_ratio_zero_volume_is_none():
+    """停牌/一字板 volume=0：前 window 日均量为 0 时量比无定义 → None。
+
+    回归：2026-10-13 实测 `GET /api/stock?code=000016`（*ST康佳A，停牌）在
+    `attach_volume_ratio` 抛 `ZeroDivisionError`，被 `http.server` 吞成**空回复**。
+    """
+    flat_zero = sa.attach_volume_ratio(_series([10.0] * 6, vols=[0.0] * 6))
+    assert [r["vol_ratio5"] for r in flat_zero] == [None] * 6
+    # 前 5 根全 0、第 6 根放巨量：分母仍是 0，不能算出 inf
+    mixed = sa.attach_volume_ratio(_series([10.0] * 6, vols=[0.0] * 5 + [900.0]))
+    assert mixed[-1]["vol_ratio5"] is None
+    # 分母恢复正数后照常计算，证明不是把整列打死
+    ok = sa.attach_volume_ratio(_series([10.0] * 6, vols=[100.0] * 5 + [250.0]))
+    assert ok[-1]["vol_ratio5"] == 2.5
+
+
 def test_verdict_st_and_limit_down_are_hard_veto():
     assert sa.verdict(dict(BASIC, is_st=True), sa.trend_metrics(_series([10.0] * 5)),
                       {}, ENV_OK, None, None, None, BASIC["first_bar_date"], D)["stance"] == sa.STANCE_AVOID

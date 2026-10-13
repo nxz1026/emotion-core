@@ -213,6 +213,13 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 - 其中 3 只（`001381` / `301569` / `301718`）尚无上市日期：已实测确认不在深交所 `A股列表`（该列表最大 3017xx 为 `301717`）⇒ 属「已发行未上市」，为预期空值，后续每日 `basic` 步自动补齐。
 - **新发现（未修，待拍板）**：`stock_basic.is_st` 全表 **0/5228** 为真，而名称带 `ST`/`*ST` 前缀的有 **198** 只；该列会进个股诊断 LLM prompt（`llm/prompts/stock.md:11`）。免费修法是在 `fill_stock_basic` 用名称前缀落 `is_st`（零 Wind 额度）。
 
+### 修复 · 2026-10-13 `stock_basic.is_st` 落地（198/5228）+ 停牌股诊断崩溃
+
+- **`stock_basic.is_st` 全表为 false** —— 简称带 `ST`/`*ST` 的 **198** 只全被写成 false。该列是 `ref_security_status`（T7，ST SCD2）的**入口过滤**（`SELECT code FROM stock_basic WHERE is_st = true`），全 false ⇒ Wind 的 ST 事件回填**永远取不到任何 code**。改为在 `fill_stock_basic` 从简称前缀落 `is_st`（先剥 `XD`/`XR`/`DR`，除权日简称是 `XD*STxx`），**零 Wind 额度**；PIT（历史 ST）语义仍由 `ref_security_status` 的 SCD2 承担，本次不动。
+- **修停牌股个股诊断崩溃**：`GET /api/stock?code=000016`（*ST康佳A，停牌）返回 **Empty reply from server** —— `algorithms/stock.py:110 attach_volume_ratio` 在「前 5 根成交量全 0」时 `ZeroDivisionError`，被 `http.server` 吞成空回复；任何停牌股都会中招。均量为 0 时量比返回 `None`，并补回归测试。
+- ⚠️ **待拍板**：`is_st` 转真会**打开** `derive.py:88` 的 `WHERE NOT s.is_st`（该谓词历史上从未生效）⇒ `derived_bar` 自 2026-10-13 起不再收录 ST 股，与 2024-01-02 ~ 10-12 的历史形成**断点**（当日影响约 198 行、其中涨停约 2 行）。不能用今天的 `is_st` 回扫历史：`derive` 阈值是板块口径（无 ST 的 5% 分支），库里 2465 行 ST 涨停其实是**该股变 ST 之前**的真实涨停。三个选项见 `docs/15-实施追踪.md` 同名小节。
+
+
 ---
 
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）

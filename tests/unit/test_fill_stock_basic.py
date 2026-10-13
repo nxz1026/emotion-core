@@ -8,6 +8,10 @@ UndefinedColumn。现在列已补，数据源取 EM clist 的 f100（行业名�
 缺列时必须 NULL → 由 upsert 的 COALESCE 保留库内旧值，**不能用 None 覆写已有事实**；
 f20/f21 自 2026-10-12 起已收录（provider 侧 `_SINA_UNIT_SCALE` 做万元→元），
 所以本机 EM 持续 502 时回退源下市值/流通股本照样有值。
+
+`is_st`（2026-10-13 接入）走**简称前缀** `ST`/`*ST`，先剥 `XD`/`XR`/`DR` 除权标记：
+东财 clist 不给风险警示标志，而 `ref_security_status.populate_is_st_from_wind()`
+要逐股烧 Wind 配额。该列进个股诊断 LLM prompt，此前全表 false（198 只漏标）。
 """
 from __future__ import annotations
 
@@ -41,10 +45,11 @@ def test_rows_from_sina_frame_without_industry_column():
                          "f20": 1.6101051e12, "f21": 1.6101051e12}])
     rows = fsb._rows_from_frame(raw)
     assert len(rows) == 1
-    code, name, industry, cap, shares = rows[0]
+    code, name, industry, cap, shares, is_st = rows[0]
     assert (code, name, industry) == ("600519", "贵州茅台", None)
     assert cap == pytest.approx(1.6101051e12)
     assert shares == pytest.approx(1.6101051e12 / 1288.0)     # ≈12.50 亿股
+    assert is_st is False
 
 
 def test_float_shares_absent_when_column_missing():
@@ -114,20 +119,24 @@ class _Rec:
 def test_upsert_sql_keeps_old_values_on_missing_fields(monkeypatch):
     rec = _Rec()
     monkeypatch.setattr(fsb, "transaction", lambda: rec)
-    assert fsb.upsert_stock_basic([("600519", "贵州茅台", "酿酒行业", 1.9e12, 1.25e9),
-                                   ("000001", "平安银行", None, None, None)]) == 2
+    assert fsb.upsert_stock_basic([("600519", "贵州茅台", "酿酒行业", 1.9e12, 1.25e9, True),
+                                   ("000001", "平安银行", None, None, None, False)]) == 2
 
     sql = rec.statements[0].as_string(None)          # 整条语句渲染出来读（铁律）
     assert ("INSERT INTO stock_basic (code, name, market, industry, market_cap,"
-            " float_shares, in_market)") in sql
+            " float_shares, is_st, in_market)") in sql
     assert "'酿酒行业'" in sql and "1900000000000" in sql and "1250000000" in sql
     assert "COALESCE(EXCLUDED.industry, stock_basic.industry)" in sql
     assert "COALESCE(EXCLUDED.market_cap, stock_basic.market_cap)" in sql
     assert "COALESCE(EXCLUDED.float_shares, stock_basic.float_shares)" in sql
+    # is_st 由名称前缀推导、每次抓取都是权威值 → **不能**用 COALESCE 保旧值
+    assert "is_st=EXCLUDED.is_st" in sql
     assert "in_market=true" in sql
     assert "updated_at=now()" in sql
-    # 缺失字段渲染成 NULL（不是 'None'），且每行都带 in_market=true
-    assert sql.count("true)") == 2
+    # 缺失字段渲染成 NULL（不是 'None'）；每行都带 in_market=true
+    assert ", true)" in sql and sql.count(", true)") == 2
+    # is_st 的布尔渲染成 true/false，不能漏出 Python 的 'True'/'False'
+    assert "false" in sql and "True" not in sql and "False" not in sql
     assert "NULL" in sql
 
 
@@ -211,9 +220,29 @@ def test_float_shares_rejects_non_positive_cap():
     assert fsb._rows_from_frame(raw)[0][4] is None
 
 
+@pytest.mark.parametrize(("name", "expected"), [
+    ("贵州茅台", False), ("平安银行", False), ("N粤芯-U", False), ("C信诺维", False),
+    ("九号公司-WD", False), ("ST海王", True), ("*ST美丽", True), ("XD*ST康佳A", True),
+    ("DRST晨鸣", True), ("SST前锋", True), ("S*ST石化", True), ("＊ST全角", True),
+    ("ST", True), ("", False), ("S佳通", False),
+])
+def test_is_st_from_name_prefix(name, expected):
+    """is_st 走简称前缀（零 Wind 额度）；除权标记要先剥，否则 `XD*STxx` 当天漏判。"""
+    assert fsb._is_st_name(name) is expected
+
+
+def test_rows_carry_is_st_flag():
+    raw = pd.DataFrame([
+        {"f12": "000078", "f14": "ST海王", "f2": 3.0, "f100": "医药商业"},
+        {"f12": "600519", "f14": "贵州茅台", "f2": 1288.0, "f100": "酿酒行业"},
+        {"f12": "000016", "f14": "XD*ST康佳A", "f2": 2.5, "f100": "白色家电"},
+    ])
+    assert [r[5] for r in fsb._rows_from_frame(raw)] == [True, False, True]
+
+
 def test_main_dry_run_never_writes(monkeypatch, capsys):
     monkeypatch.setattr(fsb, "fetch_clist",
-                        lambda: [("600519", "贵州茅台", "酿酒行业", 1.0, 2.0)])
+                        lambda: [("600519", "贵州茅台", "酿酒行业", 1.0, 2.0, False)])
     monkeypatch.setattr(fsb, "upsert_stock_basic",
                         lambda rows: pytest.fail("--dry-run 不该写库"))
     assert fsb.main(["--dry-run"]) == 0
@@ -223,7 +252,7 @@ def test_main_dry_run_never_writes(monkeypatch, capsys):
 def test_main_writes_by_default(monkeypatch):
     seen: dict[str, int] = {}
     monkeypatch.setattr(fsb, "fetch_clist",
-                        lambda: [("600519", "贵州茅台", "酿酒行业", 1.0, 2.0)])
+                        lambda: [("600519", "贵州茅台", "酿酒行业", 1.0, 2.0, False)])
     monkeypatch.setattr(fsb, "upsert_stock_basic",
                         lambda rows: seen.setdefault("n", len(rows)))
     assert fsb.main([]) == 1

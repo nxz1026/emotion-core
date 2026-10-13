@@ -101,24 +101,35 @@ def _f(v: Any) -> float | None:
 
 
 def attach_volume_ratio(series: list[dict], window: int = 5) -> list[dict]:
-    """给每根 bar 补"相对前 window 日均量"的量比（展示用；纯计算、不改库）。"""
+    """给每根 bar 补"相对前 window 日均量"的量比（展示用；纯计算、不改库）。
+
+    分母为 0 是**真实场景**：停牌日与一字板的 `volume` 就是 0，连续 5 根全 0 时
+    `sum(prev) == 0`；2026-10-13 实测 `GET /api/stock?code=000016`（*ST康佳A，停牌）
+    因此抛 `ZeroDivisionError` 并被 `http.server` 吞成**空回复**。均量为 0 时量比无定义
+    → None，不抛。
+    """
     vols = [r.get("volume") for r in series]
     out: list[dict] = []
     for i, row in enumerate(series):
         prev = [float(v) for v in vols[max(0, i - window):i] if _ok(v)]
+        avg = sum(prev) / len(prev) if prev else 0.0
         item = dict(row)
-        item["vol_ratio5"] = (round(float(vols[i]) / (sum(prev) / len(prev)), 2)
-                              if prev and _ok(vols[i]) else None)
+        item["vol_ratio5"] = (round(float(vols[i]) / avg, 2)
+                              if avg > 0 and _ok(vols[i]) else None)
         out.append(item)
     return out
 
 
 def is_st_name(name: str | None) -> bool:
-    """名称兜底的 ST 判定。
+    """名称兜底的 ST 判定（**标的名**口径，不剥 `XD`/`XR`/`DR`）。
 
-    实测（2026-09-28 真库）：`stock_basic.is_st` **5221 行全为 false**，而名字带
-    ST/*ST 的有 201 只 —— 该标志位来自 EM clist（本机 502，从未填充）。本体系把
-    ST 排除在标的池外，所以这里以名称为准（标志位为真也认）。
+    历史：2026-09-28 实测 `stock_basic.is_st` 5221 行全为 false，而名字带 ST/*ST 的
+    有 201 只 —— 该标志位来自 EM clist（本机 502，从未填充）。本体系把 ST 排除在
+    标的池外，所以这里以名称为准（标志位为真也认）。
+
+    2026-10-13 起标志位已由 `data/fill_stock_basic._is_st_name` 从简称前缀补齐
+    （198/5228，与名称逐只吻合），`is_st()` 的两条路现在一致；这里的名称路径保留作
+    **交叉校验**，也兜住 `is_st` 尚未回填的新股。
     """
     return (name or "").strip().upper().startswith(("ST", "*ST"))
 

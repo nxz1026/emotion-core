@@ -19,6 +19,11 @@ stock_basic 既无列也无数据源。现补列并在入库时写入：
   不受影响，因为 f21 只含 A 股流通市值。
 - ``float_shares`` ← f21 流通市值（元）÷ 价格，本地反推（零额外请求）。价格取
   f2 收盘价；停牌股 f2 = 0，退到 f18 昨收。
+- ``is_st`` ← **名称前缀**（`ST` / `*ST`，先剥掉 `XD` / `XR` / `DR` 除权标记）。
+  东财 clist 不直接给风险警示标志，而设计上的填充口
+  `ref_security_status.populate_is_st_from_wind()` 是**逐股烧 Wind 配额**的路径；
+  简称前缀是同一事实的免费来源。2026-10-13 前该列全表 false（198 只 `ST`/`*ST`
+  股一个没标），而它会被喂进个股诊断的 LLM prompt（`llm/prompts/stock.md:11`
 
 f20/f21 是 2026-10-12 才接入 `_SINA_TO_EM` 的（配 `_SINA_UNIT_SCALE` 做
 万元→元换算）。此前它们在回退源下缺列，而 upsert 又是 COALESCE 不覆写，于是
@@ -54,8 +59,8 @@ log = logging.getLogger("emotion_core.data.fill_stock_basic")
 # f20=总市值(元) f21=流通市值(元，仅用于反推 float_shares)
 EM_FIELDS = ["f12", "f14", "f2", "f18", "f100", "f20", "f21"]
 
-#: (code, name, industry, market_cap, float_shares)
-Row = tuple[str, str, str | None, float | None, float | None]
+#: (code, name, industry, market_cap, float_shares, is_st)
+Row = tuple[str, str, str | None, float | None, float | None, bool]
 
 
 def _as_float(v: Any) -> float | None:
@@ -90,6 +95,29 @@ def _as_text(v: Any) -> str | None:
     except (TypeError, ValueError):
         return None
     return str(v).strip() or None
+
+
+#: 行情口径的除权除息标记，会**叠在** `ST` 前面（`XD*STxx`），判断前必须剥掉。
+_ST_EX_PREFIXES = ("XD", "XR", "DR")
+#: 风险警示标记。`SST` / `S*ST` 是「未股改 + ST」的老写法（已近乎绝迹，留着不亏）；
+#: 全角 `＊` 一并认，免得哪天东财换了写法就静默漏判。
+_ST_MARKERS = ("ST", "*ST", "SST", "S*ST", "＊ST")
+
+
+def _is_st_name(name: str) -> bool:
+    """简称是否带风险警示标记（零额度，不用 Wind）。
+
+    实测 198/5228 命中，与 `stock_basic` 里的 `ST`/`*ST` 名单逐只吻合、零歧义。
+    """
+    s = name
+    for _ in range(2):                       # 最多两层除权标记
+        for d in _ST_EX_PREFIXES:
+            if s.startswith(d):
+                s = s[len(d):]
+                break
+        else:
+            break
+    return s.startswith(_ST_MARKERS)
 
 
 def _float_shares_from(rec: dict, cols: set[str]) -> float | None:
@@ -155,7 +183,7 @@ def _rows_from_frame(raw: pd.DataFrame) -> list[Row]:
             continue
         market_cap = _as_float(rec.get("f20")) if "f20" in cols else None
         rows.append((code, name, industry, market_cap,
-                     _float_shares_from(rec, cols)))
+                     _float_shares_from(rec, cols), _is_st_name(name)))
     if dropped:
         log.info("过滤已退市证券 %d 只（f100='-'），保留 %d 只在市", dropped, len(rows))
     return rows
@@ -174,7 +202,7 @@ def _market(code: str) -> str:
 
 
 def upsert_stock_basic(rows: list[Row]) -> int:
-    """幂等 upsert stock_basic（code/name/market/industry/market_cap/float_shares/in_market）。"""
+    """幂等 upsert stock_basic（code/name/market/industry/market_cap/float_shares/is_st）。"""
     if not rows:
         return 0
     from psycopg import sql
@@ -185,19 +213,21 @@ def upsert_stock_basic(rows: list[Row]) -> int:
     with transaction() as conn:
         with conn.cursor() as cur:
             values = sql.SQL(", ").join(
-                sql.SQL("({}, {}, {}, {}, {}, {}, true)").format(
+                sql.SQL("({}, {}, {}, {}, {}, {}, {}, true)").format(
                     _lit(code), _lit(name), _lit(_market(code)),
-                    _lit(industry), _lit(market_cap), _lit(float_shares))
-                for code, name, industry, market_cap, float_shares in rows
+                    _lit(industry), _lit(market_cap), _lit(float_shares),
+                    _lit(is_st))
+                for code, name, industry, market_cap, float_shares, is_st in rows
             )
             query = sql.SQL(
                 "INSERT INTO stock_basic (code, name, market, industry,"
-                " market_cap, float_shares, in_market) VALUES {} "
+                " market_cap, float_shares, is_st, in_market) VALUES {} "
                 "ON CONFLICT (code) DO UPDATE SET "
                 "name=EXCLUDED.name, market=EXCLUDED.market,"
                 " industry=COALESCE(EXCLUDED.industry, stock_basic.industry),"
                 " market_cap=COALESCE(EXCLUDED.market_cap, stock_basic.market_cap),"
                 " float_shares=COALESCE(EXCLUDED.float_shares, stock_basic.float_shares),"
+                " is_st=EXCLUDED.is_st,"
                 " in_market=true, updated_at=now()"
             ).format(values)
             cur.execute(query)
