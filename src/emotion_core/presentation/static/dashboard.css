@@ -534,3 +534,50 @@ pre code {
 .cal-jump { display: flex; align-items: center; gap: 4px; }
 .cal-jump input { padding: 2px 6px; border: 1px solid var(--border-color);
   border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); font-size: 12px; }
+
+/* ── 持仓决策卡片 R3（docs/17 §9）────────────── */
+.holding-form {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 10px;
+}
+.holding-form label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.holding-form input[type="number"] {
+  width: 130px; padding: 6px 8px; font-size: 14px;
+  border: 1px solid var(--border-color); border-radius: 6px;
+  background: var(--bg-primary); color: var(--text-primary);
+}
+.holding-form button {
+  padding: 7px 18px; font-size: 14px; cursor: pointer;
+  border: 1px solid var(--border-color); border-radius: 6px;
+  background: var(--accent-primary); color: #fff;
+}
+.holding-remember {
+  flex-direction: row; align-items: center; gap: 6px; font-size: 12px;
+}
+.holding-empty { color: var(--text-secondary); font-size: 14px; }
+.holding-head { display: flex; align-items: baseline; gap: 12px; margin: 14px 0 4px; }
+.holding-action { font-size: 20px; font-weight: 600; }
+.holding-add { color: var(--danger); }
+.holding-trim, .holding-exit { color: var(--success); }
+.holding-hold { color: var(--text-secondary); }
+.holding-tag {
+  margin-left: 6px; padding: 1px 6px; border-radius: 4px;
+  background: var(--warning); color: #000; font-size: 11px;
+}
+.holding-ladder { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.holding-ladder-row {
+  display: flex; gap: 14px; align-items: baseline;
+  background: var(--bg-tertiary); border-radius: 6px; padding: 8px 12px; font-size: 14px;
+}
+.holding-ladder-row .side {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+}
+.holding-ladder-row.buy .side { color: var(--danger); }
+.holding-ladder-row.sell .side { color: var(--success); }
+.holding-card details { margin-top: 14px; }
+.holding-card details summary {
+  cursor: pointer; color: var(--text-secondary); font-size: 14px;
+}
+.holding-card details[open] summary { margin-bottom: 8px; }

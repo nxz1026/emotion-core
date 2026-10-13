@@ -42,12 +42,16 @@
                 {% endif %}
             </div>
             <div class="snapshot-nav">
-                <a class="btn-link {% if not banner.prev %}disabled{% endif %}"
-                   href="{{ request_path }}?date={{ banner.prev }}"
-                   {% if not banner.prev %}aria-disabled="true" tabindex="-1"{% endif %}>‹ 上一交易日</a>
-                <a class="btn-link {% if not banner.next %}disabled{% endif %}"
-                   href="{{ request_path }}?date={{ banner.next }}"
-                   {% if not banner.next %}aria-disabled="true" tabindex="-1"{% endif %}>下一交易日 ›</a>
+                {% if banner.prev %}
+                <a class="btn-link" href="{{ request_path }}?date={{ banner.prev }}">‹ 上一交易日</a>
+                {% else %}
+                <span class="btn-link disabled" aria-disabled="true">‹ 上一交易日</span>
+                {% endif %}
+                {% if banner.next %}
+                <a class="btn-link" href="{{ request_path }}?date={{ banner.next }}">下一交易日 ›</a>
+                {% else %}
+                <span class="btn-link disabled" aria-disabled="true">下一交易日 ›</span>
+                {% endif %}
                 <span class="muted">共 {{ dates_total }} 个快照日</span>
             </div>
         </div>

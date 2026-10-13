@@ -152,10 +152,16 @@
   }
 
   function renderHolding(d) {
-    if (!d || !d.ok) {
+    // 除 `!d.ok` 外还要校验载荷形状：未识别的 `/api/*` 会被服务端兜底成
+    // status 载荷（`{ok:true,date,phase,…}`，见 server.py 的 /api/ 兜底分支），
+    // 只判 ok 会把动作与价格渲染成字面量 `undefined`。
+    if (!d || !d.ok || !d.action) {
       // 失败/不可用：只报原因，不清空上一次结果（docs/17 §9.1）
       $("holding-hint").textContent =
-        "无法计算：" + ((d && d.error) || "未知原因（保留上次结果）");
+        "无法计算：" + ((d && d.error) ||
+          (d && d.ok
+            ? "服务端未返回持仓决策（面板进程可能早于后端代码，需重启服务）"
+            : "未知原因（保留上次结果）"));
       return;
     }
     $("holding-hint").textContent = "";
