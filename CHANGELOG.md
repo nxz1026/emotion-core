@@ -232,6 +232,12 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 
 - `data/providers/exchange_list.py` 的 `_fetch_one()` 由「只有 `retry_fetch` + 空帧检查」改为 **daemon 线程 + `t.join(_FETCH_TIMEOUT=20.0)`**，超时抛 `FetchError`，`fetch_list_date_map()` 按既有口径 warning 跳过该市场。
 - 起因：2026-10-13 akshare 上交所 `stock_info_sh_name_code` 那条读挂住（无超时），daily 流水线自 `09:23` 卡到 `18:00+`，当日 `derive` / `market` / `ladder` / `signal` / `promotion` / `theme` / `strategy` / `outcome` / `health` 全未执行。
+### 修复 · 2026-10-13 `derive` 步对停牌股 NaN 列容错（曾让当日其余 9 步全不跑）
+
+- `services/derive_service.py` 的 `_load_bars` 原写 `int(r.volume) if r.volume else 0` —— **NaN 是真值**，该写法挡不住：`688496`（*ST清越，停牌）在 2026-10-13 的 `daily_bar` 行 open/high/low/volume/amount 全为 NULL（pandas 读成 NaN），`int(nan)` 抛 `ValueError: cannot convert float NaN to integer`，derive 步失败、当日 `market`/`ladder`/`signal`/`promotion`/`theme`/`ecosystem`/`strategy`/`outcome`/`health` 全没跑。
+- 新增 `_to_int()` / `_to_float()` 两个容错转换（None / NaN / 不可解析 → 0 / 0.0），替换 `volume` 与 `turnover_rate` 两处；补 6 个单测（含「停牌股全空列」回归）。
+- 补跑 `--date 2026-10-13 --from-step derive` → 14 步全 OK，`derived_bar` / `market_stat` 到达 2026-10-13。
+
 ---
 
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）

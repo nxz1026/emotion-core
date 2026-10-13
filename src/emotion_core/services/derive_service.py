@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from decimal import Decimal
 
 from emotion_core.algorithms import indicators
 from emotion_core.domain.bar import Bar
@@ -23,6 +22,30 @@ def _to_cents(v) -> int:
     if f != f:  # NaN check
         return 0
     return int(round(f * 100))
+
+
+def _to_int(v) -> int:
+    """None / NaN / 不可解析 → 0。
+
+    回归：2026-10-13 `688496`（*ST清越，停牌）的 `daily_bar` 行 open/high/low/
+    volume/amount 全为 NULL（pandas 读成 NaN），`int(nan)` 抛
+    `ValueError: cannot convert float NaN to integer` —— derive 步失败，当日其余
+    9 步全没跑。注意 **NaN 是真值**，`int(r.volume) if r.volume else 0` 挡不住。
+    """
+    if v is None:
+        return 0
+    f = float(v)
+    if f != f:  # NaN
+        return 0
+    return int(f)
+
+
+def _to_float(v) -> float:
+    """None / NaN / 不可解析 → 0.0（`v is not None` 同样挡不住 NaN）。"""
+    if v is None:
+        return 0.0
+    f = float(v)
+    return 0.0 if f != f else f
 
 
 def _load_bars(trade_date: date) -> list[Bar]:
@@ -54,8 +77,8 @@ def _load_bars(trade_date: date) -> list[Bar]:
             low_cents=_to_cents(r.low),
             close_cents=_to_cents(r.close),
             pre_close_cents=_to_cents(r.pre_close),
-            volume=int(r.volume) if r.volume else 0,
-            turnover_rate=float(r.turnover_rate) if r.turnover_rate is not None else 0.0,
+            volume=_to_int(r.volume),
+            turnover_rate=_to_float(r.turnover_rate),
         )
         for r in df.itertuples()
     ]
