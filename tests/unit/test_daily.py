@@ -51,7 +51,7 @@ def patch_today(monkeypatch):
 
 @pytest.fixture
 def patch_all_steps(monkeypatch):
-    """桩掉 13 步的实现（只留编排层），使 run_daily 走真实 ``_run_step`` 分派。
+    """桩掉 14 步的实现（只留编排层），使 run_daily 走真实 ``_run_step`` 分派。
 
     返回值取真实量纲（行数 / 窗口），供 detail 断言；不依赖 DB 与网络。
     """
@@ -59,6 +59,9 @@ def patch_all_steps(monkeypatch):
     monkeypatch.setattr("emotion_core.data.providers.eastmoney.em_data_date",
                         lambda: date(2026, 9, 29))
     monkeypatch.setattr("emotion_core.services.ingest.fetch_hot_snapshot", lambda d: 0)
+    monkeypatch.setattr("emotion_core.data.fill_stock_basic.backfill", lambda: 5223)
+    monkeypatch.setattr("emotion_core.data.fill_list_date.backfill", lambda **kw: 3)
+    monkeypatch.setattr("emotion_core.data.fill_industry.backfill", lambda *a, **kw: 2)
     monkeypatch.setattr("emotion_core.services.coverage.gate", lambda d: "coverage line")
     monkeypatch.setattr("emotion_core.services.derive_service.run", lambda d: 0)
     monkeypatch.setattr("emotion_core.services.market_service.run", lambda d: 0)
@@ -97,7 +100,7 @@ class TestRunDailyStepOrder:
     """run_daily 步骤执行顺序、打点行为。"""
 
     def test_all_steps_execute_in_order(self, patch_pipeline, patch_today, patch_trading_day):
-        """所有 13 步按 STEPS 顺序执行，每步都 mark_running + mark_done。"""
+        """所有 14 步按 STEPS 顺序执行，每步都 mark_running + mark_done。"""
         step_calls = []
 
         def mock_run_step(step, trade_date):
@@ -108,8 +111,8 @@ class TestRunDailyStepOrder:
 
         assert rc == 0
         assert step_calls == [s for s, _ in daily.STEPS]
-        assert daily.pipeline.mark_running.call_count == 13
-        assert daily.pipeline.mark_done.call_count == 13
+        assert daily.pipeline.mark_running.call_count == 14
+        assert daily.pipeline.mark_done.call_count == 14
         daily.pipeline.mark_failed.assert_not_called()
 
     def test_from_step_resumes(self, patch_pipeline, patch_today, patch_trading_day):
@@ -332,7 +335,71 @@ class TestSignalStepDetail:
                                      " buy_window=ENHANCED source=live")
 
 
-# ── 6. 默认参数 ───────────────────────────────────────────────────────
+# ── 6. basic 步：基础信息刷新 ─────────────────────────────────────────
+
+class TestBasicStep:
+    """basic 步：stock_basic 元数据刷新（fail-soft 与不回补历史）。"""
+
+    def test_detail_reports_three_sources(self, patch_all_steps, patch_today):
+        assert daily._basic_detail() == "spot=5223 list_date=3 industry=2"
+
+    def test_snapshot_failure_does_not_block_the_other_two(
+            self, patch_today, monkeypatch):
+        """快照失败（新浪/东财都挂）只让 spot 那一段 FAILED，后两步照跑。"""
+        monkeypatch.setattr("emotion_core.data.fill_stock_basic.backfill",
+                            lambda: (_ for _ in ()).throw(RuntimeError("502 Bad Gateway")))
+        monkeypatch.setattr("emotion_core.data.fill_list_date.backfill", lambda **kw: 3)
+        monkeypatch.setattr("emotion_core.data.fill_industry.backfill", lambda *a, **kw: 2)
+
+        detail = daily._basic_detail()
+        assert detail == "spot=FAILED(502 Bad Gateway) list_date=3 industry=2"
+
+    def test_all_sources_failing_still_returns_detail(self, patch_today, monkeypatch):
+        """三条源全挂：不抛（否则拦掉当天全部算法产出），但 detail 必须如实标 FAILED。"""
+        def boom(*a, **kw):
+            raise RuntimeError("down")
+
+        for mod in ("fill_stock_basic", "fill_list_date", "fill_industry"):
+            monkeypatch.setattr(f"emotion_core.data.{mod}.backfill", boom)
+
+        detail = daily._basic_detail()
+        assert detail.count("FAILED(down)") == 3
+        assert detail.startswith("spot=FAILED(")
+
+    def test_industry_call_is_bounded_and_only_missing(self, patch_all_steps, monkeypatch):
+        """正常日只补缺失的，且必须带上限——防表被清空时一次拉几千只。"""
+        seen: dict[str, object] = {}
+
+        def _fake_industry(source, **kw):
+            seen["source"] = source
+            seen.update(kw)
+            return 0
+
+        monkeypatch.setattr("emotion_core.data.fill_industry.backfill", _fake_industry)
+        daily._basic_detail()
+        assert seen["source"] == "cninfo"
+        assert seen["only_missing"] is True
+        assert seen["limit"] == daily._INDUSTRY_LIMIT
+
+    def test_skips_historical_replay(self, patch_today, monkeypatch):
+        """历史补跑（trade_date ≠ 今天）不刷新快照列，也不打网络源。"""
+        for mod in ("fill_stock_basic", "fill_list_date", "fill_industry"):
+            monkeypatch.setattr(f"emotion_core.data.{mod}.backfill",
+                                lambda *a, **kw: pytest.fail("历史补跑不该打网络源"))
+
+        assert daily._run_step("basic", date(2026, 1, 5)) == ""
+
+    def test_runs_on_current_trading_day(self, patch_all_steps, patch_today):
+        assert daily._run_step("basic", date(2026, 9, 29)) == (
+            "spot=5223 list_date=3 industry=2")
+
+    def test_brief_truncates_and_normalizes(self):
+        assert daily._brief(RuntimeError("a\nb")) == "a b"
+        assert daily._brief(RuntimeError("")) == "RuntimeError"
+        assert len(daily._brief(RuntimeError("x" * 500))) == 60
+
+
+# ── 7. 默认参数 ───────────────────────────────────────────────────────
 
 class TestDefaultArgs:
     """默认参数行为。"""
@@ -345,10 +412,18 @@ class TestDefaultArgs:
         # 验证至少执行了一个步骤（今天是交易日）
         mock_run.assert_called()
 
-    def test_steps_list_has_13_entries(self):
-        """STEPS 注册表必须有 13 步（R20 起含 hot）。"""
-        assert len(daily.STEPS) == 13
+    def test_steps_list_has_14_entries(self):
+        """STEPS 注册表必须有 14 步（R20 起含 hot，R21 起含 basic）。"""
+        assert len(daily.STEPS) == 14
         step_names = [s for s, _ in daily.STEPS]
-        expected = ["sync", "coverage", "hot", "derive", "market", "ladder", "signal",
-                    "promotion", "theme", "ecosystem", "strategy", "outcome", "health"]
+        expected = ["sync", "coverage", "hot", "basic", "derive", "market", "ladder",
+                    "signal", "promotion", "theme", "ecosystem", "strategy", "outcome",
+                    "health"]
         assert step_names == expected
+
+    def test_basic_step_runs_before_algorithm_steps(self):
+        """basic 必须在 derive 之前：当日新股的基础信息要先落地，算法步才读得到。"""
+        names = [s for s, _ in daily.STEPS]
+        assert names.index("basic") < names.index("derive")
+        # coverage 紧跟 sync 的契约（test_coverage 守）不能被 basic 插断
+        assert names.index("coverage") == names.index("sync") + 1

@@ -159,13 +159,23 @@ def upsert_stock_basic(rows: list[Row]) -> int:
     return len(rows)
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+def backfill() -> int:
+    """全市场快照刷新（抓 → 写），返回写入行数。
+
+    供编排层（`orchestration/daily.py` 的 basic 步）与 `main()` 共用一份实现：
+    此前只有 `main()`，而 CLI 不是可调用入口 ⇒ 这个模块在生产上**零调用方**，
+    `industry` / `market_cap` / `float_shares` 一度全表 NULL 就是这么来的。
+    """
     rows = fetch_clist()
     log.info("拉取全市场 %d 只", len(rows))
     n = upsert_stock_basic(rows)
     log.info("stock_basic upsert %d 行", n)
     return n
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    return backfill()
 
 
 if __name__ == "__main__":

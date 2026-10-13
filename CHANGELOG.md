@@ -140,6 +140,34 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 
 ---
 
+### 修复 · 2026-10-12 `stock_basic.market_cap` / `float_shares` 回填（5223/5223）
+
+- **根因**：`fill_stock_basic.EM_FIELDS` 请求东财 `f20`（总市值），东财 `push2`/`push2delay` 从本机持久 502 后回退 `_sina_clist`，而 `_SINA_TO_EM` 映射表**没有 `mktcap`/`nmc`** ⇒ `f20` 缺列 ⇒ `_rows_from_frame` 取 None ⇒ upsert 的 `COALESCE` 保留 NULL。**而新浪 `Market_Center.getHQNodeData` 本来就返回 `mktcap`/`nmc`**，只是没取
+- **量纲**（决定性）：新浪是**万元**、东财 `f20` 是**元**，差 10000 倍。用「`mktcap ÷ trade` 反推总股本」独立核对：000001 平安银行 = **194.06 亿股（与公开总股本精确吻合）**、600519 = 12.50 亿、688111 = 4.64 亿。新浪快照 `trade` 与库内 `daily_bar` 2026-10-12 收盘价逐只相同
+- **修法**：`providers/eastmoney.py` 的 `_SINA_TO_EM` 补 `mktcap→f20` / `nmc→f21`，新增 `_SINA_UNIT_SCALE`（`f5` 股→手 ÷100、`f20`/`f21` 万元→元 ×10000）——**映射与量纲必须成对**，只加映射不加换算＝静默 10000 倍错
+- **`float_shares` 零额外请求**：`f21 ÷ f2`（流通市值 ÷ 收盘价）；停牌股 `f2=0` 退回昨收 `f18`
+- **验收**：`SELECT count(*), count(market_cap), count(float_shares), count(industry)` → **5223 / 5223 / 5223 / 5221**；`float_shares` 与深交所官方 `A股流通股本` 抽样 8 只对账，偏差 −1.40% ~ +0.00%（5 只 0 偏差）；`/api/stock?code=601811` → `market_cap=28378343000.0`（改前 `null`）
+- **口径提示**：A+B 股公司（如 000016 深康佳A）的 `f20` 是 **A+B 合计**总市值（24.08 亿）而非 A 股口径（官方 15.97 亿），只影响 `market_cap`；`f21` 只含 A 股流通故 `float_shares` 不受影响
+- **测试**：`pytest tests/unit tests/architecture` → **1657 passed**（commit `0624570`）
+
+---
+
+### 新增 · 2026-10-13 元数据收口：`list_date` / daily `basic` 步 / `ingest` 去重 / 评级回填
+
+上一节留下的 4 条待办 + 2 条追加项全部收口。**`stock_basic` 五列首次全满**：
+`count(*) / list_date / market_cap / float_shares / industry` = **5223 / 5223 / 5223 / 5223 / 5223**。
+
+- **`list_date` 回填 5223/5223（新源）**：`stock_basic.list_date` 原先全 NULL。改用**交易所官方列表**——深 `ak.stock_info_sz_name_code("A股列表")` 2904 行、沪 `stock_info_sh_name_code("主板A股")` 1702 行 + `("科创板")` 618 行，**3 次 HTTP 调用、0 Wind 额度**（对比巨潮逐股 5221 次）、且深沪两市的「上市日期」类型不同（深是字符串 `1991-04-03`、沪是 `datetime.date`）。新增 `data/providers/exchange_list.py` + `data/fill_list_date.py`（幂等 `UPDATE ... WHERE list_date IS DISTINCT FROM v.d`，`_CHUNK=1000`）
+- **`float_shares` 接进面板**：`data/stock_query.py::basic_row`、`services/diagnose_service.py` 的 `_FUNDAMENTAL_SQL` 与 `_seg_b`、`presentation/static/stock.js` 四处补齐，副标题显示「市值 X 亿 · 流通 Y 亿股」
+- **daily 新增第 14 步 `basic`**（fail-soft）：位置在 `hot` 之后 `derive` 之前（**不能插 `sync`/`coverage` 之间**，有单测守护）；三段各自 try/except，任一段失败只写 `pipeline_state.detail`（`spot=FAILED(...) list_date=3 industry=2`）、**不阻断主链**；快照 `trade_date != 当日` 直接跳过；行业补缺限量 `_INDUSTRY_LIMIT=100` 防拖长日更窗口。这同时解决「`fill_stock_basic` 全仓无生产调用方 ⇒ 市值快照永不刷新」和「`fill_industry` 要不要接 daily」
+- **`services/ingest.py` 去重（−139/+19）**：删掉与 `data.providers.eastmoney` 重复的 `_EM_CLIST`/`_EM_FS_ALL_A`/`_SPOT_MAP`/`_SINA_*`/`_sina_clist`/`_em_clist_paged`/`_em_clist`/`_reject_zero_prices`，改为 import；顺带清 4 个死常量。**先证伪「漂移是活 bug」**：唯一实体差异是 `_em_clist_paged` 漏传 `fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP`，而这两个键**不在 `utils/config.py` 的 CONFIG 里**（`_cfg` 对两者都回退默认 3 / 0.5）⇒ 潜伏漂移而非当期故障。等价性实跑：`ingest._em_clist(_EM_FS_ALL_A, list(_SPOT_MAP))` → 5223 行、列集合与 `_SPOT_MAP` 键集合相等、无 `f20`/`f21`
+- **`dragon_env` 历史回填 669/669**：`ecosystem_service` 新增 `run(trade_date, mode="live")`（透传 `mode`）、`run_range(start, end)` 与 CLI。**0 Wind 额度**（只读库内表）。实跑 `dragon_env 2024-01-02~2026-10-12：669/669 日` → `dragon_env`/`dragon_env_reasons`/`dragon_env_risks` 三列各 669/669，分布 **NEUTRAL 396 / FAVORABLE 198 / UNFAVORABLE 75**。回填走 `replay` 口径（B3 判据允许看「胜出次日」，`bound = trade_date + 3d`），原先流水线跑过的 10 天重算后评级未变（10-08/10-09/10-12 仍 `UNFAVORABLE`）
+- **顺带修掉一个被单测掩盖的必崩**：`algorithms/dragon_env.py::run_range` 原写 `persist(d, mode="replay")`，而 `persist()` 的 `persist_fn` 是**无默认值的 keyword-only 参数** ⇒ 真实调用必抛 `TypeError: persist() missing 1 required keyword-only argument`。之所以一直没暴露：唯一使用方是单测，它把 `persist` 整段 mock 掉、假函数还给了 `persist_fn=None` 默认值；生产上 `run_range` 零调用方。改为 `run_range(start, end, *, persist_fn)` 注入式（保持 `algorithms` 不直连 `data`，过 `tests/architecture/test_dependency_direction.py`），单测同步改成「假 persist 不给默认值」+ 新增「漏传必 TypeError」用例
+- **测试**：`pytest tests/unit tests/architecture -q` → **1696 passed**（上一轮 1657）；新增 `tests/unit/test_exchange_list.py`、`tests/unit/test_fill_list_date.py`，改写 `test_ingest_fallback.py`（补丁目标随 `_em_clist` 迁到 providers 命名空间）、`test_daily.py`（14 步）、`test_dragon_env.py`、`test_ecosystem_service.py`
+- **踩坑**：`FetchError` 是双参（`FetchError(msg, cause)`），`DataError`/`ProviderError` 是单参；`pd.NaT` 也是 `datetime` 实例（`to_date()` 必须**先 `pd.isna` 再 isinstance**）；**`python -m` 少了 `if __name__ == "__main__":` 就是静默空转**（669 日回填第一次「exit 0、无输出、DB 一行没变」就是这个）
+
+---
+
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）
 
 ### systemd：仓 ↔ `/etc/systemd/system` 双向对齐（两边现在都是 11 个单元）

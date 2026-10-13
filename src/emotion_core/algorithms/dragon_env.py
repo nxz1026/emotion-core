@@ -365,18 +365,31 @@ def persist(trade_date: date, accel: tuple | None = None,
         json.dumps(_ser(r["bads"]), ensure_ascii=False))
 
 
-def run_range(start: date, end: date) -> int:
+def run_range(start: date, end: date, *,
+              persist_fn: Callable[[date, str, str, str], int]) -> int:
     """区间评级：仅处理 market_stat 已有行的交易日，返回成功天数。
 
-    A8（审计 P2 修复）：原写法 `r[0] for r in df["date"]` 遍历的是 Series 的
-    date 元素，TypeError——此前 CLI 直接循环 persist 绕过了它，回填 645 日
-    "成功"掩盖了坏死路径。改 tolist() 并让 CLI 复用本函数。
+    ``persist_fn`` 由服务层注入（同 :func:`persist`；``algorithms`` 不得直连
+    ``data``，见 tests/architecture/test_dependency_direction.py:60）。
+
+    这里踩过一次「被单测掩盖的必崩」：原写法是 ``persist(d, mode="replay")``，
+    漏传 ``persist_fn`` —— 而 ``persist`` 的 ``persist_fn`` 是**无默认值**的
+    keyword-only 参数，所以真实调用必抛
+    ``TypeError: persist() missing 1 required keyword-only argument: 'persist_fn'``。
+    之所以一直没暴露：唯一使用方是把它整段 monkeypatch 掉的单测，而假函数顺手
+    给 ``persist_fn`` 留了 ``=None`` 默认值；生产上 ``run_range`` 又是零调用方
+    （历次回填命令行自己循环 ``persist``，绕开了它）。A8 在这同一个函数上修的
+    ``r[0]``-vs-``tolist()`` 是同类问题的上一次。
+
+    ``mode="replay"``：B3 要看得见「胜出次日」的结果，回放时把观察窗右界放宽到
+    ``trade_date + 3 天``（见 :func:`b3_next_day_dump`）；live 模式右界就是当日。
     """
     days = query_df(
         "SELECT date FROM market_stat WHERE date BETWEEN %s AND %s"
         " AND tradable_max_days IS NOT NULL ORDER BY date",
         (start, end))["date"].tolist()
-    n = sum(1 for d in days if persist(d, mode="replay"))
+    n = sum(1 for d in days
+            if persist(d, mode="replay", persist_fn=persist_fn))
     log.info("dragon_env %s~%s：%d/%d 日", start, end, n, len(days))
     return n
 

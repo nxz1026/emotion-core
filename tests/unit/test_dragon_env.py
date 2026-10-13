@@ -352,13 +352,38 @@ def test_persist_writes_rating_and_condition_payload(monkeypatch):
 
 
 def test_run_range_replays_only_existing_market_stat_days(fake, monkeypatch):
-    """A8：遍历的是日期值而非 Series，且回填一律 replay 口径。"""
+    """A8：遍历的是日期值而非 Series，且回填一律 replay 口径。
+
+    假函数刻意**不给** `persist_fn` 默认值——原版写了 `persist_fn=None`，
+    正好把生产上「漏传 persist_fn → TypeError」的必崩掩盖掉了。
+    """
     fake.days = [date(2026, 9, 23), date(2026, 9, 24)]
     seen: list[tuple[date, str]] = []
-    monkeypatch.setattr(dragon_env, "persist",
-                        lambda d, accel=None, mode="live", *, persist_fn=None: seen.append((d, mode)) or 1)
-    assert dragon_env.run_range(date(2026, 9, 1), D) == 2
+
+    def fake_persist(d, accel=None, mode="live", *, persist_fn):
+        assert persist_fn is not None, "run_range 必须把落库口透传给 persist"
+        seen.append((d, mode))
+        return 1
+
+    monkeypatch.setattr(dragon_env, "persist", fake_persist)
+
+    def sink(*_args):
+        return 1
+
+    assert dragon_env.run_range(date(2026, 9, 1), D, persist_fn=sink) == 2
     assert seen == [(date(2026, 9, 23), "replay"), (date(2026, 9, 24), "replay")]
+
+
+def test_run_range_requires_persist_fn(fake):
+    """注入是必填的：漏传必须当场 TypeError，而不是悄悄不落库。"""
+    fake.days = [date(2026, 9, 23)]
+    with pytest.raises(TypeError):
+        dragon_env.run_range(date(2026, 9, 1), D)         # type: ignore[call-arg]
+
+
+def test_run_range_empty_interval_is_zero(fake):
+    fake.days = []
+    assert dragon_env.run_range(date(2026, 9, 1), D, persist_fn=lambda *a: 1) == 0
 
 
 # ── 只读汇总视图 ──────────────────────────────────────────────────

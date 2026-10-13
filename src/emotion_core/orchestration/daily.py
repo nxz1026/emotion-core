@@ -30,6 +30,13 @@ STEPS = [
     # 「coverage 紧跟 sync」（拉完立刻验、早失败），插中间会破坏它。hot 不参与
     # coverage 门槛，故排在门槛之后同样安全。
     ("hot", "人气榜"),
+    # R21：`fill_stock_basic` 此前只有 CLI `main()`、生产零调用方 ⇒
+    # stock_basic.industry / market_cap / float_shares 长期全表 NULL（面板「行业
+    # 未接入」）。basic 步把它和另外两条「补缺列」源串起来：全市场快照 →
+    # 交易所上市日期（仅缺失）→ 巨潮行业（仅缺失）。位置同 hot 一样在 coverage
+    # 之后（coverage 与 sync 的相邻契约由 test_coverage 守，不能插中间），
+    # 且在算法步骤之前，让当日新股的基础信息先落地。
+    ("basic", "基础信息刷新"),
     ("derive", "判据+连板"),
     ("market", "状态机"),
     ("ladder", "梯队"),
@@ -156,6 +163,60 @@ def _signal_detail(trade_date: date, sig: object | None) -> str:
             f" buy_window={window} source={sig.source.value}")
 
 
+#: basic 步里巨潮行业回填的单次上限。正常日 only_missing 只有当日新股（个位数），
+#: 给上限是防「表被清空 / 源改口径」时一次拉几千只（逐股 ~1.2s）把 daily 拖住。
+_INDUSTRY_LIMIT = 100
+
+
+def _brief(exc: Exception, limit: int = 60) -> str:
+    """异常摘要（进 detail；``pipeline_state.detail`` 上限 500 字符）。"""
+    text = " ".join(str(exc).split()) or exc.__class__.__name__
+    return text[:limit]
+
+
+def _basic_detail() -> str:
+    """basic 步：刷新 stock_basic 的 name/industry/market_cap/float_shares/list_date。
+
+    三条源串成「先补新代码、再补缺列」：
+
+        全市场快照（新浪/东财）→ 交易所上市日期（仅缺失）→ 巨潮行业（仅缺失）
+
+    为什么这三条失败只 warning + 落 detail、不抛（与 sync/hot 的硬失败刻意不同）：
+    它们都是**元数据富化**，不是当日信号的输入。新浪/交易所/巨潮任何一家抖动就
+    让 `run_daily` `return 1`，等于用「市值晚一天更新」换掉当天 derive/market/
+    signal/theme 的全部产出，代价不对等。可见性交给 detail 与 warning 日志，而不是
+    交给 status——`pipeline_state.detail` 正是为「status=OK 但没产出」这个盲区设的
+    （见模块 docstring 与 _signal_detail）。
+    """
+    parts: list[str] = []
+
+    try:
+        from emotion_core.data import fill_stock_basic
+        parts.append(f"spot={fill_stock_basic.backfill()}")
+    except Exception as exc:                      # noqa: BLE001 —— 源异常类型不定
+        log.warning("basic: 全市场快照刷新失败（保留旧值）：%s", exc)
+        parts.append(f"spot=FAILED({_brief(exc)})")
+
+    # 必须在快照之后：新股的 code 要先由快照写进 stock_basic，
+    # 下面两步的 only_missing 才把它们算进目标集合。
+    try:
+        from emotion_core.data import fill_list_date
+        parts.append(f"list_date={fill_list_date.backfill(only_missing=True)}")
+    except Exception as exc:                      # noqa: BLE001
+        log.warning("basic: 上市日期回填失败（保留旧值）：%s", exc)
+        parts.append(f"list_date=FAILED({_brief(exc)})")
+
+    try:
+        from emotion_core.data import fill_industry
+        parts.append("industry=" + str(fill_industry.backfill(
+            "cninfo", only_missing=True, limit=_INDUSTRY_LIMIT)))
+    except Exception as exc:                      # noqa: BLE001
+        log.warning("basic: 行业回填失败（保留旧值）：%s", exc)
+        parts.append(f"industry=FAILED({_brief(exc)})")
+
+    return " ".join(parts)
+
+
 def _run_step(step: str, trade_date: date) -> str:
     """执行单个步骤；返回写进 ``pipeline_state.detail`` 的短摘要。
 
@@ -184,6 +245,14 @@ def _run_step(step: str, trade_date: date) -> str:
             return ""
         from emotion_core.services.ingest import fetch_hot_snapshot
         fetch_hot_snapshot(trade_date)
+    elif step == "basic":
+        # 快照类刷新：stock_basic 的那几列没有日期维度（是「最新值」），
+        # 历史补跑时刷新它等于拿今天的快照覆盖历史语境，语义上无意义且白打三次
+        # 网络源 —— 与 hot 的「不回补历史」同口径。
+        if trade_date != today_sh():
+            log.info("basic: 跳过 %s（基础信息是快照列，不回补历史）", trade_date)
+            return ""
+        return _basic_detail()
     elif step == "coverage":
         from emotion_core.services.coverage import gate
         gate(trade_date)          # 不足 0.90 抛 CoverageBlocked → 退出码 76

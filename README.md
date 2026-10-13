@@ -74,7 +74,7 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
 | 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` **惰性**加载 .so（首次访问符号时才加载；产物缺失时抛 `RustCoreUnavailable` 并给出编译指引，不再在导入期崩） |
 | 阶段 4 数据层 | ✅ 已落地 | 30 张表 DDL；`daily_bar` 337.8 万行 / 663 交易日 / 5221 只；`derived_bar` 337.8 万行；`market_stat` 663 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
-| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` 13 步（sync/coverage/hot/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health）；仓内 systemd：6 个 `.service` + 5 个 `.timer` 共 **11 个单元**（`emotion-core-{daily,dash,pool,report,strategy,watchdog}.service` + `{daily,pool,report,strategy,watchdog}.timer`）。**2026-10-07 起与 `/etc/systemd/system` 逐文件一致**，`close` 单元已撤销，详见下方「systemd 仓/生产漂移」小节 |
+| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` **14 步**（sync/coverage/hot/**basic**/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health，`basic` 于 2026-10-13 插入、fail-soft）；仓内 systemd：6 个 `.service` + 5 个 `.timer` 共 **11 个单元**（`emotion-core-{daily,dash,pool,report,strategy,watchdog}.service` + `{daily,pool,report,strategy,watchdog}.timer`）。**2026-10-07 起与 `/etc/systemd/system` 逐文件一致**，`close` 单元已撤销，详见下方「systemd 仓/生产漂移」小节 |
 | 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 4 个 JSON 接口（另有 `/api/*` 兜底状态），端口 8098，nginx 前缀 `/emotion` |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
 | 阶段 8 上线 | ✅ 已完成 | 2026-10-07 实测：`emotion-core-dash` 常驻（:8098 HTTP 200，basic auth 经 `/emotion/`）；五个 timer 全部 `enabled + active`，`emotion-core-daily.timer` 于 2026-10-06 17:20 北京成功执行、`pipeline_state` 13 步全 `OK`（`for_date=2026-09-30`，因 10-01~10-07 国庆休市，交易日守卫正常跳过，下一交易日 10-08 自动接上）；`signal`/`signal_outcome` 各 162 行全 `source='replay'`；`theme_group` 仍 0 行 |
@@ -215,6 +215,12 @@ PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_industry --source cnin
 
 # 基础信息回填（运维入口；一次调用拿全市场 code/name/industry/market_cap/float_shares）
 PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_stock_basic
+
+# 上市日回填（运维入口；交易所官方列表，深 1 次 + 沪 2 次调用，0 Wind 额度）
+PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_list_date --only-missing
+
+# 生态评级历史回填（运维入口；只读库内表、不碰外部源，0 Wind 额度）
+PYTHONPATH=src .venv/bin/python -m emotion_core.services.ecosystem_service --start 2024-01-02 --end 2026-10-12
 ```
 
 ---
@@ -246,7 +252,7 @@ emotion-core/
 │   ├── core/          Rust 算法核心（.so）
 │   ├── algorithms/    Python 算法外壳（PyO3）+ 个股判定
 │   ├── data/          数据层（DB + 同步 + 回填 + 清理 + 独立交易日历）
-│   ├── orchestration/ 编排层（daily.py 13 步 + systemd）
+│   ├── orchestration/ 编排层（daily.py 14 步 + systemd）
 │   ├── presentation/  展示层（直观/逻辑/算法/策略/个股 5 页 + 4 个 JSON 接口）
 │   ├── services/      服务层（覆盖率门槛/校准/LLM/个股诊断/历史信号回填 CLI）
 │   ├── llm/           LLM 层（4 profile + 回退链 + prompts/strategies）

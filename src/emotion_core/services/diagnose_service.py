@@ -115,7 +115,8 @@ SELECT date, phase, buy_window, has_candidate, diverge, force_liquidate,
 """
 
 _FUNDAMENTAL_SQL = """
-SELECT name, industry, market_cap, is_st, list_date, first_bar_date, in_market
+SELECT name, industry, market_cap, float_shares, is_st, list_date,
+       first_bar_date, in_market
   FROM stock_basic
  WHERE code = %s
 """
@@ -292,7 +293,8 @@ def _seg_b(code: str, as_of: date, basic: dict) -> dict:
         "title": TITLE_B, "available": True,
         "identity": {
             "name": basic.get("name"), "industry": basic.get("industry"),
-            "market_cap": basic.get("market_cap"), "first_bar_date": first_bar,
+            "market_cap": basic.get("market_cap"),
+            "float_shares": basic.get("float_shares"), "first_bar_date": first_bar,
             "list_date": basic.get("list_date"), "is_st": basic.get("is_st"),
             "in_market": basic.get("in_market"), "is_new_issuer": new_issuer,
         },

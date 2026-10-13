@@ -85,8 +85,8 @@ def resolve_code(text: str, limit: int = 10) -> list[dict]:
 def basic_row(code: str) -> dict | None:
     """证券主数据一行。"""
     df = query_df(
-        """SELECT code, name, is_st, industry, market_cap, list_date,
-                  first_bar_date, in_market
+        """SELECT code, name, is_st, industry, market_cap, float_shares,
+                  list_date, first_bar_date, in_market
            FROM stock_basic WHERE code = %s""", (code,))
     return None if df.empty else df.iloc[0].to_dict()
 

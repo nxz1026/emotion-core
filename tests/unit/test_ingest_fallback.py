@@ -23,6 +23,7 @@ import requests
 from emotion_core.data.providers.base import (
     BAR_COLS, DataError, FetchError, ProviderError, valid_frame,
 )
+from emotion_core.data.providers import eastmoney as em_provider
 from emotion_core.services import ingest
 from emotion_core.utils.fetch import fetch_json, retry_fetch
 
@@ -89,8 +90,8 @@ class TestEmClistFallback:
             return _FakeResp(status=404)
 
         monkeypatch.setattr(ingest.requests, "get", mock_get)
-        monkeypatch.setattr(ingest, "_FETCH_RETRY", 1)
-        monkeypatch.setattr(ingest, "_TIME_SLEEP", 0)
+        monkeypatch.setattr(em_provider, "_FETCH_RETRY", 1)
+        monkeypatch.setattr(em_provider, "_TIME_SLEEP", 0)
 
         fs = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
         df = ingest._em_clist(fs, list(ingest._SPOT_MAP))
@@ -101,8 +102,8 @@ class TestEmClistFallback:
     def test_em_data_error_does_not_fall_back(self, monkeypatch):
         """DataError（协议变化）不应回退，直接上抛。"""
         monkeypatch.setattr(ingest.requests, "get", _make_data_error_get)
-        monkeypatch.setattr(ingest, "_FETCH_RETRY", 1)
-        monkeypatch.setattr(ingest, "_TIME_SLEEP", 0)
+        monkeypatch.setattr(em_provider, "_FETCH_RETRY", 1)
+        monkeypatch.setattr(em_provider, "_TIME_SLEEP", 0)
 
         with pytest.raises(DataError):
             ingest._em_clist("m:0+t:6", ["f12"])
@@ -133,7 +134,7 @@ class TestSnapshotDailyGuard:
             lambda: date(2026, 9, 29),
         )
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", [])
-        monkeypatch.setattr(ingest, "_em_clist_paged",
+        monkeypatch.setattr(em_provider, "_em_clist_paged",
                             lambda *a, **kw: pd.DataFrame())
 
         with pytest.raises(Exception) as exc_info:

@@ -58,11 +58,29 @@
     $("stock-result").style.display = "none";
   }
 
+  // 量纲展示：market_cap 是元、float_shares 是股，都折算到「亿」；缺值返回 ""，
+  // 由调用方整段省略（不显示「市值 —」这种占位噪音）。
+  function yi(v) {
+    const n = Number(v);
+    if (v === null || v === undefined || v === "" || Number.isNaN(n)) return "";
+    return (n / 1e8).toFixed(2) + " 亿";
+  }
+
+  function sizeText(basic) {
+    const parts = [];
+    const cap = yi(basic.market_cap);
+    const fs = yi(basic.float_shares);
+    if (cap) parts.push(`市值 ${cap}`);
+    if (fs) parts.push(`流通 ${fs}股`);
+    return parts.join(" · ");
+  }
+
   function renderVerdict(v, basic, tradeDate) {
+    const size = sizeText(basic);
     $("verdict-title").textContent = `${basic.code} ${basic.name}`;
     $("verdict-sub").textContent =
       `${tradeDate} · ${v.layer ? v.layer + " 层级" : "无连板"} · ` +
-      `行业 ${basic.industry || "未接入"}`;
+      `行业 ${basic.industry || "未接入"}` + (size ? ` · ${size}` : "");
     const badge = $("verdict-badge");
     badge.textContent = v.stance_text;
     badge.className = "badge " + (STANCE_CLASS[v.stance] || "badge-neutral");

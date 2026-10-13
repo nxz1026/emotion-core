@@ -9,6 +9,9 @@
 - `from lkl.utils import db` + `db.query_df/execute` → `emotion_core.utils.db`。
 - providers 四处 import 保持函数内延迟 import，落到 `emotion_core.data.providers.*`
   （第 8 层未搬，与 doctor.py 同款：仅调用时 ImportError，不影响 import 期）。
+  例外：EM clist + 新浪回退源的常量与取数函数（`_EM_CLIST` / `_SPOT_MAP` /
+  `_em_clist` 等）2026-10-13 去重后为模块级 import——它们原先在本模块整段复刻了
+  一份，`retry_fetch` 漏传 `fetch_retry/time_sleep` 造成静默漂移。
 - `_retry` 源在 453-467 行（属第 2 段），但本段 `_sina_clist`/`_em_clist_paged`/
   `_em_data_date_em` 与第 3 段 `fetch_limit_pool`/`fetch_hot_snapshot` 都依赖它，
   故提前收进本段——这是唯一定义处，第 2 段不得重复定义。
@@ -30,10 +33,15 @@ import akshare as ak
 import pandas as pd
 import requests
 
+from emotion_core.data.providers.eastmoney import (
+    _EM_CLIST,
+    _EM_FS_ALL_A,
+    _SPOT_MAP,
+    _em_clist,
+)
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import execute, query_df, transaction
-from emotion_core.utils.errors import DataError, FetchError
-from emotion_core.utils.fetch import fetch_json, fetch_json_list, is_positive, retry_fetch
+from emotion_core.utils.fetch import fetch_json, retry_fetch
 
 log = logging.getLogger("emotion_core.ingest")
 
@@ -97,24 +105,19 @@ def _daily_rows_from_em(frame: pd.DataFrame, trade_date: date) -> list[tuple]:
     return [tuple(getattr(r, col) for col in BAR_COLS)
             for r in out[BAR_COLS].itertuples(index=False)]
 
-# EM 行情列表：akshare spot 分页(56请求+sign)在本机被 reset，自建单页封装。
-# push2 对本 IP 间歇 502/302；直连 302 目标 push2delay（延迟行情，盘后与终值一致）。
-# fs = 深主板/创业板/沪主板/科创板。
-_EM_CLIST = "https://push2delay.eastmoney.com/api/qt/clist/get"
-_EM_FS_ALL_A = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
-_SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
-             "f2": "close", "f18": "pre_close", "f5": "volume",
-             "f6": "amount", "f8": "turnover_rate"}
-
+# EM 行情列表 / 新浪回退源 的常量与取数实现（`_EM_CLIST`、`_EM_FS_ALL_A`、
+# `_SPOT_MAP`、`_SINA_CLIST`、`_SINA_TO_EM`、`_SINA_UNIT_SCALE`，以及
+# `_sina_clist` / `_em_clist_paged` / `_em_clist` / `_reject_zero_prices`
+# 四个函数）已由 `emotion_core.data.providers.eastmoney` 单点定义，本模块只 import
+# 再导出。2026-10-13 去重：这里曾整段复刻一份，其中 `retry_fetch` 漏传
+# `fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP`，与 providers 静默漂移
+# （当前 CONFIG 未收录这两个键、默认值恰好相同 3/0.5，故未造成实际差异，
+#  但一旦有人调 CONFIG 就会只在快照路径上失效）。
 
 # FetchError / DataError 的唯一定义处已下移到 `data.providers.base`（2026-09-29
-# 架构守护：services 允许依赖 data，反向不允许）：本模块从那里 import 并同名再导出，
-# 异常对象与 `data.providers.*` 抛出的那份是同一个类。
-
-
-
-
-
+# 架构守护：services 允许依赖 data，反向不允许）。本模块原先在此 import 再导出，
+# 2026-10-13 去重后 EM / 新浪 clist 的取数实现整体移入 providers，这里不再捕获
+# 这两个异常；需要时直接从 `emotion_core.utils.errors` 取。
 # ── 新浪全市场源：EM clist 高频 502 时的回退 ────────────────────────────
 # 2026-09-24 实测：本机出口是日本大阪 Oracle Cloud，EM push2 / push2delay 的
 # clist 路径**高频失败**——连打 20 次仅 4 次 200（16 次 502 + 1 次连接失败，
@@ -122,131 +125,8 @@ _SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
 # 502 由东财自身 nginx 返回），但配 FETCH_RETRY=3 后单次调用仍有约
 # 0.8³≈51% 概率三次全挂。新浪 / 腾讯 HTTP 源同期 100% 正常，故守卫与快照
 # 双线回退到新浪——回退的目的是**让守卫可靠**，不是"EM 永远不通"。
-_SINA_CLIST = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-               "Market_Center.getHQNodeData")
-_SINA_QUOTE = "https://hq.sinajs.cn/list="
-# 新浪指数日K：最后一根的日期 = 最近一个「已完成」交易日。用于盘前判定
-# （hq.sinajs.cn 的日期字段是「当前交易日」，盘前已翻新但无成交）。
-_SINA_KLINE = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-               "CN_MarketData.getKLineData")
-_SINA_HEADERS = {"User-Agent": "Mozilla/5.0",
-                 "Referer": "https://finance.sina.com.cn"}
-#: A股收盘时间（北京时间），表示成「距零点的分钟数」。行情时间 >= 它才算
-#: 「当日已收完」。**故意用整数而非 datetime.time**：本模块 `import time`
-#: （标准库）给 `_retry` 用，若 `from datetime import time` 会把它覆盖掉，
-#: `time.sleep` 随即 AttributeError，整条管道直接死。
-_SINA_SESSION_END_MIN = 15 * 60
-_SINA_TO_EM = {"code": "f12", "name": "f14", "open": "f17", "high": "f15",
-               "low": "f16", "trade": "f2", "settlement": "f18",
-               "volume": "f5", "amount": "f6", "turnoverratio": "f8"}
-
-
-
-
-
-def _reject_zero_prices(rows: list[dict]) -> None:
-    """拒绝「全零行情」入库——盘前快照的最后一道防线。
-
-    2026-09-24 实测：北京 09:05（未开盘）新浪 hs_a 返回 100/100 行
-    trade=0 open=0 volume=0，仅 settlement（昨收）有值。这类快照若入库，
-    daily_bar 的 open/high/low/close 会静默全变 0——**不报错，只是数字错**。
-    故过半无有效收盘价即判异常，按协议层错误上抛（重试无意义，直接暴露）。
-
-    这里只兜底、不承担正常分支：正常盘后快照 0 行无价。
-    """
-    if not rows:
-        return
-    priced = sum(1 for r in rows if is_positive(r.get("f2")))
-    if priced * 2 < len(rows):
-        raise DataError(
-            f"新浪全市场快照价格异常：{len(rows) - priced}/{len(rows)} 行收盘价为空或 0"
-            "（疑似盘前或接口异常），拒绝入库")
-
-
-def _sina_clist(fields: list[str], page: int = 100,
-                max_pages: int = 80) -> pd.DataFrame:
-    """新浪全市场行情分页拉取 → DataFrame（列名为 EM f 码，供 _em_clist 回退）。
-
-    口径对齐（2026-09-24 实测）：新浪 node=hs_a 共 5567 条，含北交所 346 条；
-    剔除 bj* 后 5221 条，与 EM _EM_FS_ALL_A（深主板+创业板+沪主板+科创板，
-    本就不含北交所）的 total 完全一致——故此处过滤 bj*，不改变原股票池口径。
-
-    单位对齐（这是本回退最容易踩的坑）：新浪 volume 单位是「股」，EM f5 是
-    「手」——必须 /100，否则全市场成交量静默放大 100 倍，不报错、只是数字错。
-    三方实测 600519.SH 2026-09-23：新浪 3098122 股 = 腾讯 30981 手 =
-    Wind 3098122（Wind 元数据 unit=股）。新浪 amount 单位是「元」，与 EM f6
-    一致，不换算。
-    """
-    want = [f for f in fields if f in _SINA_TO_EM.values()]
-    src = {v: k for k, v in _SINA_TO_EM.items()}
-    out: list[dict] = []
-    pn = 1
-    while True:
-        params = {"page": pn, "num": page, "sort": "symbol", "asc": 1, "node": "hs_a"}
-        rows = retry_fetch(fetch_json_list, _SINA_CLIST, params)
-        if not rows:
-            break
-        for r in rows:
-            if str(r.get("symbol") or "").startswith("bj"):
-                continue                      # 北交所不在原股票池口径内
-            item = {f: r.get(src[f]) for f in want}
-            if item.get("f5") is not None:
-                try:
-                    item["f5"] = float(item["f5"]) / 100.0     # 股 → 手
-                except (TypeError, ValueError):
-                    item["f5"] = None
-            out.append(item)
-        if len(rows) < page or pn >= max_pages:
-            if pn >= max_pages:
-                log.warning("新浪 clist 分页达上限 %d 页：取 %d 条", max_pages, len(out))
-            break
-        pn += 1
-    _reject_zero_prices(out)
-    return pd.DataFrame(out)
-
-
-def _em_clist_paged(fs: str, fields: list[str], page: int = 100,
-                    max_pages: int = 80) -> pd.DataFrame:
-    """EM clist 分页拉取（服务端单页上限100）→ DataFrame（字段名为 f 码）。
-
-    V1（二轮审计）：分页上限防 total 异常时的死循环。
-    V1-fix（09-02 实跑教训）：上限 20 页=2000 条 < 全市场 5556 只——
-    防死循环护栏截断了正常快照（当日 daily_bar 1912/5200 行，缺数
-    被报告「数据质量」段如实报警）。护栏应远高于正常需求：A股全市场
-    约 5600 只需 56 页，上限 80 页（8000 条）留增长余量，防 total
-    返回异常大值（如 9999999）的死循环。
-    """
-    out: list[dict] = []
-    pn, total = 1, None
-    while True:
-        params = {"pn": pn, "pz": page, "po": 1, "np": 1, "fltt": 2, "invt": 2,
-                  "fid": "f12", "fs": fs, "fields": ",".join(fields)}
-        data = retry_fetch(fetch_json, _EM_CLIST, params).get("data") or {}
-        diff = data.get("diff") or []
-        out.extend(diff)
-        total = data.get("total") or 0
-        if not diff or len(out) >= total or pn >= max_pages:
-            if pn >= max_pages and len(out) < total:
-                log.warning("EM clist 分页达上限 %d 页：取 %d/%d 条",
-                            max_pages, len(out), total)
-            return pd.DataFrame(out)
-        pn += 1
-
-
-def _em_clist(fs: str, fields: list[str], page: int = 100,
-              max_pages: int = 80) -> pd.DataFrame:
-    """全市场行情列表：优先 EM，网络层失败（FetchError）回退新浪同口径源。
-
-    V2（09-24）：EM clist 对本机 IP 高频 502（实测失败率 80%），此前守卫先崩、
-    快照随后崩，整条 daily 链自 09-18 起静默停在 09-17。现按异常类型分流：
-    FetchError（网络/5xx，可重试已耗尽）→ 回退新浪；DataError（协议变化，
-    重试无意义）仍按原语义上抛，不掩盖真实的接口结构变更。
-    """
-    try:
-        return _em_clist_paged(fs, fields, page, max_pages)
-    except FetchError as exc:
-        log.warning("EM clist 不可用（%s），回退新浪全市场源", exc)
-        return _sina_clist(fields, page, max_pages)
+# 单位对齐（volume 股→手、mktcap/nmc 万元→元）见 providers/eastmoney.py 的
+# `_SINA_UNIT_SCALE`——加 `_SINA_TO_EM` 映射必须同时加单位表。
 
 
 def _em_data_date_em() -> date:
