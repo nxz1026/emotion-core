@@ -134,7 +134,11 @@ class TestSnapshotDailyGuard:
             lambda: date(2026, 9, 29),
         )
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", [])
+        # 主源与备源都钉成空帧：EM 空帧自 2026-10-13 起会回退新浪（见 `_em_clist` V3），
+        # 只钉 `_em_clist_paged` 会让这里真的去打新浪接口。
         monkeypatch.setattr(em_provider, "_em_clist_paged",
+                            lambda *a, **kw: pd.DataFrame())
+        monkeypatch.setattr(em_provider, "_sina_clist",
                             lambda *a, **kw: pd.DataFrame())
 
         with pytest.raises(Exception) as exc_info:

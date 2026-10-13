@@ -196,3 +196,36 @@ class TestSinaClistUnits:
         df = eastmoney._sina_clist(["f12", "f2"])
         assert set(df.columns) == {"f12", "f2"}
         assert df.iloc[0]["f12"] == "600519"
+
+
+class TestEmClistEmptyFrameFallback:
+    """2026-10-13：EM 返回 HTTP 200 但 `data=null` / `diff=[]` 时必须回退新浪。
+
+    这类失败不抛 FetchError：`_em_clist_paged` 只在网络层异常时上抛，空 payload 会
+    静默返回空帧。而 `services/ingest.py` 的**默认主源路径**就是 `_em_clist`
+    （`_INGEST_FALLBACK_CHAIN` 缺省为空）→ 空帧会让当日日线静默入库 0 行、
+    只留一句「入库 0 行」。
+    """
+
+    def _patch(self, monkeypatch, payload: dict, sina_calls: list[str]):
+        monkeypatch.setattr(eastmoney, "fetch_json", lambda *a, **k: payload)
+        monkeypatch.setattr(eastmoney, "_FETCH_RETRY", 1)
+        monkeypatch.setattr(eastmoney, "_TIME_SLEEP", 0)
+
+        def fake_sina(fields, page=100, max_pages=80):
+            sina_calls.append("sina")
+            return pd.DataFrame([{"f12": "600519"}])
+
+        monkeypatch.setattr(eastmoney, "_sina_clist", fake_sina)
+
+    def test_null_data_falls_back_to_sina(self, monkeypatch):
+        calls: list[str] = []
+        self._patch(monkeypatch, {"rc": 0, "data": None}, calls)
+        assert eastmoney._em_clist("m:1+t:2", ["f12"])["f12"].tolist() == ["600519"]
+        assert calls == ["sina"]
+
+    def test_empty_diff_falls_back_to_sina(self, monkeypatch):
+        calls: list[str] = []
+        self._patch(monkeypatch, {"rc": 0, "data": {"total": 0, "diff": []}}, calls)
+        assert eastmoney._em_clist("m:1+t:2", ["f12"])["f12"].tolist() == ["600519"]
+        assert calls == ["sina"]

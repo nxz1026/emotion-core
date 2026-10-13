@@ -73,7 +73,7 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 阶段 2a Python 参考实现 | ✅ 完成 | 11 个算法模块 |
 | 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
 | 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` **惰性**加载 .so（首次访问符号时才加载；产物缺失时抛 `RustCoreUnavailable` 并给出编译指引，不再在导入期崩） |
-| 阶段 4 数据层 | ✅ 已落地 | 30 张表 DDL；`daily_bar` 337.8 万行 / 663 交易日 / 5221 只；`derived_bar` 337.8 万行；`market_stat` 663 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
+| 阶段 4 数据层 | ✅ 已落地 | 30 张表 DDL（库内 emotion-core 侧实际建了 24 张；`ref_dividend`/`ref_limit_rule`/`ref_rs`/`ref_security_status` 与 `ops_quota_ledger`/`ops_raw_manifest` 未建。同一数据库另有 CPT 项目的 10 张 `cpt_*` 表）；`daily_bar` 340.9 万行 / 669 交易日 / 5223 只；`derived_bar` 340.9 万行；`market_stat` 669 行；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
 | 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` **14 步**（sync/coverage/hot/**basic**/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health，`basic` 于 2026-10-13 插入、fail-soft）；仓内 systemd：6 个 `.service` + 5 个 `.timer` 共 **11 个单元**（`emotion-core-{daily,dash,pool,report,strategy,watchdog}.service` + `{daily,pool,report,strategy,watchdog}.timer`）。**2026-10-07 起与 `/etc/systemd/system` 逐文件一致**，`close` 单元已撤销，详见下方「systemd 仓/生产漂移」小节 |
 | 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 4 个 JSON 接口（另有 `/api/*` 兜底状态），端口 8098，nginx 前缀 `/emotion` |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
@@ -202,7 +202,7 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 ```bash
 cd emotion-core
 # 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1850 passed
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1708 passed
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q

@@ -148,3 +148,91 @@ def test_market_prefix_rule():
     assert fsb._market("600519") == "sh"
     assert fsb._market("000001") == "sz"
     assert fsb._market("300750") == "sz"
+
+
+def test_rows_drop_delisted_marker():
+    """东财用 f100='-' 标记退市证券：必须丢弃，否则以 in_market=true 抬高覆盖率分母。
+
+    2026-10-13 实证：`_EM_FS_ALL_A` 的板块过滤不排除退市股，一次抓取 5562 行里
+    334 行是 f100='-'（PT金田A / 国华退 / 退市紫晶），写库后 coverage 上限
+    5223/5562=0.939（门槛 0.90，安全垫 9.8%→3.9%）。
+    """
+    raw = pd.DataFrame([
+        {"f12": "000001", "f14": "平安银行", "f2": 11.73, "f100": "银行"},
+        {"f12": "000003", "f14": "PT金田A", "f2": 0.0, "f100": "-"},
+        {"f12": "000004", "f14": "国华退", "f2": 0.0, "f100": "-"},
+        {"f12": "600519", "f14": "贵州茅台", "f2": 1288.0, "f100": "酿酒行业"},
+    ])
+    assert [r[0] for r in fsb._rows_from_frame(raw)] == ["000001", "600519"]
+
+
+def test_delisted_filter_only_matches_literal_dash():
+    """判据只认字面量 '-'：新浪回退帧无 f100 列、新股 f100 为 NaN/空 都不能误伤。"""
+    no_col = pd.DataFrame([{"f12": "600519", "f14": "贵州茅台", "f2": 1288.0}])
+    assert len(fsb._rows_from_frame(no_col)) == 1
+    nan_ind = pd.DataFrame([{"f12": "301660", "f14": "N粤芯-U", "f100": float("nan")}])
+    assert len(fsb._rows_from_frame(nan_ind)) == 1
+    blank = pd.DataFrame([{"f12": "600519", "f14": "贵州茅台", "f100": ""}])
+    assert len(fsb._rows_from_frame(blank)) == 1
+
+
+def test_nan_of_any_dtype_is_missing():
+    """`isinstance(v, float)` 判 NaN 太窄：numpy float32/Decimal('NaN')/pd.NA 都要认。
+
+    2026-10-13 修正前实测：`_as_float(np.float32('nan'))` 原样返回 nan（会作为 PG
+    NaN 入库，COALESCE 拦不住），`_as_text(np.float32('nan'))` 返回字面量 'nan'。
+    """
+    from decimal import Decimal
+
+    import numpy as np
+
+    for v in (np.float32("nan"), np.float16("nan"), Decimal("NaN"), pd.NA, pd.NaT, None):
+        assert fsb._as_float(v) is None, repr(v)
+        assert fsb._as_text(v) is None, repr(v)
+    assert fsb._as_float("12.5") == 12.5
+    assert fsb._as_text(" 银行 ") == "银行"
+
+
+def test_nan_name_and_blank_code_are_dropped_not_written():
+    """f14=NaN 曾写成字面量 'nan'；f12='' 经 zfill 塌缩成 '000000' 并静默入库。"""
+    raw = pd.DataFrame([
+        {"f12": float("nan"), "f14": "庄股"},
+        {"f12": "", "f14": "空代码"},
+        {"f12": "  0", "f14": "短码"},
+        {"f12": "600519", "f14": float("nan")},
+        {"f12": "600519", "f14": "贵州茅台"},
+    ])
+    assert [(r[0], r[1]) for r in fsb._rows_from_frame(raw)] == [("600519", "贵州茅台")]
+
+
+def test_float_shares_rejects_non_positive_cap():
+    """f21=0 会写出 0.0，而 COALESCE 只拦 NULL 不拦 0 → 反把库内正确股数覆盖成 0。"""
+    raw = pd.DataFrame([{"f12": "600519", "f14": "甲", "f2": 100.0, "f21": 0.0}])
+    assert fsb._rows_from_frame(raw)[0][4] is None
+
+
+def test_main_dry_run_never_writes(monkeypatch, capsys):
+    monkeypatch.setattr(fsb, "fetch_clist",
+                        lambda: [("600519", "贵州茅台", "酿酒行业", 1.0, 2.0)])
+    monkeypatch.setattr(fsb, "upsert_stock_basic",
+                        lambda rows: pytest.fail("--dry-run 不该写库"))
+    assert fsb.main(["--dry-run"]) == 0
+    assert "未写库" in capsys.readouterr().out
+
+
+def test_main_writes_by_default(monkeypatch):
+    seen: dict[str, int] = {}
+    monkeypatch.setattr(fsb, "fetch_clist",
+                        lambda: [("600519", "贵州茅台", "酿酒行业", 1.0, 2.0)])
+    monkeypatch.setattr(fsb, "upsert_stock_basic",
+                        lambda rows: seen.setdefault("n", len(rows)))
+    assert fsb.main([]) == 1
+    assert seen["n"] == 1
+
+
+def test_main_help_is_not_a_backfill(monkeypatch):
+    """回归：原模块不解析 argv，`--help` 会静默全量抓取 + 写库（2026-10-13 生产库事故）。"""
+    monkeypatch.setattr(fsb, "backfill", lambda: pytest.fail("--help 不该触发回填"))
+    with pytest.raises(SystemExit) as exc:
+        fsb.main(["--help"])
+    assert exc.value.code == 0

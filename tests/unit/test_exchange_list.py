@@ -107,3 +107,40 @@ def test_all_markets_failing_yields_empty_map(monkeypatch):
     monkeypatch.setattr(el.ak, "stock_info_sz_name_code", boom)
     monkeypatch.setattr(el.ak, "stock_info_sh_name_code", boom)
     assert el.fetch_list_date_map() == {}
+
+
+def test_one_market_column_drift_does_not_lose_other_markets(monkeypatch):
+    """2026-10-13：解析循环原先在 try 之外，任一市场改列名会让**已拿到的其它市场一起丢**。
+
+    实测（monkeypatch 出一个列名漂移市场 + 一个正常市场）：修正前直接
+    `KeyError: '上市日期'` 穿透，正常市场的 000001 也没进 map；修正后只丢漂移市场。
+    """
+    def fake_sources():
+        return (
+            ("漂移市场", lambda **_kw: None, {}, "证券代码", "上市日期"),
+            ("正常市场", lambda **_kw: None, {}, "A股代码", "A股上市日期"),
+        )
+
+    def fake_fetch_one(label, fn, kw):
+        if label == "漂移市场":
+            return pd.DataFrame({"证券代码": ["600000"], "换了名字的日期列": ["1999-11-10"]})
+        return pd.DataFrame({"A股代码": ["000001"], "A股上市日期": ["1991-04-03"]})
+
+    monkeypatch.setattr(el, "_sources", fake_sources)
+    monkeypatch.setattr(el, "_fetch_one", fake_fetch_one)
+    assert el.fetch_list_date_map() == {"000001": date(1991, 4, 3)}
+
+
+def test_non_six_digit_codes_are_ignored(monkeypatch):
+    """akshare 的空串/短码不该进 map（源侧偶发空 code 列）。"""
+    def fake_sources():
+        return (("正常市场", lambda **_kw: None, {}, "A股代码", "A股上市日期"),)
+
+    def fake_fetch_one(label, fn, kw):
+        return pd.DataFrame({"A股代码": ["000001", "", "  600000  ", "60000"],
+                             "A股上市日期": ["1991-04-03"] * 4})
+
+    monkeypatch.setattr(el, "_sources", fake_sources)
+    monkeypatch.setattr(el, "_fetch_one", fake_fetch_one)
+    assert el.fetch_list_date_map() == {"000001": date(1991, 4, 3),
+                                        "600000": date(1991, 4, 3)}

@@ -166,6 +166,46 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 - **测试**：`pytest tests/unit tests/architecture -q` → **1696 passed**（上一轮 1657）；新增 `tests/unit/test_exchange_list.py`、`tests/unit/test_fill_list_date.py`，改写 `test_ingest_fallback.py`（补丁目标随 `_em_clist` 迁到 providers 命名空间）、`test_daily.py`（14 步）、`test_dragon_env.py`、`test_ecosystem_service.py`
 - **踩坑**：`FetchError` 是双参（`FetchError(msg, cause)`），`DataError`/`ProviderError` 是单参；`pd.NaT` 也是 `datetime` 实例（`to_date()` 必须**先 `pd.isna` 再 isinstance**）；**`python -m` 少了 `if __name__ == "__main__":` 就是静默空转**（669 日回填第一次「exit 0、无输出、DB 一行没变」就是这个）
 
+### 修复 · 2026-10-13 审计：退市股污染覆盖率分母 + 3 个静默失效 + 文档订正 11 处
+
+- **退市股混入 `stock_basic`（A1，最高危）**：东财 `_EM_FS_ALL_A` 的板块过滤**不排除已退市证券**，
+  EM 恢复可用后一次抓取 5562 行里 **334 行 `f100='-'`**（PT金田A / 国华退 / 退市紫晶…，`f20` 与
+  `f2` 皆空）。`fill_stock_basic` 原先无条件 upsert 且硬编码 `in_market=true` → 这 334 只被算进
+  `services/coverage.py` 的硬门槛分母：覆盖率上限 1.0 → **5223/5562 = 0.939**
+  （门槛 `CONFIG.MIN_COVERAGE=0.90`），安全垫 9.8% → 3.9%，日常少约 218 行即触发
+  `EXIT_COVERAGE_BLOCKED=76` 硬阻断整条 daily。已按 `f100='-'` 丢弃（判据只认字面量，
+  新浪备源无该列不误伤）。
+- **`--help` 会真跑全量回填（A2）**：`fill_stock_basic.main()` 不解析 argv →
+  `python -m emotion_core.data.fill_stock_basic --help` 直接把 339 行写进生产库（本次事故根因）。
+  已补 `argparse` + `--dry-run`，`__main__` 改 `sys.exit(main())`。
+- **写库事故已回滚**：`DELETE FROM stock_basic WHERE list_date IS NULL` → **339 行**（事故前
+  `count(*) = count(list_date) = 5223`，故该条件恰好等于本次新增行）；回滚后
+  `5223/5223/5223/5223/5223`、`industry='-'` 0 行。339 行留档
+  `/home/ubuntu/work/stock_basic.delisted-accident-20261013.csv`。
+- **交易所列表单市场失败隔离失效（A3）**：`exchange_list.fetch_list_date_map` 的 try 只包
+  `_fetch_one`，解析循环在 try 之外 → 任一市场改列名会**连带丢掉另两个市场已拿到的数据**，
+  违反自身 docstring。已整段入 try，另捕 `KeyError/ValueError/TypeError` 只跳该市场。
+- **NaN 判据过窄（A4/A5）**：`str(rec.get("f14") or "")` 对 NaN 失效（NaN 是真值）→ `name`
+  写成 `'nan'`，而 upsert 的 `name=EXCLUDED.name` 会无条件覆盖库内正确名；`f12=""` 经
+  `zfill(6)` 塌缩成 `'000000'` 并静默入库。`_as_float`/`_as_text` 的 `isinstance(v, float)`
+  漏掉 `np.float32('nan')` / `Decimal('NaN')` / `pd.NA`。判据统一改 `pd.isna`（try 包住）。
+- **EM 空帧不回退（A6）**：`_em_clist` 在 `data=null` / `diff=[]` 时静默返回空帧 —— 不抛错也不
+  回退；而 `services/ingest.py` 默认主源路径就是它 → 当日日线静默入库 0 行。已补空帧判定回退新浪。
+- **`f21=0` 会覆盖有效股本（B5）**：`_float_shares_from` 只判 `price>0` 不判 `cap>0`，写出
+  `float_shares=0.0` 会被 `COALESCE` 当有效值（它只拦 NULL）。已改 `cap <= 0` 一并作废。
+- **文档订正 11 处**：`docs/15` 遗留 6 条中 5 条已被 `93975e7` 解决却未加注记（并与下一节「已…」
+  口径矛盾）、`market_cap 5221/5221` 与 `5223/5223` 混用；`docs/11` 的 `data/db.py`
+  （实际在 `utils/db.py`）、providers 列表里的 `wind`（不存在，Wind 在 `services/wind_client.py`）
+  与 `pytdx`（实为 `pytdx_provider.py`）、`data/systemd/`（单元实际在 `orchestration/systemd/`，
+  `close` 已撤销）；`docs/15` 阶段 4 设计「18 个模块 / 5 个 provider」→ 实测 23 个 .py /
+  8 个 provider；`README` 的 `1850 passed` → `1708 passed`、`daily_bar` 337.8 万行 / 663 日 /
+  5221 只 → 340.9 万行 / 669 日 / 5223 只、并注明 DDL 30 张但库内 emotion-core 侧实建 24 张
+  （`ref_*` 4 张 + `ops_*` 2 张未建；同库另有 CPT 项目的 10 张 `cpt_*` 表）；`docs/15` 两处行号
+  引用差 1（`diagnose_service.py:118`→`:117`、`eastmoney.py:104-107`→`:104-106`）。
+- **测试**：`pytest tests/unit tests/architecture -q -p no:randomly` → **1708 passed**（上一轮 1696，
+  本节 +12）；ruff 改动 7 个文件与 `HEAD` 逐条相同、**零新增**；现场 `--dry-run` 实证
+  `过滤已退市证券 334 只（f100='-'），保留 5228 只在市` 且库未被改动。
+
 ---
 
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）

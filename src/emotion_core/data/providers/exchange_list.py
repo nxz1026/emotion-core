@@ -105,15 +105,20 @@ def fetch_list_date_map() -> dict[str, date]:
     for label, fn, kw, code_col, date_col in _sources():
         try:
             df = _fetch_one(label, fn, kw)
+            n = 0
+            for code, raw in zip(df[code_col], df[date_col], strict=True):
+                d = to_date(raw)
+                c = str(code).strip()
+                if len(c) == 6 and c.isdigit() and d is not None:
+                    out[c] = d
+                    n += 1
+            log.info("%s：%d 行 → 解析出 %d 个上市日期", label, len(df), n)
         except FetchError as exc:
             log.warning("%s", exc)
-            continue
-        n = 0
-        for code, raw in zip(df[code_col], df[date_col], strict=True):
-            d = to_date(raw)
-            c = str(code).strip()
-            if c and d is not None:
-                out[c] = d
-                n += 1
-        log.info("%s：%d 行 → 解析出 %d 个上市日期", label, len(df), n)
+        except (KeyError, ValueError, TypeError) as exc:
+            # 列名漂移（KeyError）/ 两列长度不齐（strict=True → ValueError）：只丢这
+            # 一个市场。2026-10-13 订正——try 原先只包住 _fetch_one，解析循环在外面，
+            # 任一市场改列名会让**另外两个市场已拿到的数据一起丢**，与上面 docstring
+            # 承诺的「单市场失败只 warning 跳过」不符。
+            log.warning("%s 解析失败（%r），跳过该市场", label, exc)
     return out

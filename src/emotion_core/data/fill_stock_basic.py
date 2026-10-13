@@ -27,12 +27,20 @@ f20/f21 是 2026-10-12 才接入 `_SINA_TO_EM` 的（配 `_SINA_UNIT_SCALE` 做
 ``COALESCE(EXCLUDED.x, stock_basic.x)``，不用 NULL 覆写已有事实。
 
 `in_market`（覆盖率门槛的分母，见 `services/coverage.py`）在 upsert 时置 true——
-本列表就是当前在市全市场列表。**退市不反扫**：退市股不在本列表里，也就不会被
-置回 false，分母因此偏大、门槛偏严（宁可拦，不放过），待单独工单做退市扫描。
+本列表是「当前在市全市场」列表。**2026-10-13 订正**：原文写「退市股不在本列表
+里」，与实测不符——东财 `_EM_FS_ALL_A` 的板块过滤并不排除已退市证券，EM 恢复
+可用后一次抓取就夹带了 334 只（`f100='-'`，如 PT金田A / 国华退 / 退市紫晶）。
+它们没有行情、不会进 `daily_bar`，却会被置成 `in_market=true`，把覆盖率硬门槛
+（`CONFIG.MIN_COVERAGE=0.90`，`services/coverage.py`）的分母从 5223 抬到 5562，
+覆盖率上限 1.0 → 0.939、安全垫 9.8% → 3.9%。故现在在 `_rows_from_frame` 里按
+`f100='-'` 显式丢弃。**退市不反扫**依然成立：不会把库内已有的退市股改回 false，
+待单独工单做退市扫描。
 """
 from __future__ import annotations
 
 import logging
+import sys
+from collections.abc import Sequence
 from typing import Any
 
 import pandas as pd
@@ -54,9 +62,15 @@ def _as_float(v: Any) -> float | None:
     """None / NaN / 不可解析 → None。
 
     pandas 会把整列的 None 变成 NaN（回退源缺列与空值都走这里）→ 必须显式识别，
-    否则 NaN 会被当有效值写进库。
+    否则 NaN 会被当有效值写进库。判据用 ``pd.isna`` 而**不是** ``isinstance(v,
+    float)``：源列的 dtype 可能是 float32/float16，也可能是 ``Decimal('NaN')``，
+    它们都不是 ``float`` 实例却同样是缺失值（2026-10-13 实测 ``np.float32('nan')``
+    会原样返回 nan 并作为 PG ``NaN`` 入库，``COALESCE`` 拦不住）。
     """
-    if v is None or (isinstance(v, float) and pd.isna(v)):
+    try:
+        if v is None or pd.isna(v):
+            return None
+    except (TypeError, ValueError):  # pd.isna(数组) 返回数组 → 真值判断抛 ValueError
         return None
     try:
         return float(v)
@@ -65,8 +79,15 @@ def _as_float(v: Any) -> float | None:
 
 
 def _as_text(v: Any) -> str | None:
-    """None / NaN / 全空白 → None，否则 strip 后的字符串。"""
-    if v is None or (isinstance(v, float) and pd.isna(v)):
+    """None / NaN / 全空白 → None，否则 strip 后的字符串。
+
+    判据同 `_as_float`。用 ``str(v or "")`` 是不行的：``np.float32('nan')`` 是真值，
+    ``str()`` 会得到字面量 ``'nan'`` 并当作有效名称/代码写进库。
+    """
+    try:
+        if v is None or pd.isna(v):
+            return None
+    except (TypeError, ValueError):
         return None
     return str(v).strip() or None
 
@@ -85,7 +106,9 @@ def _float_shares_from(rec: dict, cols: set[str]) -> float | None:
     if "f21" not in cols:
         return None
     cap = _as_float(rec.get("f21"))
-    if cap is None:
+    if cap is None or cap <= 0:
+        # cap<=0 与 None 同样作废：写 0 会被 upsert 的 COALESCE 当成有效值，反把
+        # 库内已有的正确股数覆盖成 0.0（COALESCE 只拦 NULL，不拦 0）。
         return None
     price = _as_float(rec.get("f2")) if "f2" in cols else None
     if price is None or price <= 0:
@@ -95,24 +118,46 @@ def _float_shares_from(rec: dict, cols: set[str]) -> float | None:
     return cap / price
 
 
+#: 东财用它标记「已退市 / 无行业归属」的证券（f100 的字面值）。见 `_rows_from_frame`。
+_DELISTED_INDUSTRY = "-"
+
+
 def _rows_from_frame(raw: pd.DataFrame) -> list[Row]:
     """DataFrame（EM/Sina 同形，列名 f 码）→ 行元组；缺列取 None，不抛。
 
     回退源（新浪）只有 `_SINA_TO_EM` 收录的字段：f100（行业名）必然缺列 → None，
     由 upsert 的 COALESCE 保留旧值；f20/f21 现已收录，故总市值与流通股本在回退源
     下同样有值。一律用 `record.get` 而非属性访问，缺列即 None。
+
+    **在市过滤（2026-10-13）**：东财 `_EM_FS_ALL_A` 的板块过滤不排除已退市证券，
+    退市股会以 `f100='-'` 夹带进来（实测 5562 行里 334 行如此：PT金田A、国华退、
+    退市紫晶…）。它们没有行情、不会进 `daily_bar`，却会被 upsert 置
+    `in_market=true`；而 `in_market` 是 `services/coverage.py` 硬门槛的分母，
+    会把覆盖率上限从 1.0 压到 5223/5562=0.939（门槛 0.90），安全垫 9.8%→3.9%。
+    故 `f100` 明确为 `'-'` 的行直接丢弃，并记一行 info 便于对账。
+    判据只认字面量 `'-'`：新浪回退源没有 f100 列，`record.get` 取到 None，不会
+    误伤；新股尚未分类时 f100 是 NaN，也仍然保留（`.get` 走 `_as_text` → None）。
     """
     cols = set(raw.columns)
     rows: list[Row] = []
+    dropped = 0
     for rec in raw.to_dict("records"):
-        code = str(rec.get("f12") or "").strip().zfill(6)
-        name = str(rec.get("f14") or "").strip()
-        if not code or not name or not code.isdigit():
+        name = _as_text(rec.get("f14")) or ""
+        code = (_as_text(rec.get("f12")) or "").zfill(6)
+        # zfill 会把空串/无意义短码补成 '000000'，必须显式挡掉后再用 isdigit 校验，
+        # 否则会静默写入假代码；同批出现两条同码时 INSERT ... ON CONFLICT 还会抛
+        # PG「cannot affect row a second time」导致整批失败。
+        if code == "000000" or len(code) != 6 or not code.isdigit() or not name:
             continue
         industry = _as_text(rec.get("f100")) if "f100" in cols else None
+        if industry == _DELISTED_INDUSTRY:
+            dropped += 1
+            continue
         market_cap = _as_float(rec.get("f20")) if "f20" in cols else None
         rows.append((code, name, industry, market_cap,
                      _float_shares_from(rec, cols)))
+    if dropped:
+        log.info("过滤已退市证券 %d 只（f100='-'），保留 %d 只在市", dropped, len(rows))
     return rows
 
 
@@ -173,10 +218,27 @@ def backfill() -> int:
     return n
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI：默认全量刷新；``--dry-run`` 只抓不写。
+
+    2026-10-13 补 argparse：此前本模块不解析 argv，``--help`` 会被静默忽略并**真的
+    执行全量抓取 + 写库**（一次审计拿它试 CLI，就把 339 只退市股写进了生产库）。
+    `fill_list_date` / `fill_industry` 两个姊妹模块一直有 argparse + ``--dry-run``，
+    这里补齐后运维入口才谈得上可试跑。
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="刷新 stock_basic（全市场快照，幂等 upsert）")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只抓取并打印解析行数与样例，不写库")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    return backfill()
+    if not args.dry_run:
+        return backfill()
+    rows = fetch_clist()
+    print(f"dry-run：解析 {len(rows)} 行（未写库），前 3 行 = {rows[:3]}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

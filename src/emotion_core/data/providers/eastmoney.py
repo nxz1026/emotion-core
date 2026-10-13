@@ -210,12 +210,21 @@ def _em_clist(fs: str, fields: list[str], page: int = 100,
     快照随后崩，整条 daily 链自 09-18 起静默停在 09-17。现按异常类型分流：
     FetchError（网络/5xx，可重试已耗尽）→ 回退新浪；DataError（协议变化，
     重试无意义）仍按原语义上抛，不掩盖真实的接口结构变更。
+
+    V3（2026-10-13）：EM 返回 HTTP 200 但 `data=null` / `diff=[]` 时，`_em_clist_paged`
+    会静默返回空帧 —— 不抛 FetchError、也不回退，调用方只看到「0 行」。`services/
+    ingest.py` 默认主源路径正是本函数（`_INGEST_FALLBACK_CHAIN` 缺省为空），空帧会
+    让当日日线静默入库 0 行。故补空帧判定，一并回退新浪。
     """
     try:
-        return _em_clist_paged(fs, fields, page, max_pages)
+        df = _em_clist_paged(fs, fields, page, max_pages)
     except FetchError as exc:
         log.warning("EM clist 不可用（%s），回退新浪全市场源", exc)
         return _sina_clist(fields, page, max_pages)
+    if df.empty:
+        log.warning("EM clist 返回空帧（data=null 或 diff=[]），回退新浪全市场源")
+        return _sina_clist(fields, page, max_pages)
+    return df
 
 
 def _em_data_date_em() -> date:
