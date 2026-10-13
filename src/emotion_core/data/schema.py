@@ -1,6 +1,6 @@
 """建表 DDL（幂等）。emotion-core 数据层 schema。
 
-**30 张表**（2026-10-07 按 `len(DDL)` 实测更正；原文写「27」且下面的清单只列了
+**31 张表**（2026-10-13 按 `len(DDL)` 实测；原文写「27」且下面的清单只列了
 23 个 —— 三个数互相对不上），按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
 新库直接建最新 schema，不需要 _MIGRATIONS。
 
@@ -9,23 +9,20 @@
 - 判据：`derived_bar` `limit_pool_em`
 - 市场：`market_stat` `promotion_day` `ladder_day` `trade_calendar`
 - 信号：`signal` `signal_outcome` `strategy_signal`
-- 交易：`position` `trade_event`
+- 交易：`position` `trade_event` `holding_decision`（R3 持仓决策快照，见 docs/17）
 - 报告：`review_report` `eval_result`
 - 题材：`theme_tag` `theme_group`
 - 运维：`alert` `llm_call_log` `ingest_progress` `hot_rank` `pipeline_state`
-  `data_revision` `watchlist` `ops_raw_manifest` `ops_quota_ledger`
-- 参考数据：`ref_limit_rule` `ref_security_status` `ref_dividend` `ref_rs`
+  `data_revision` `watchlist` `ops_raw_manifest`（Wind 原始响应 JSON）
+  `ops_quota_ledger`（Wind 调用记账）
+- 参考数据：`ref_limit_rule`（涨跌幅制度）`ref_security_status`（ST/*ST 历史）
+  `ref_dividend`（除权除息日）`ref_rs`（相对强弱）
 
-注：生产 `emotion_core` 库的 `public` schema 实测 **32 张** —— 30 张本仓 DDL 减去
-尚未建的 6 张（`ref_*` / `ops_*`），再加 CPT 共用的 8 张 `cpt_*`。**这不是矛盾**：
-「本仓定义几张」与「库里现有几张」是两个事实。
-- 日历：trade_calendar
-- 制度规则：ref_limit_rule（涨跌幅限制等交易所制度）
-- 安全状态：ref_security_status（ST/*ST 历史）
-- 分红除权：ref_dividend（除权除息日，不复权体系下供分析参考）
-- 相对强弱：ref_rs（个股相对市场指数的强度排名）
-- 原始留存：ops_raw_manifest（Wind 原始响应 JSON）
-- 配额台账：ops_quota_ledger（Wind 调用记账）
+注：生产 `emotion_core` 库的 `public` schema 实测 **41 张** = 31 张本仓 DDL +
+CPT（Chan_Pattern_Trader）共用的 10 张 `cpt_*`。**这不是矛盾**：「本仓定义几张」
+与「库里现有几张」是两个事实。2026-10-13 已补建先前漏建的 6 张（`ref_*` 4 + `ops_*` 2）
+—— `create_all` 在本仓 `src` 里**无调用方**，新增表后必须**手动跑一次**，
+否则 DDL 与库内静默漂移。
 """
 from __future__ import annotations
 
@@ -400,6 +397,39 @@ DDL: dict[str, str] = {
             benchmark    text NOT NULL DEFAULT '000300',
             UNIQUE (code, as_of_date, benchmark)
         )""",
+    "holding_decision": """
+        CREATE TABLE IF NOT EXISTS holding_decision (
+            id               bigserial PRIMARY KEY,
+            trade_date       date        NOT NULL,
+            code             text        NOT NULL,
+            -- 输入快照（成本/数量可空 = 只做「未持仓」评估）
+            cost_price       numeric(12,3),
+            shares           integer,
+            -- 市况
+            market_price     numeric(12,3),
+            pnl_pct          double precision,
+            -- 结论
+            action           text        NOT NULL
+                             CHECK (action IN ('ADD','HOLD','TRIM','EXIT')),
+            action_label     text        NOT NULL,
+            sizing_method    text        NOT NULL,
+            suggested_shares integer,
+            position_pct     double precision,
+            suggested_amount numeric(18,2),
+            -- 价位（全部 raw 域，不复权）
+            buy_reference    numeric(12,3),
+            stop_price       numeric(12,3),
+            target_price     numeric(12,3),
+            price_basis      text        NOT NULL,
+            -- 结构化明细
+            ladder           jsonb       NOT NULL DEFAULT '[]'::jsonb,
+            reasons          jsonb       NOT NULL DEFAULT '[]'::jsonb,
+            facts            jsonb       NOT NULL DEFAULT '{}'::jsonb,
+            inputs           jsonb       NOT NULL DEFAULT '{}'::jsonb,
+            cpt_status       text,
+            created_at       timestamptz NOT NULL DEFAULT now(),
+            UNIQUE (trade_date, code)
+        )""",
 }
 
 _INDEXES: tuple[str, ...] = (
@@ -419,6 +449,8 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_ops_quota_ledger_ts ON ops_quota_ledger (ts)",
     "CREATE INDEX IF NOT EXISTS idx_ref_dividend_code ON ref_dividend (code)",
     "CREATE INDEX IF NOT EXISTS idx_ref_rs_code_date ON ref_rs (code, as_of_date)",
+    "CREATE INDEX IF NOT EXISTS idx_holding_decision_code_date"
+    " ON holding_decision (code, trade_date DESC)",
 )
 
 

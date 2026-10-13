@@ -10,7 +10,7 @@ class TestSchema:
             "stock_basic", "daily_bar", "derived_bar", "limit_pool_em",
             "market_stat", "ladder_day", "promotion_day",
             "signal", "signal_outcome", "strategy_signal",
-            "position", "trade_event",
+            "position", "holding_decision", "trade_event",
             "review_report", "eval_result",
             "theme_tag", "theme_group",
             "alert", "llm_call_log", "ingest_progress", "hot_rank",
