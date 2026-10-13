@@ -96,6 +96,188 @@
     ).join("");
   }
 
+  // ── 我的持仓（R3 · docs/17 §9）：成本 + 数量 → 买卖价位与建议数量 ──────────
+  // 展示纪律：①降级必须可见（basis == "pct_fallback" 标「百分比兜底」）
+  // ②缺数显示「—」不显示 0 ③CPT 结论并排不合并（D7）。
+  const HOLDING_KEY = (code) => "emotion.holding." + code;
+  const HOLD_FIELDS = ["holding-cost", "holding-shares", "holding-capital"];
+  let holdingBound = false;
+  let holdingCode = "";
+
+  function price3(v) {
+    return v === null || v === undefined ? "—" : Number(v).toFixed(3);
+  }
+
+  function holdingInput(id) {
+    const raw = ($(id).value || "").trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function holdingRead(code) {
+    try {
+      return JSON.parse(localStorage.getItem(HOLDING_KEY(code)) || "{}") || {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function holdingWrite(code) {
+    try {
+      if (!$("holding-remember").checked) {
+        localStorage.removeItem(HOLDING_KEY(code));
+        return;
+      }
+      localStorage.setItem(HOLDING_KEY(code), JSON.stringify({
+        cost: $("holding-cost").value,
+        shares: $("holding-shares").value,
+        capital: $("holding-capital").value,
+      }));
+    } catch (err) {
+      // 隐私模式 / 配额满：记住失败不影响计算
+    }
+  }
+
+  function holdingQuery(code) {
+    const p = new URLSearchParams({ code: code });
+    const cost = holdingInput("holding-cost");
+    const shares = holdingInput("holding-shares");
+    const capital = holdingInput("holding-capital");
+    if (cost !== null) p.set("cost", cost);
+    if (shares !== null) p.set("shares", shares);
+    if (capital !== null) p.set("capital", capital);
+    if (TRADE_DATE) p.set("as_of", TRADE_DATE);
+    return p.toString();
+  }
+
+  function renderHolding(d) {
+    if (!d || !d.ok) {
+      // 失败/不可用：只报原因，不清空上一次结果（docs/17 §9.1）
+      $("holding-hint").textContent =
+        "无法计算：" + ((d && d.error) || "未知原因（保留上次结果）");
+      return;
+    }
+    $("holding-hint").textContent = "";
+    $("holding-body").style.display = "block";
+
+    const act = $("holding-action");
+    act.textContent = `${d.action_label || d.action} · ${d.code} ${d.name || ""}`;
+    act.className = "holding-action holding-" + String(d.action || "").toLowerCase();
+
+    const h = d.holding || {};
+    if (h.pnl_pct === null || h.pnl_pct === undefined) {
+      $("holding-pnl").textContent = (h.cost === null || h.cost === undefined)
+        ? "未填成本 → 只看加仓参考" : "—";
+    } else {
+      $("holding-pnl").textContent =
+        `浮动 ${h.pnl_pct >= 0 ? "+" : ""}${(h.pnl_pct * 100).toFixed(2)}%`;
+    }
+
+    const ladder = d.ladder || [];
+    const buys = ladder.filter((x) => x.side === "BUY");
+    const fallback = ((d.stop || {}).basis || "") === "pct_fallback";
+    const tag = fallback ? '<span class="holding-tag">百分比兜底</span>' : "";
+    // 买参考 = 买档里**最高**一档。契约上买档已按价格降序（docs/17 §3.3），
+    // 这里仍取 max 以免后端排序回归时静默显示错价。
+    const buyRef = buys.reduce(
+      (a, x) => (x.price !== null && x.price !== undefined
+        && (a === null || x.price > a) ? x.price : a), null);
+    $("holding-buy").innerHTML = (buyRef !== null ? price3(buyRef) : "—") + tag;
+    $("holding-stop").innerHTML = price3((d.stop || {}).price) + tag;
+    $("holding-target").innerHTML = price3((d.target || {}).price) + tag;
+
+    const sz = d.sizing || {};
+    const hasPct = sz.position_pct !== null && sz.position_pct !== undefined;
+    const hasSh = sz.suggested_shares !== null && sz.suggested_shares !== undefined;
+    $("holding-size").textContent = hasSh && hasPct
+      ? `${sz.suggested_shares} 股 / ${(sz.position_pct * 100).toFixed(2)}%`
+      : (hasSh ? `${sz.suggested_shares} 股` : (hasPct
+        ? `${(sz.position_pct * 100).toFixed(2)}%` : "—"));
+    $("holding-size-note").textContent =
+      (sz.detail || "") + (sz.method ? `（口径 ${sz.method}）` : "");
+
+    $("holding-ladder").innerHTML = ladder.map((x) => {
+      const sh = (x.shares === null || x.shares === undefined) ? "—" : `${x.shares} 股`;
+      return `<div class="holding-ladder-row ${String(x.side).toLowerCase()}">` +
+        `<span class="side">${esc(x.side)}</span><span>${price3(x.price)}</span>` +
+        `<span>${sh}</span><span class="muted">${esc(x.why || "")}</span></div>`;
+    }).join("");
+
+    const reasons = d.reasons || [];
+    $("holding-reason-count").textContent = reasons.length;
+    // reasons 是 {kind,text,src} 对象数组（docs/17 §3.3），不是字符串数组 —— 直接
+    // bold(r) 会渲染成 [object Object]。
+    $("holding-reasons").innerHTML =
+      reasons.map((r) => `<li>${bold((r && r.text) || r)}` +
+        `<span class="muted">${r && r.src ? " · " + esc(r.src) : ""}</span></li>`
+      ).join("") || "<li class='muted'>无</li>";
+
+    const cpt = d.cpt || {};
+    const hasCpt = !!(cpt.action || cpt.status);
+    $("holding-cpt-box").style.display = hasCpt ? "block" : "none";
+    $("holding-cpt").textContent = hasCpt ? [
+      cpt.action ? `动作 ${cpt.action}` : "",
+      cpt.status ? `状态 ${cpt.status}` : "",
+      cpt.divergence_status ? `背驰 ${cpt.divergence_status}` : "",
+      (cpt.price_ratio === null || cpt.price_ratio === undefined)
+        ? "复权比 —" : `复权比 ${cpt.price_ratio}`,
+      cpt.note || "",
+    ].filter(Boolean).join(" · ") : "";
+
+    $("holding-disclaimer").textContent = d.disclaimer || "";
+  }
+
+  async function analyzeHolding(code) {
+    if (!code) return;
+    const hint = $("holding-hint").textContent;
+    $("holding-hint").textContent = "计算中…";
+    try {
+      const res = await fetch(`${BASE}/api/holding?${holdingQuery(code)}`);
+      renderHolding(await res.json());
+      holdingWrite(code);
+    } catch (err) {
+      $("holding-hint").textContent = `计算失败：${err}${hint ? "（" + hint + "）" : ""}`;
+    }
+  }
+
+  // 预填：`position` 表有在仓记录 ⇒ 成本/数量 + 标注来源（docs/17 §9.1）
+  async function prefillFromPosition(code) {
+    try {
+      const res = await fetch(`${BASE}/api/holding?code=${encodeURIComponent(code)}&cpt=0`);
+      const d = await res.json();
+      const h = (d && d.holding) || {};
+      if (h.cost === null || h.cost === undefined) return;
+      $("holding-cost").value = h.cost;
+      if (h.shares !== null && h.shares !== undefined) $("holding-shares").value = h.shares;
+      $("holding-source").textContent = "（来自持仓表）";
+    } catch (err) {
+      // 预填失败静默：用户手填即可
+    }
+  }
+
+  function bindHoldingForm(initial) {
+    const code = (initial && initial.code) || "";
+    $("holding-card").style.display = "block";
+    if (!holdingBound) {
+      holdingBound = true;
+      $("holding-calc").addEventListener("click", () => analyzeHolding(holdingCode));
+      HOLD_FIELDS.forEach((id) => {
+        $(id).addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); analyzeHolding(holdingCode); }
+        });
+      });
+    }
+    if (code && code === holdingCode) return;   // 同标的重算：不动用户已改的输入
+    holdingCode = code;
+    const saved = code ? holdingRead(code) : {};
+    $("holding-cost").value = saved.cost || "";
+    $("holding-shares").value = saved.shares || "";
+    $("holding-capital").value = saved.capital || "";
+    $("holding-source").textContent = saved.cost ? "（上次输入）" : "";
+    if (!saved.cost && code) prefillFromPosition(code);
+  }
+
   function renderBuyPoint(bp) {
     if (!bp || (!bp.limit_price && !bp.odds)) {
       $("buy-point-card").style.display = "none";
@@ -347,6 +529,7 @@
       $("stock-hint").textContent =
         `口径：只用 ${data.trade_date} 及之前的样本；标的数据源 daily_bar/derived_bar/market_stat/stock_basic。`;
       renderVerdict(data.verdict, data.basic, data.trade_date);
+      bindHoldingForm({ code: data.basic.code });
       renderBuyPoint(data.buy_point);
       renderTrend(data.trend, data.structure);
       renderSeries(data.series || []);

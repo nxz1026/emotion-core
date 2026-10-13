@@ -94,6 +94,103 @@ def _query_arg(parsed, key: str, default: str = "") -> str:
     return _recover_utf8(raw)
 
 
+def _opt_float(parsed, key: str) -> float | None:
+    """可选**正**浮点参数；缺省/空白 → None，非数字或 ≤0 → `ValueError`（翻 400）。
+
+    `cost`（成本价）与 `capital`（总资金）都没有 ≤0 的语义；拒绝它们是为了跟
+    `_opt_int` 的 shares 口径一致，避免出现「成本 -1 也照样算出决策」这种结果。
+    `not v > 0` 同时挡住 NaN。
+    """
+    raw = _query_arg(parsed, key).strip()
+    if not raw:
+        return None
+    try:
+        v = float(raw)
+    except ValueError:
+        raise ValueError(f"参数 {key} 需要数字，得到 {raw!r}") from None
+    if not v > 0:
+        raise ValueError(f"参数 {key} 需要正数，得到 {raw!r}")
+    return v
+
+
+def _opt_int(parsed, key: str) -> int | None:
+    """可选整数参数；缺省/空白 → None，非法 → `ValueError`（HTTP 侧翻 400）。"""
+    raw = _query_arg(parsed, key).strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"参数 {key} 需要整数，得到 {raw!r}") from None
+
+
+def _query_flag(parsed, key: str, *, default: bool = True) -> bool:
+    """`cpt=0` 这类开关键：`0/false/no/off` 为假，缺省取 `default`。"""
+    raw = _query_arg(parsed, key).strip().lower()
+    if not raw:
+        return default
+    return raw not in ("0", "false", "no", "off")
+
+
+def _opt_date(parsed, key: str) -> date | None:
+    """可选的 `YYYY-MM-DD` 参数；缺省 → None（由服务层取最新有日线的交易日）。"""
+    raw = _query_arg(parsed, key).strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        raise ValueError(f"参数 {key} 需要 YYYY-MM-DD，得到 {raw!r}") from None
+
+
+def holding_payload(parsed) -> tuple[dict, int]:
+    """`GET /api/holding`：单标的持仓决策。返回 `(payload, http_status)`。
+
+    **恒只读**：`persist=False`，HTTP 路径不写 `holding_decision`（落库只走
+    `python -m emotion_core.services.holding_service --persist`）。
+    参数非法 → 400；标的无当日日线 → 服务层给 `ok=False`，翻 404（与 `/api/stock` 同律）。
+    """
+    from emotion_core.services import holding_service
+
+    try:
+        dec = holding_service.decide(
+            _query_arg(parsed, "code"),
+            cost=_opt_float(parsed, "cost"),
+            shares=_opt_int(parsed, "shares"),
+            capital=_opt_float(parsed, "capital"),
+            as_of=_opt_date(parsed, "as_of"),
+            use_cpt=_query_flag(parsed, "cpt"),
+            persist=False,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
+    body = holding_service.to_payload(dec)
+    return body, 200 if body.get("ok") else 404
+
+
+def holdings_payload(parsed) -> tuple[dict, int]:
+    """`GET /api/holdings`：全部 OPEN 持仓的决策列表。返回 `(payload, http_status)`。
+
+    无持仓 → `count=0 / items=[]`（**不是** 404：空仓是正常状态）。参数非法 → 400。
+    """
+    from emotion_core.services import holding_service
+
+    try:
+        items = [holding_service.to_payload(d) for d in holding_service.analyze_holdings(
+            capital=_opt_float(parsed, "capital"),
+            as_of=_opt_date(parsed, "as_of"),
+            use_cpt=_query_flag(parsed, "cpt"))]
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
+    return {
+        "ok": True,
+        "trade_date": items[0]["trade_date"] if items else None,
+        "count": len(items),
+        "items": items,
+        "disclaimer": holding_service.DISCLAIMER,
+    }, 200
+
+
 def _render_template(template_name: str, **context) -> str:
     """渲染 Jinja2 模板。"""
     template = _jinja.get_template(template_name)
@@ -500,6 +597,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             from emotion_core.services import stock_service
             code = _query_arg(parsed, "code")
             self._send_json(stock_service.llm_for(code, _query_date(parsed)))
+            return
+
+        # 持仓决策（R3，docs/17）：HTTP **恒只读**，落库只走 CLI --persist
+        if parsed.path == "/api/holding":
+            self._send_json(*holding_payload(parsed))
+            return
+        if parsed.path == "/api/holdings":
+            self._send_json(*holdings_payload(parsed))
             return
 
         # Trade API (LKL-Trade 决策/结果交换)

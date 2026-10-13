@@ -44,6 +44,36 @@
         </div>
         <div class="chip-row" id="verdict-tags"></div>
     </div>
+    <div class="card holding-card" id="holding-card" style="display:none">
+        <h2>我的持仓 <span class="muted" id="holding-source"></span></h2>
+        <div class="holding-form">
+            <label>成本价 <input id="holding-cost" type="number" step="0.001" min="0" placeholder="21.500"></label>
+            <label>数量（股）<input id="holding-shares" type="number" step="100" min="0" placeholder="1000"></label>
+            <label>总资金（元，可空）<input id="holding-capital" type="number" step="10000" min="0" placeholder="300000"></label>
+            <button type="button" id="holding-calc">计算</button>
+            <label class="holding-remember"><input id="holding-remember" type="checkbox" checked> 记住</label>
+        </div>
+        <p class="muted" id="holding-hint"></p>
+        <div id="holding-body" style="display:none">
+            <div class="holding-head">
+                <strong id="holding-action">—</strong>
+                <span class="muted" id="holding-pnl"></span>
+            </div>
+            <div class="stats">
+                <div class="stat"><div class="stat-label">买参考</div><div class="stat-value" id="holding-buy">—</div></div>
+                <div class="stat"><div class="stat-label">止损</div><div class="stat-value" id="holding-stop">—</div></div>
+                <div class="stat"><div class="stat-label">目标</div><div class="stat-value" id="holding-target">—</div></div>
+                <div class="stat"><div class="stat-label">建议仓位</div><div class="stat-value" id="holding-size">—</div></div>
+            </div>
+            <div class="holding-ladder" id="holding-ladder"></div>
+            <p class="muted" id="holding-size-note"></p>
+            <details><summary>依据（<span id="holding-reason-count">0</span> 条）</summary>
+                <ul class="reason-list" id="holding-reasons"></ul></details>
+            <details id="holding-cpt-box"><summary>CPT 并排结论（原样，不参与本系统判定）</summary>
+                <p class="muted" id="holding-cpt"></p></details>
+            <p class="muted" id="holding-disclaimer"></p>
+        </div>
+    </div>
     <div class="card" id="buy-point-card" style="display:none">
         <h2>买点参考</h2>
         <div class="stats">

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, datetime
 from typing import Any
 
@@ -35,6 +36,11 @@ log = logging.getLogger("emotion_core.data.providers.exchange_list")
 
 _FETCH_RETRY: int = getattr(CONFIG, "FETCH_RETRY", 3)
 _TIME_SLEEP: float = getattr(CONFIG, "TIME_SLEEP", 0.5)
+
+#: 单市场请求的硬超时（秒）。akshare 内部 requests **不带超时**，上游不回包就会把
+#: 调用方无限期钉住——2026-10-13 实测：daily 的 `basic` 步在上交所列表请求上卡死
+#: 7 小时，顺带把当天 derive/market/ladder/signal/... 全部拖没。见 `_fetch_one`。
+_FETCH_TIMEOUT: float = 20.0
 
 #: 深交所：一个 symbol 覆盖深市全部 A 股（主板 + 创业板）。
 _SZ_SYMBOL = "A股列表"
@@ -85,11 +91,39 @@ def _sources() -> tuple[tuple[str, Any, dict[str, str], str, str], ...]:
 
 
 def _fetch_one(label: str, fn: Any, kw: dict[str, str]) -> pd.DataFrame:
-    """单市场列表请求（带重试）；失败或返回空一律抛 FetchError。"""
-    try:
-        df = retry_fetch(fn, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP, **kw)
-    except Exception as exc:  # noqa: BLE001 —— 网络源异常类型不定
+    """单市场列表请求（带重试 + **硬超时**）；失败/超时/返回空一律抛 FetchError。
+
+    为什么要超时：akshare 内部的 ``requests`` 调用没有 timeout 参数，上游半开连接
+    或不回包时 ``retry_fetch`` 也救不了——它只会无限等下去。2026-10-13 实测
+    ``ak.stock_info_sh_name_code`` 把 daily 的 ``basic`` 步钉死 7 小时（进程
+    ``S`` 状态、ESTAB 到 ``202.122.113.77:443``），当天后续 9 个步骤全部没跑。
+
+    CPython 无法真正 kill 一个卡在 socket read 的线程，所以用 **daemon 线程 +
+    ``join(timeout)``**：超时后调用方立刻放弃该市场（按设计只 warning 跳过），
+    卡住的线程随进程退出消失。代价是超时场景会泄漏一个线程——远小于卡死流水线。
+
+    超时值 ``_FETCH_TIMEOUT`` 取 20s：正常一次列表请求实测 <2s（含重试），
+    20s 足够容错又不至于让某个市场拖住整步。
+    """
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["df"] = retry_fetch(
+                fn, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP, **kw)
+        except Exception as exc:  # noqa: BLE001 —— 网络源异常类型不定
+            box["err"] = exc
+
+    t = threading.Thread(target=_run, name=f"exchange-list-{label}", daemon=True)
+    t.start()
+    t.join(_FETCH_TIMEOUT)
+    if t.is_alive():
+        raise FetchError(f"{label}列表请求超时（>{_FETCH_TIMEOUT:g}s）",
+                         TimeoutError(f"timeout after {_FETCH_TIMEOUT:g}s"))
+    if "err" in box:
+        exc = box["err"]
         raise FetchError(f"{label}列表请求失败（{kw}）", exc) from exc
+    df = box.get("df")
     if df is None or len(df) == 0:
         raise FetchError(f"{label}列表返回空（{kw}）", ValueError("empty frame"))
     return df

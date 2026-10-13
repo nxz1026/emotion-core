@@ -220,6 +220,18 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 - **`derived_bar` 口径断点（已定：前向生效，用户 m03030）**：`is_st` 转真**打开**了 `derive.py:88` 的 `WHERE NOT s.is_st`（该谓词历史上从未生效）⇒ `derived_bar` **自 2026-10-13 起不再收录 ST 股**，与 2024-01-02 ~ 10-12 的历史形成断点（当日影响约 198 行、其中涨停约 2 行；实测 `compute_derived(2026-10-12)` 返回 **5025 = 5223 − 198**，旧日期不掉行因为 upsert 从不 DELETE）。**不**用今天的 `is_st` 回扫历史：`derive` 阈值是板块口径（无 ST 的 5% 分支），库里 2465 行 ST 涨停其实是**该股变 ST 之前**的真实涨停。`algorithms/derive.py` 已就地加注释留痕；要消除断点须先上 `ref_security_status` 的 PIT 回填，详见 `docs/15-实施追踪.md`「is_st 落地」节。
 
 
+### 新增 · 2026-10-13 R3 持仓决策：`holding_decision` + 价位/数量算法 + CPT 客户端 + `/api/holding` + 个股页卡片
+
+- 新表 `holding_decision`（23 列，`UNIQUE (trade_date, code)`）落 `data/schema.py` → 本仓 DDL 31 张、库内 public 41 张（31 + CPT 共用 10 张 `cpt_*`）。
+- `domain/holding.py`（`Holding` / `Levels` / `Sizing` / `Ladder` / `Decision`）、`algorithms/levels.py`（CPT 结构位优先 + 固定百分比兜底）、`algorithms/sizing.py`（固定风险 + 流动性上限 + 单票上限取小；按手数取整，主板 100 / 科创板 200；只剩单票上限时不给股数）。
+- `services/cpt_client.py`（CPT 只读 HTTP：绝不抛、只回环、永不传 `ensure_factors`、两种 `data_quality` 形状）、`data/holding_store.py`、`services/holding_service.py`（`decide()` / `analyze_holdings()` / CLI，默认只读、`--persist` 才写，`(trade_date, code)` 幂等）。
+- HTTP `GET /api/holding`（`code` / `cost` / `shares` / `capital` / `as_of` / `cpt`）+ `GET /api/holdings`，**恒只读**；个股页新增「持仓决策」卡片（`templates/stock.html` + `static/stock.js` + `static/style.css`）。
+- 设计依据 `docs/17-持仓决策-功能与代码设计.md`（决策 D1–D9）；全量 `pytest tests/unit tests/architecture` → **1935 passed**。
+
+### 修复 · 2026-10-13 `exchange_list` 加 20s 硬超时（daily `basic` 步曾卡死 8 小时）
+
+- `data/providers/exchange_list.py` 的 `_fetch_one()` 由「只有 `retry_fetch` + 空帧检查」改为 **daemon 线程 + `t.join(_FETCH_TIMEOUT=20.0)`**，超时抛 `FetchError`，`fetch_list_date_map()` 按既有口径 warning 跳过该市场。
+- 起因：2026-10-13 akshare 上交所 `stock_info_sh_name_code` 那条读挂住（无超时），daily 流水线自 `09:23` 卡到 `18:00+`，当日 `derive` / `market` / `ladder` / `signal` / `promotion` / `theme` / `strategy` / `outcome` / `health` 全未执行。
 ---
 
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）

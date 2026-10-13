@@ -202,7 +202,7 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 ```bash
 cd emotion-core
 # 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1708 passed
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1935 passed
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
@@ -221,6 +221,12 @@ PYTHONPATH=src .venv/bin/python -m emotion_core.data.fill_list_date --only-missi
 
 # 生态评级历史回填（运维入口；只读库内表、不碰外部源，0 Wind 额度）
 PYTHONPATH=src .venv/bin/python -m emotion_core.services.ecosystem_service --start 2024-01-02 --end 2026-10-12
+
+# 持仓决策（运维入口；★ 默认只读，`--persist` 才写 holding_decision；`--no-cpt` 关 CPT 查询）
+PYTHONPATH=src .venv/bin/python -m emotion_core.services.holding_service --code 601811 --cost 21.5 --shares 1000 --capital 1000000
+
+# 持仓决策（HTTP，恒只读）：GET /api/holding?code=601811&cost=21.5&shares=1000&capital=1000000&cpt=0
+#                             GET /api/holdings   ← 全部 OPEN 持仓（`position` 表驱动）
 ```
 
 ---
@@ -245,6 +251,8 @@ emotion-core/
 │   ├── 13-架构评审与逐层代码框架设计.md   ★ 评审结论 + 逐层代码框架
 │   ├── 14-自主决策日志.md               逐条拍板留痕
 │   ├── 15-实施追踪.md                   缺口修复 / 运维记录 / 踩坑
+│   ├── 16-Trade-API-Protocol.md        LKL-Trade 决策 / 结果交换协议
+│   ├── 17-持仓决策-功能与代码设计.md     ★ R3 持仓决策（DB→后端→前端 + S1–S7 实施）
 │   ├── decisions/                    ADR：0001 盘后约束与买点口径 + 口径冲突清单
 │   ├── evidence/                     取证材料（合并分析 + 展示层取证）
 │   └── archive-lkl/                  ★ lkl 策略规格书归档（只读，46 文件）

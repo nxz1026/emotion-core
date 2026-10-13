@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 
 import pandas as pd
@@ -95,6 +96,26 @@ def test_fetch_one_wraps_network_error_as_fetch_error(monkeypatch):
     monkeypatch.setattr(el.ak, "stock_info_sz_name_code", boom)
     with pytest.raises(FetchError, match="请求失败"):
         el._fetch_one("深交所A股列表", el.ak.stock_info_sz_name_code, {"symbol": "A股列表"})
+
+
+def test_fetch_one_times_out(monkeypatch):
+    """akshare 内部 requests 没超时 → `_fetch_one` 必须自己兜底。
+
+    回归：2026-10-13 上交所 `stock_info_sh_name_code` 挂住，daily 的 `basic` 步
+    在 `fill_list_date` 里卡了 7 小时（MainPID 314478 一直 sleeping）。
+    """
+    monkeypatch.setattr(el, "_FETCH_TIMEOUT", 0.05)
+    monkeypatch.setattr(el, "_FETCH_RETRY", 1)
+    monkeypatch.setattr(el, "_TIME_SLEEP", 0)
+
+    def hang(**_kw):
+        time.sleep(0.4)
+        return pd.DataFrame()
+
+    t0 = time.monotonic()
+    with pytest.raises(FetchError, match="超时"):
+        el._fetch_one("上交所主板A股", hang, {"symbol": "主板A股"})
+    assert time.monotonic() - t0 < 0.35      # 远小于 hang 的 0.4s
 
 
 def test_all_markets_failing_yields_empty_map(monkeypatch):
