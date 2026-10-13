@@ -85,6 +85,13 @@ WITH u AS (
          (round(b.low * 100))::bigint   AS l_c,
          (b.high - b.low) / b.pre_close * 100 AS amp
   FROM daily_bar b JOIN stock_basic s ON s.code = b.code
+  -- ST 剔除：`stock_basic.is_st` 是**当前口径**（非 PIT，见 docs/04 数据源层讨论），
+  -- 只有「算当日」时才等价于 PIT；拿它回扫历史会误删该股变 ST 之前的真实涨停
+  -- （涨停阈值走 {pct} 板块口径，没有 ST 的 5 个百分点分支）。
+  -- 该谓词在 2026-10-13 之前**从未生效**（is_st 全表为 false）⇒ derived_bar 的历史
+  -- 含 ST，自该日起不含 ST，是已知断点；决策与影响见 docs/15-实施追踪.md「is_st 落地」节。
+  -- 注意：本段注释里**不要出现百分号字面量** —— psycopg 会把它当占位符扫描
+  -- （报 incomplete placeholder），整个 SQL 在带参数执行时直接 ProgrammingError。
   WHERE NOT s.is_st
     AND {bse}
     AND b.date BETWEEN %s AND %s
@@ -111,6 +118,10 @@ def render_sql() -> str:
 
     三组 config 驱动谓词：涨停价比 {pct}（板块比例）、北交所剔除 {bse}（C7）、
     价格可用性 {finite_*}（NULL/NaN 剔除）。
+
+    另有一条**非** config 驱动的谓词 `WHERE NOT s.is_st`（见 SQL 内注释）：它读的是
+    `stock_basic.is_st` 这个「当前口径」标志，2026-10-13 前全表为 false 故从未生效，
+    同日转真后 `derived_bar` 自该日起不含 ST（历史含 ST ⇒ 已知断点）。
     """
     return (_DERIVE_SQL
             .replace("{pct}", _pct_case("b.code"))

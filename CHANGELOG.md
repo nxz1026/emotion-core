@@ -217,7 +217,7 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 
 - **`stock_basic.is_st` 全表为 false** —— 简称带 `ST`/`*ST` 的 **198** 只全被写成 false。该列是 `ref_security_status`（T7，ST SCD2）的**入口过滤**（`SELECT code FROM stock_basic WHERE is_st = true`），全 false ⇒ Wind 的 ST 事件回填**永远取不到任何 code**。改为在 `fill_stock_basic` 从简称前缀落 `is_st`（先剥 `XD`/`XR`/`DR`，除权日简称是 `XD*STxx`），**零 Wind 额度**；PIT（历史 ST）语义仍由 `ref_security_status` 的 SCD2 承担，本次不动。
 - **修停牌股个股诊断崩溃**：`GET /api/stock?code=000016`（*ST康佳A，停牌）返回 **Empty reply from server** —— `algorithms/stock.py:110 attach_volume_ratio` 在「前 5 根成交量全 0」时 `ZeroDivisionError`，被 `http.server` 吞成空回复；任何停牌股都会中招。均量为 0 时量比返回 `None`，并补回归测试。
-- ⚠️ **待拍板**：`is_st` 转真会**打开** `derive.py:88` 的 `WHERE NOT s.is_st`（该谓词历史上从未生效）⇒ `derived_bar` 自 2026-10-13 起不再收录 ST 股，与 2024-01-02 ~ 10-12 的历史形成**断点**（当日影响约 198 行、其中涨停约 2 行）。不能用今天的 `is_st` 回扫历史：`derive` 阈值是板块口径（无 ST 的 5% 分支），库里 2465 行 ST 涨停其实是**该股变 ST 之前**的真实涨停。三个选项见 `docs/15-实施追踪.md` 同名小节。
+- **`derived_bar` 口径断点（已定：前向生效，用户 m03030）**：`is_st` 转真**打开**了 `derive.py:88` 的 `WHERE NOT s.is_st`（该谓词历史上从未生效）⇒ `derived_bar` **自 2026-10-13 起不再收录 ST 股**，与 2024-01-02 ~ 10-12 的历史形成断点（当日影响约 198 行、其中涨停约 2 行；实测 `compute_derived(2026-10-12)` 返回 **5025 = 5223 − 198**，旧日期不掉行因为 upsert 从不 DELETE）。**不**用今天的 `is_st` 回扫历史：`derive` 阈值是板块口径（无 ST 的 5% 分支），库里 2465 行 ST 涨停其实是**该股变 ST 之前**的真实涨停。`algorithms/derive.py` 已就地加注释留痕；要消除断点须先上 `ref_security_status` 的 PIT 回填，详见 `docs/15-实施追踪.md`「is_st 落地」节。
 
 
 ---
