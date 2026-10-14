@@ -239,3 +239,193 @@ class TestRecommendationView:
     @pytest.mark.parametrize("bad", [None, {}, {"unknown": 1}])
     def test_empty_is_none(self, bad):
         assert cc.recommendation_view(bad) is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R4 / docs/18 §7.1 新函数
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestNormUser:
+    @pytest.mark.parametrize("ok", ["default", "test_user", "user-1", "a.b", "A1", "x" * 32])
+    def test_valid(self, ok):
+        assert cc._norm_user(ok) == ok
+
+    @pytest.mark.parametrize(
+        "bad", [None, "", "   ", 123, "a b", "x" * 33, "a@b", "a/b", "a:b", "a*b", "奎爷"],
+    )
+    def test_invalid_falls_back(self, bad):
+        assert cc._norm_user(bad) == "default"
+
+
+class TestPostJson:
+    def test_ok(self, monkeypatch):
+        seen: dict = {}
+
+        def fake(req, timeout=None):
+            seen["url"] = req.full_url
+            seen["method"] = req.get_method()
+            seen["body"] = req.data
+            seen["user"] = req.headers.get("X-cpt-user")
+            return _FakeResp(b'{"created": true}')
+
+        monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
+        resp = cc._post_json("/api/x", {"action": "add"}, user="test_user")
+        assert resp == {"created": True}
+        assert seen["url"] == "http://127.0.0.1:8010/api/x"
+        assert seen["method"] == "POST"
+        assert seen["body"] == b'{"action": "add"}'
+        assert seen["user"] == "test_user"
+
+    def test_http_error_returns_none(self, monkeypatch):
+        def boom(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 500, "err", {}, io.BytesIO(b""))
+
+        monkeypatch.setattr(cc.urllib.request, "urlopen", boom)
+        assert cc._post_json("/api/x", {"action": "add"}, user="u") is None
+
+
+class TestFetchSnapshotEnsureFactors:
+    def test_ensure_factors_true_appends_param(self, monkeypatch):
+        seen = _patch_urlopen(monkeypatch, json.dumps({"overlays": {}}).encode())
+        cc.fetch_snapshot("601811", ensure_factors=True)
+        assert "ensure_factors=1" in seen["url"]
+
+    @pytest.mark.parametrize("val", [None, False])
+    def test_ensure_factors_false_or_none_omits_param(self, monkeypatch, val):
+        seen = _patch_urlopen(monkeypatch, json.dumps({"overlays": {}}).encode())
+        cc.fetch_snapshot("601811", ensure_factors=val)
+        assert "ensure_factors" not in seen["url"]
+
+
+class TestTrackFunctions:
+    """track_* 只校验路径、method、user 头；不打实库。"""
+
+    def test_track_list(self, monkeypatch):
+        seen = _patch_urlopen(monkeypatch, json.dumps([{"code": "601811"}]).encode())
+        resp = cc.track_list(user="test_user")
+        assert isinstance(resp, list) and resp[0]["code"] == "601811"
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track?"
+
+    def test_track_add(self, monkeypatch):
+        seen: dict = {}
+
+        def fake(req, timeout=None):
+            seen["method"] = req.get_method()
+            seen["url"] = req.full_url
+            seen["body"] = req.data
+            seen["user"] = req.headers.get("X-cpt-user")
+            return _FakeResp(b'{"created": true}')
+
+        monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
+        assert cc.track_add("601811", user="test_user", note="watch") is True
+        assert seen["method"] == "POST"
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track"
+        assert seen["user"] == "test_user"
+        assert json.loads(seen["body"]) == {"action": "add", "code": "601811", "note": "watch"}
+
+    def test_track_add_bad_code(self):
+        assert cc.track_add("abc", user="u") is False
+
+    def test_track_remove(self, monkeypatch):
+        seen: dict = {}
+
+        def fake(req, timeout=None):
+            seen["body"] = req.data
+            return _FakeResp(b'{"removed": true}')
+
+        monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
+        assert cc.track_remove("601811", user="u") is True
+        assert json.loads(seen["body"]) == {"action": "remove", "code": "601811"}
+
+    def test_track_restore(self, monkeypatch):
+        seen: dict = {}
+
+        def fake(req, timeout=None):
+            seen["body"] = req.data
+            return _FakeResp(b'{"restored": true}')
+
+        monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
+        assert cc.track_restore("601811", user="u") is True
+        assert json.loads(seen["body"]) == {"action": "restore", "code": "601811"}
+
+    def test_track_advice(self, monkeypatch):
+        payload = json.dumps({
+            "suggested_points": {"buy": [{"price_level": 15.0, "confirmed": True}]}
+        }).encode()
+        seen = _patch_urlopen(monkeypatch, payload)
+        resp = cc.track_advice("601811", user="test_user")
+        assert isinstance(resp, dict)
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track/601811/advice?"
+
+    def test_track_speak(self, monkeypatch):
+        seen: dict = {}
+
+        def fake(req, timeout=None):
+            seen["method"] = req.get_method()
+            seen["url"] = req.full_url
+            return _FakeResp('{"text": "说人话：…"}'.encode())
+
+        monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
+        assert cc.track_speak("601811", user="u") is True
+        assert seen["method"] == "POST"
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track/601811/speak"
+
+
+class TestPointsView:
+    def test_full(self):
+        advice = {
+            "suggested_points": {
+                "buy": [{"price_level": 15.0, "confirmed": True}, {"price_level": 14.5}],
+                "sell": [{"price_level": 27.0, "confirmed": False}],
+                "stop_loss_reference": 14.2,
+            },
+            "raw_close": 21.14,
+            "price_ratio": 1.061,
+            "as_of_basis": "close",
+        }
+        v = cc.points_view(advice)
+        assert v is not None
+        assert v["buy"][0]["price_level"] == 15.0 and v["buy"][0]["confirmed"] is True
+        assert v["buy"][1]["confirmed"] is False
+        assert v["sell"][0]["price_level"] == 27.0
+        assert v["stop_loss"] == 14.2
+        assert v["raw_close"] == 21.14 and v["price_ratio"] == 1.061
+        assert v["as_of_basis"] == "close"
+
+    def test_missing_fields_are_none(self):
+        v = cc.points_view({"suggested_points": {}})
+        assert v is not None
+        assert v["buy"] is None and v["sell"] is None
+        assert v["stop_loss"] is None
+
+    def test_bad_input(self):
+        assert cc.points_view(None) is None
+        # suggested_points 非 dict → 所有买点/卖点字段为 None，但仍返回结构
+        v = cc.points_view({"suggested_points": "nope"})
+        assert v is not None
+        assert v["buy"] is None and v["sell"] is None
+
+
+class TestHumanText:
+    def test_str(self):
+        assert cc.human_text({"human": " 说人话：快跑 "}) == "说人话：快跑"
+
+    def test_dict(self):
+        assert cc.human_text({"human": {"text": "快跑"}}) == "快跑"
+
+    def test_missing(self):
+        assert cc.human_text({}) is None
+        assert cc.human_text({"human": ""}) is None
+        assert cc.human_text({"human": 123}) is None
+
+
+class TestPointsEmptyReason:
+    def test_ok(self):
+        assert cc.points_empty_reason(
+            {"suggested_points": {"reason": "no_structure"}}
+        ) == "no_structure"
+
+    def test_missing(self):
+        assert cc.points_empty_reason({}) is None
+        assert cc.points_empty_reason({"suggested_points": {}}) is None
