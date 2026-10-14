@@ -1,5 +1,9 @@
 """P3-3 自选股（watchlist）：add/rm/list + 当日状态摘要。
 
+⚠️  R4 关注列表真源已迁 CPT `cpt_track`（see `services/watchlist_service.py`）。
+    本模块仍维护本地 `watchlist` 表，供 review / strategy universe 等既有调用方使用；
+    新增的「追踪」/「关注列表」语义请走 `watchlist_service`（CPT 侧是真源）。
+
 watchlist 表 = 用户自选清单（code PK, name 冗余快照, note）。CLI 与报告
 段共用 status_rows()——单查询取齐当日行情/派生态，避免双实现漂移。
 

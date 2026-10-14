@@ -302,10 +302,21 @@ class TestTrackFunctions:
     """track_* 只校验路径、method、user 头；不打实库。"""
 
     def test_track_list(self, monkeypatch):
-        seen = _patch_urlopen(monkeypatch, json.dumps([{"code": "601811"}]).encode())
+        seen = _patch_urlopen(
+            monkeypatch,
+            json.dumps({"available": True, "items": [{"code": "601811"}], "recycle": []}).encode(),
+        )
         resp = cc.track_list(user="test_user")
         assert isinstance(resp, list) and resp[0]["code"] == "601811"
         assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track?"
+
+    def test_track_list_degraded(self, monkeypatch):
+        """CPT available=False → None（不是空列表）。"""
+        _patch_urlopen(
+            monkeypatch,
+            json.dumps({"available": False, "reason": "DBError", "items": []}).encode(),
+        )
+        assert cc.track_list(user="u") is None
 
     def test_track_add(self, monkeypatch):
         seen: dict = {}

@@ -356,13 +356,19 @@ def recommendation_view(recommendation: dict[str, Any] | None) -> dict[str, Any]
 def track_list(*, user: str | None = DEFAULT_USER) -> list[dict[str, Any]] | None:
     """GET `/api/dashboard/track` → 当前用户全部活跃追踪（CPT 不可达 → None）。
 
+    CPT 返回 ``{"available": True, "items": [...], "recycle": [...]}``；
+    ``available=False`` 时（DB 故障降级）返回 ``None``。
+
     返回 ``None`` 表示 CPT 挂了（调用方据此走降级）；``[]`` 表示 CPT 通了但该用户
     没追踪任何票。**绝不**由本模块把它翻译成布尔或空字符串。
     """
     data = _get_json_any(_TRACK_PREFIX, {}, CPT_TIMEOUT, user=user)
-    if not isinstance(data, list):
+    if not isinstance(data, dict):
         return None
-    return data
+    if data.get("available") is not True:
+        return None
+    items = data.get("items")
+    return items if isinstance(items, list) else None
 
 
 def track_add(code: str, *, user: str | None = DEFAULT_USER, note: str = "") -> bool:
