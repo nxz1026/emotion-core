@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+### 新增 · 2026-10-15 情绪+缠论整合（emotion-core 侧 R4 S1–S7）
+
+> 唯一设计依据：`docs/18-情绪+缠论整合-功能与代码设计.md`。CPT 侧（C1/S0/C2①–④）已先落地。
+
+- **`services/cpt_client.py`（S1）**：新增 `CPT_ENSURE_TIMEOUT=30.0`、`_norm_user`、`_post_json`；`fetch_snapshot` 加 keyword-only `ensure_factors: bool | None = None`（仅 `True` 才拼 `?ensure_factors=1`）；`fetch_snapshot/fetch_recommendation` 加 keyword-only `user`（透传 `X-CPT-User` 头）；新增 `track_list/add/remove/restore/advice/speak`（track 写操作走 POST + JSON body）、`points_view`（前端契约 §9.3）、`human_text`、`points_empty_reason`；`__all__` 新增 9 名。commit `d712ae0`。
+- **`services/watchlist_service.py`（S2，新建，103 行）**：`list_codes/add/remove/restore/is_tracked`；CPT 不可达时读返回 `([], False)`、写返回 `(False, "CPT 不可达：…")`，**绝不回落本地 `watchlist` 表**（防真源分裂）；`watchlist.py` 顶部标 legacy。commit `38a46de`。
+- **`algorithms/sizing.py` + `services/holding_service.py` + `data/holding_store.py` + `data/schema.py`（S3）**：`sizing.py` 加 `SIZING_BOUNDS` = `{"risk_pct": (0.001, 0.05), "liq_pct": (0.001, 0.05), "max_position_pct": (0.05, 1.0)}`；`plan_shares` 接受 `risk_pct/liq_pct/max_position_pct/lot`（默认值不变，已有调用方零改动）；`holding_service.decide` 加 `sizing_params/ensure_factors/cpt_user` + `_resolve_sizing_params`（越界回落默认 + `reasons` 记 `sizing_param_ignored`）；`holding_decision` 表加 `sizing_params jsonb` 列。commit `918c460`。
+- **`presentation/server.py`（S4）**：`_opt_pct`（闭区间）+ `_opt_user`；`holding_payload/holdings_payload` 加 `sizing_params/ensure_factors/cpt_user`；`cpt_points_payload`（GET `/api/cpt/points` 恒只读）；`watchlist_payload`（GET `/api/watchlist` 恒只读）；`_handle_watchlist_post`（POST `/api/watchlist` add/remove/restore，body≤4KiB，非法 JSON→400）；`to_payload` 补 `inputs` 字段。临时端口 8202 实跑五端点全通过。commit `688f9b9`。
+- **`presentation/templates/stock.html` + `static/stock.js` + `static/dashboard.css`（S5）**：holding 表单加 `<details class="holding-sizing">` 折叠区（三参数 number 输入）；verdict 头部加 `.verdict-actions` 包 `#watchlist-toggle` 按钮 + badge；`STOCK_SIZING_DEFAULTS/BOUNDS` 注入；`stock.js` 加 `SIZING_FIELDS` + `holdingQuery` + `renderHolding` 渲染 CPT 点位 + `refreshWatchlistToggle/toggleWatchlist/bindWatchlistToggle`；`dashboard.css` 加 `.holding-sizing/.verdict-actions/#watchlist-toggle/.holding-cpt-points`。commit `4391ace`。
+- **CLI 扩展 + 常量一致性（S6）**：`holding_service.main()` 新增 `--risk-pct/--liq-pct/--max-position-pct`（闭区间校验）+ `--ensure-factors` + `--user`；`test_levels.py::TestConstantsMatchCptLive` 从 CPT 仓源码 import 真实常量（`BI_LOOKBACK/ZHONGSHU_LOOKBACK/BUY_BUFFER/SELL_BUFFER/STOP_LOSS_RATIO`）逐值比对防漂移。commit `f90f732`。
+- **文档（S7）**：`docs/15` 追加 R4 小节；`CHANGELOG` 本条目；`README` 加 R4 入口 + `docs/18` 目录项 + HTTP 运维命令；`docs/18` ↔ `docs/17` 互引；订正 `docs/18`/`docs/17` 的 `sudo systemctl restart cpt-dashboard` 过时说法（实证 `kill -9 <MainPID>` 触发 `Restart=on-failure`）。
+- **全量 `pytest tests/unit tests/architecture` → 2079 passed, ruff 全绿。**
+
 ### 变更 · 2026-10-14 ST PIT 批量回补入口（Wind）· 数据未落库
 
 - `services/ref_security_status.py` 新增 `backfill_security_status_bulk()`：用 `search_stocks` 按半年窗口枚举「实施ST / 撤销ST」，替代逐股烧配额的 `get_stock_events` 路径（全量 2024 起约 20 次调用）。

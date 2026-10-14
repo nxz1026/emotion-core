@@ -224,9 +224,14 @@ PYTHONPATH=src .venv/bin/python -m emotion_core.services.ecosystem_service --sta
 
 # 持仓决策（运维入口；★ 默认只读，`--persist` 才写 holding_decision；`--no-cpt` 关 CPT 查询）
 PYTHONPATH=src .venv/bin/python -m emotion_core.services.holding_service --code 601811 --cost 21.5 --shares 1000 --capital 1000000
+#                           + 可选：--risk-pct 0.02 --liq-pct 0.01 --max-position-pct 0.5 --ensure-factors --user alice
 
 # 持仓决策（HTTP，恒只读）：GET /api/holding?code=601811&cost=21.5&shares=1000&capital=1000000&cpt=0
-#                             GET /api/holdings   ← 全部 OPEN 持仓（`position` 表驱动）
+#                             + 可选：risk_pct=0.02&liq_pct=0.01&max_position_pct=0.5&ensure_factors=1&user=alice
+#                             GET /api/holdings   ← 全部 OPEN 持仓（`position` 表驱动；参数同上）
+# CPT 点位（HTTP，恒只读）：GET /api/cpt/points?code=601811&user=alice
+# 关注列表（HTTP，恒只读）：GET /api/watchlist?user=alice
+# 关注列表（HTTP，写）：  POST /api/watchlist  body={"action":"add|remove|restore","code":"601811","note":"...","user":"alice"}
 ```
 
 ---
@@ -253,6 +258,7 @@ emotion-core/
 │   ├── 15-实施追踪.md                   缺口修复 / 运维记录 / 踩坑
 │   ├── 16-Trade-API-Protocol.md        LKL-Trade 决策 / 结果交换协议
 │   ├── 17-持仓决策-功能与代码设计.md     ★ R3 持仓决策（DB→后端→前端 + S1–S7 实施）
+│   ├── 18-情绪+缠论整合-功能与代码设计.md  ★ R4 情绪+缠论整合（S1–S7 实施 + CPT 侧 C1/S0/C2①–④）
 │   ├── decisions/                    ADR：0001 盘后约束与买点口径 + 口径冲突清单
 │   ├── evidence/                     取证材料（合并分析 + 展示层取证）
 │   └── archive-lkl/                  ★ lkl 策略规格书归档（只读，46 文件）
