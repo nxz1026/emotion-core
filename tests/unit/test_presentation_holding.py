@@ -190,3 +190,16 @@ class TestRouteWiring:
         src = inspect.getsource(server.DashboardHandler.do_GET)
         assert (src.index('"/api/holding"') <
                 src.index('parsed.path.startswith("/api/")'))
+
+    def test_unknown_api_path_is_404_not_status_fallback(self):
+        """未识别的 `/api/*` 必须 404，不能再兜底成 status 载荷。
+
+        2026-10-14 审计 A5：兜底让拼错的接口返回 200 + `ok:true`，前端把 status
+        载荷当成功渲染出字面量 `undefined · undefined`，监控也看不出失败。
+        兜底只留给 `/api/status`（门户「今日速览」依赖它）。
+        """
+        src = inspect.getsource(server.DashboardHandler.do_GET)
+        assert src.index('"/api/status"') < src.index('parsed.path.startswith("/api/")')
+        assert "未知 API 路径" in src
+        # 兜底只剩一处调用点（`/api/status` 分支），catch-all 不再调它
+        assert src.count("self._handle_status()") == 1

@@ -621,12 +621,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(payload, status)
             return
 
-        if parsed.path.startswith("/api/"):
-            # ⚠️ 兜底是有意的（门户「今日速览」需要一个永远可用的 status），
-            # 但它让**拼错的接口也返回 200 + status 数据** ⇒ 前端会静默降级
-            # 而不是报错，监控也看不出接口调用失败。这里记 warning 让错拼可见。
-            log.warning("未识别的 API 路径，返回 status 兜底：%s", parsed.path)
+        if parsed.path == "/api/status":
+            # 门户「今日速览」永远要一个可用的 status（`portal/app.py` 打的就是
+            # `/api/status`，见其 `EMOTION_CORE + "api/status"`）。
             self._handle_status()
+            return
+
+        if parsed.path.startswith("/api/"):
+            # 未识别的 API 路径一律 404。**不要退化成 status 兜底**：那会让拼错的
+            # 接口也返回 200 + `ok:true` —— 前端把它当成功载荷（2026-10-14 审计
+            # A5：持仓卡片因此渲染出字面量 `undefined · undefined`），监控也看不出
+            # 接口调用失败。兜底只保留给上面的 `/api/status`。
+            log.warning("未识别的 API 路径，返回 404：%s", parsed.path)
+            self._send_json({"ok": False,
+                             "error": f"未知 API 路径：{parsed.path}"}, 404)
             return
 
         # Dashboard 页面
