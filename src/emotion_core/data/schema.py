@@ -11,7 +11,7 @@
 - 信号：`signal` `signal_outcome` `strategy_signal`
 - 交易：`position` `trade_event` `holding_decision`（R3 持仓决策快照，见 docs/17）
 - 报告：`review_report` `eval_result`
-- 题材：`theme_tag` `theme_group`
+- 题材：`theme_tag` `theme_group` `theme_spot`
 - 运维：`alert` `llm_call_log` `ingest_progress` `hot_rank` `pipeline_state`
   `data_revision` `watchlist` `ops_raw_manifest`（Wind 原始响应 JSON）
   `ops_quota_ledger`（Wind 调用记账）
@@ -257,6 +257,19 @@ DDL: dict[str, str] = {
             member_count      integer,
             PRIMARY KEY (date, theme)
         )""",
+    "theme_spot": """
+        CREATE TABLE IF NOT EXISTS theme_spot (
+            date         date NOT NULL,
+            node         text NOT NULL,
+            theme        text,
+            member_count integer,
+            pct_chg      numeric(8,2),
+            amount       numeric(20,2),
+            leading_code text,
+            leading_name text,
+            source       text NOT NULL DEFAULT 'sina_concept',
+            PRIMARY KEY (date, node)
+        )""",
     "strategy_signal": """
         CREATE TABLE IF NOT EXISTS strategy_signal (
             trade_date   date NOT NULL,
@@ -439,6 +452,7 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_ladder_day_date ON ladder_day (date)",
     "CREATE INDEX IF NOT EXISTS idx_signal_date ON signal (confirm_date)",
     "CREATE INDEX IF NOT EXISTS idx_theme_group_date ON theme_group (date)",
+    "CREATE INDEX IF NOT EXISTS idx_theme_spot_date ON theme_spot (date)",
     "CREATE INDEX IF NOT EXISTS idx_strategy_signal_date ON strategy_signal (trade_date)",
     "CREATE INDEX IF NOT EXISTS idx_strategy_signal_strategy ON strategy_signal (strategy)",
     "CREATE UNIQUE INDEX IF NOT EXISTS position_open_code_uk"

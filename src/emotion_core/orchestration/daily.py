@@ -274,7 +274,11 @@ def _run_step(step: str, trade_date: date) -> str:
         promotion_run(trade_date)
     elif step == "theme":
         from emotion_core.services.theme_service import run as theme_run
-        theme_run(trade_date)
+        # 现成返回值即当日题材组数（同 ladder 步：口径只在业务层一处，编排层不新增查询）。
+        # 2026-10-14 实测缺口：本步此前丢弃返回值 ⇒ detail 恒为 ''，而这一次题材源刚
+        # 从 NullProvider 换成新浪概念，「题材源挂了(0 组)」与「正常产出(24 组)」在
+        # pipeline_state 里长得一模一样——正是本文件开头说的那种不可区分。
+        return f"题材组={theme_run(trade_date)}"
     elif step == "ecosystem":
         from emotion_core.services.ecosystem_service import run as ecosystem_run
         ecosystem_run(trade_date)

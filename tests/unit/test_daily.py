@@ -13,7 +13,6 @@ CoverageBlocked 专用退出码、通用异常退出码、未知步骤拒绝。
 
 from __future__ import annotations
 
-import logging
 from datetime import date
 from unittest.mock import MagicMock, call, patch
 
@@ -22,7 +21,6 @@ import pytest
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
 from emotion_core.orchestration import daily
 from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocked
-
 
 # ── fixtures ──────────────────────────────────────────────────────────
 
@@ -160,7 +158,7 @@ class TestRunDailyStepOrder:
 
     def test_signal_and_ladder_details_land_in_pipeline_state(
             self, patch_pipeline, patch_today, patch_trading_day, patch_all_steps):
-        """真实分派下：signal / ladder 两步带摘要，其余步骤允许为空串。"""
+        """真实分派下：signal / ladder / theme 三步带摘要，其余步骤允许为空串。"""
         rc = daily.run_daily(date(2026, 9, 29))
 
         assert rc == 0
@@ -168,6 +166,8 @@ class TestRunDailyStepOrder:
         assert list(by_step) == [s for s, _ in daily.STEPS]
         assert "signals=" in by_step["signal"]
         assert by_step["ladder"] == "候选=42"
+        # theme 步摘要：题材源激活后「0 组(源空)」与「正常 N 组」必须在打点里可区分。
+        assert by_step["theme"] == "题材组=0"
 
 
 # ── 3. run_daily: 守卫与异常处理 ──────────────────────────────────────

@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+### 新增 · 2026-10-14 题材源接入（新浪概念）+ 人气 / 连板回补
+
+- **题材源激活（拍板 ①）**：新增 `data/providers/sina_concept.py`（概念节点清单
+  `newFLJK.php?param=class` + 成分股 `Market_Center.getHQNodeData`，均为 GBK/JS 字面量），
+  实测 **175 个概念 / 3265 只个股**；东财概念接口（`m:90 t:3`）在本机出口是持久 502，
+  同 `providers/sina_industry.py` 记的坑。`data/theme_source.py` 新增
+  `SinaConceptProvider`，`get_provider()` 读环境变量 `EMOTION_THEME_PROVIDER`
+  （生产值写在 `deploy/env/emotion-core.env`，daily / report / watchdog 三个单元本就用
+  `EnvironmentFile=` 读它 ⇒ **无需改 systemd 单元**）。**刻意不动 `utils/config.py`**：
+  CONFIG 是 frozen dataclass，新增字段会改 `config_hash()`，让 `pipeline_state` /
+  `signal` / `eval_result` 里的策略指纹平白换代。未激活时仍是 NullProvider，原有钉死
+  测试（默认=Null、未知名字不抛错）全绿。
+- **`theme_tag` / `theme_spot` 首次落库（拍板 ①）**：`services/theme_service.py` 补上
+  自 2026-09 起挂着的 `# TODO: 写 theme_tag`（逐票 primary + secondary 数组），并新增
+  当日概念板块热点榜落库；热点榜单独 try（附加产物失败不连累题材标签）。`data/schema.py`
+  新增 `theme_spot` 表 + 日期索引（`create_all()` 在 src 里无调用方，已手动建表）。
+  实测 2026-10-14：`theme_tag` **3265** / `theme_group` **24** / `theme_spot` **175** 行。
+- **无历史 PIT（拍板 ① 接受）**：新浪这两个接口只返回**当前**名单与涨幅，无法按历史日期
+  回放 ⇒ `theme_tag` 是「从接入日起逐日累积的快照」，**不回填历史**（回填等于把今天的
+  概念成分当成昨天的）。docs/04 §3 第 5 项「历史题材 PIT 维持放弃」的结论不变。
+- **人气票池回补（拍板 ②）**：`scripts/backfill_hot_rank_all.py` 对 `hot_universe` 的
+  3831 只逐票回补东财 `getHisList` 排名史，写入 **1,388,762 行 / 48 分钟 / 2 只失败已补跑
+  （+648 行）**。但**可用窗口只有约 1 年**：2025-10 之前每日仅 1~3 行、`min(rank)` 远大于
+  100；2025-10 起 denseness 由 19/31 天升到 100%（2026 年每月 31/31 天、rank 1 可达）
+  ⇒ 每日 top100 人气榜实际覆盖 ≈ 250 个交易日，这是源自身的历史深度，不是取数没取全。
+- **连板 / 晋级一次性重算（拍板 ②）**：`scripts/recompute_ladder_promotion.py` 对 671 个
+  交易日重算 `ladder_day`（**8745 行 / 670 日**）与 `promotion_day`（**3350 行 / 670 日**），
+  0 失败 / 2.3 分钟。**前后对账**（对照重算前备份）：`ladder_day` 142/142 格全等；
+  `promotion_day` 除 3 格 `fail_perf` 外全等 —— 该列是唯一由「当日 close / 昨收」派生的列，
+  那 3 格原写于 2026-09-28~09-30 的日更修复窗口，用 `promotion._PAIRS_SQL` 独立复算得到与
+  重算后一致的值 ⇒ 旧值不可信、新值可复现。
+- **`theme` 步 detail 修复**：`orchestration/daily.py` 的 theme 步此前**丢弃**
+  `theme_service.run` 的返回值 ⇒ `pipeline_state.detail` 恒为 `''`，于是「题材源挂了
+  （0 组）」与「正常产出（24 组）」在打点里长得一模一样。现写 `题材组=N`（口径同 ladder 步，
+  编排层不新增查询）。实测重跑：`status=OK / detail=题材组=24 / exit_code=0`，且重跑后三个
+  表行数不变（幂等）。
+- **验证**：`pytest tests/unit` → **1912 passed**；对改动文件 ruff 零新增；只留 theme 步走
+  真实编排器（`daily.STEPS` 临时缩为 theme）跑通生产同日数据两次，均 exit 0。
+
 ### 修复 · 2026-10-09 巡检拍板落实（配额 300 / 决策去重 / SSE 超时 / strategy 单元 2h）
 
 - **上调配额（拍板 ①）**：`utils/config.py` 的 `STRATEGY_MAX_LLM` 默认 `50` → **`300`**

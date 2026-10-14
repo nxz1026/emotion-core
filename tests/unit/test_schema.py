@@ -12,7 +12,7 @@ class TestSchema:
             "signal", "signal_outcome", "strategy_signal",
             "position", "holding_decision", "trade_event",
             "review_report", "eval_result",
-            "theme_tag", "theme_group",
+            "theme_tag", "theme_group", "theme_spot",
             "alert", "llm_call_log", "ingest_progress", "hot_rank",
             "pipeline_state", "data_revision", "watchlist",
             "trade_calendar",
