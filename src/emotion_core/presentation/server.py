@@ -143,6 +143,31 @@ def _opt_date(parsed, key: str) -> date | None:
         raise ValueError(f"参数 {key} 需要 YYYY-MM-DD，得到 {raw!r}") from None
 
 
+def _opt_pct(parsed, key: str, lo: float, hi: float) -> float | None:
+    """可选的百分比参数（闭区间校验）。
+
+    缺省/空白 → None；非数字或不在 `[lo, hi]` → `ValueError`（HTTP 侧翻 400）。
+    例：`risk_pct` 合法区间 0.001–0.05。
+    """
+    raw = _query_arg(parsed, key).strip()
+    if not raw:
+        return None
+    try:
+        v = float(raw)
+    except ValueError:
+        raise ValueError(f"参数 {key} 需要数字，得到 {raw!r}") from None
+    if not lo <= v <= hi:
+        raise ValueError(f"参数 {key} 需要在 {lo}-{hi} 之间，得到 {raw!r}")
+    return v
+
+
+def _opt_user(parsed, key: str = "user") -> str:
+    """可选的用户标识；缺省 / 空 → ``"default"``。"""
+    from emotion_core.services.cpt_client import DEFAULT_USER
+    raw = _query_arg(parsed, key).strip()
+    return raw if raw else DEFAULT_USER
+
+
 def holding_payload(parsed) -> tuple[dict, int]:
     """`GET /api/holding`：单标的持仓决策。返回 `(payload, http_status)`。
 
@@ -150,9 +175,20 @@ def holding_payload(parsed) -> tuple[dict, int]:
     `python -m emotion_core.services.holding_service --persist`）。
     参数非法 → 400；标的无当日日线 → 服务层给 `ok=False`，翻 404（与 `/api/stock` 同律）。
     """
+    from emotion_core.algorithms import sizing as sizing_mod
     from emotion_core.services import holding_service
 
     try:
+        sizing_params = None
+        rp = _opt_pct(parsed, "risk_pct", *sizing_mod.SIZING_BOUNDS["risk_pct"])
+        lp = _opt_pct(parsed, "liq_pct", *sizing_mod.SIZING_BOUNDS["liq_pct"])
+        mp = _opt_pct(parsed, "max_position_pct",
+                      *sizing_mod.SIZING_BOUNDS["max_position_pct"])
+        if rp is not None or lp is not None or mp is not None:
+            sizing_params = {k: v for k, v in
+                             [("risk_pct", rp), ("liq_pct", lp),
+                              ("max_position_pct", mp)] if v is not None}
+        ensure_raw = _query_arg(parsed, "ensure_factors").strip().lower()
         dec = holding_service.decide(
             _query_arg(parsed, "code"),
             cost=_opt_float(parsed, "cost"),
@@ -161,6 +197,9 @@ def holding_payload(parsed) -> tuple[dict, int]:
             as_of=_opt_date(parsed, "as_of"),
             use_cpt=_query_flag(parsed, "cpt"),
             persist=False,
+            sizing_params=sizing_params,
+            ensure_factors=ensure_raw in ("1", "true"),
+            cpt_user=_opt_user(parsed),
         )
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}, 400
@@ -173,13 +212,25 @@ def holdings_payload(parsed) -> tuple[dict, int]:
 
     无持仓 → `count=0 / items=[]`（**不是** 404：空仓是正常状态）。参数非法 → 400。
     """
+    from emotion_core.algorithms import sizing as sizing_mod
     from emotion_core.services import holding_service
 
     try:
+        sizing_params = None
+        rp = _opt_pct(parsed, "risk_pct", *sizing_mod.SIZING_BOUNDS["risk_pct"])
+        lp = _opt_pct(parsed, "liq_pct", *sizing_mod.SIZING_BOUNDS["liq_pct"])
+        mp = _opt_pct(parsed, "max_position_pct",
+                      *sizing_mod.SIZING_BOUNDS["max_position_pct"])
+        if rp is not None or lp is not None or mp is not None:
+            sizing_params = {k: v for k, v in
+                             [("risk_pct", rp), ("liq_pct", lp),
+                              ("max_position_pct", mp)] if v is not None}
         items = [holding_service.to_payload(d) for d in holding_service.analyze_holdings(
             capital=_opt_float(parsed, "capital"),
             as_of=_opt_date(parsed, "as_of"),
-            use_cpt=_query_flag(parsed, "cpt"))]
+            use_cpt=_query_flag(parsed, "cpt"),
+            sizing_params=sizing_params,
+            cpt_user=_opt_user(parsed))]
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}, 400
     return {
@@ -189,6 +240,113 @@ def holdings_payload(parsed) -> tuple[dict, int]:
         "items": items,
         "disclaimer": holding_service.DISCLAIMER,
     }, 200
+
+
+def watchlist_payload(parsed) -> tuple[dict, int]:
+    """`GET /api/watchlist`：当前用户的关注列表。
+
+    恒只读；CPT 不可达 → `ok=True, items=[], cpt_available=False`。
+    """
+    from emotion_core.services import watchlist_service
+    try:
+        items, available = watchlist_service.list_codes(user=_opt_user(parsed))
+    except Exception as exc:
+        log.exception("watchlist list failed")
+        return {"ok": False, "error": str(exc)}, 500
+    return {"ok": True, "items": items, "cpt_available": available,
+            "count": len(items)}, 200
+
+
+def cpt_points_payload(parsed) -> tuple[dict, int]:
+    """`GET /api/cpt/points`：单标的 CPT 参考买卖点（恒只读）。
+
+    仅暴露 CPT 侧的结构位 + 人话；不做数量/动作决策（那是 /api/holding 的事）。
+    参数非法 → 400；CPT 不可达 → `ok=False, cpt_available=False`。
+    """
+    from emotion_core.algorithms import levels as levels_mod
+    from emotion_core.services import cpt_client
+
+    try:
+        code = _query_arg(parsed, "code").strip()
+        if not code:
+            return {"ok": False, "error": "参数 code 必填"}, 400
+        ensure_raw = _query_arg(parsed, "ensure_factors").strip().lower()
+        ensure_factors = ensure_raw in ("1", "true")
+        user = _opt_user(parsed)
+        timeout = (cpt_client.CPT_ENSURE_TIMEOUT if ensure_factors
+                   else cpt_client.CPT_TIMEOUT)
+        snap = cpt_client.fetch_snapshot(code, timeout=timeout,
+                                         ensure_factors=True if ensure_factors else None,
+                                         user=user)
+        if snap is None:
+            return {"ok": True, "cpt_available": False, "code": code}, 200
+        recommendation = cpt_client.fetch_recommendation(code, user=user)
+        if recommendation is None:
+            return {"ok": True, "cpt_available": True, "code": code}, 200
+        price_ratio = cpt_client.price_ratio_of(recommendation)
+        overlays = cpt_client.snapshot_overlays(snap)
+        lv = (levels_mod.structure_levels(overlays, price_ratio, close=None)
+              if overlays else None)
+        advice = cpt_client.track_advice(code, user=user)
+        return {
+            "ok": True,
+            "cpt_available": True,
+            "code": code,
+            "data_quality": cpt_client.data_quality_note(snap),
+            "price_ratio": price_ratio,
+            "levels": {
+                "buy_reference": lv.buy_reference if lv else None,
+                "sell_reference": lv.sell_reference if lv else None,
+                "stop_price": lv.stop_price if lv else None,
+                "target_price": lv.target_price if lv else None,
+                "basis": lv.basis if lv else None,
+                "detail": lv.detail if lv else None,
+            } if lv else None,
+            "action": recommendation.get("action"),
+            "signal_type": recommendation.get("signal_type"),
+            "divergence_status": recommendation.get("divergence_status"),
+            "points": cpt_client.points_view(advice),
+            "human_text": cpt_client.human_text(advice),
+            "headline": recommendation.get("headline"),
+            "reason": recommendation.get("reason"),
+        }, 200
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
+    except Exception as exc:
+        log.exception("cpt_points failed")
+        return {"ok": False, "error": str(exc)}, 500
+
+
+def _handle_watchlist_post(handler) -> tuple[dict, int] | None:
+    """`POST /api/watchlist`：add / remove / restore。
+
+    body ≤4 KiB；JSON 解析失败 → 400。返回 None 表示不是 watchlist 路由。
+    """
+    from emotion_core.services import watchlist_service
+    content_length = int(handler.headers.get("Content-Length", 0))
+    raw = handler.rfile.read(content_length) if content_length > 0 else b"{}"
+    if content_length > 4096:
+        return {"ok": False, "error": "请求体过大（最大 4KiB）"}, 413
+    try:
+        body = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"ok": False, "error": "请求体不是合法 JSON"}, 400
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "请求体需要是 JSON 对象"}, 400
+    action = body.get("action", "").strip().lower()
+    code = (body.get("code") or "").strip()
+    note = body.get("note") or ""
+    user = body.get("user") or "default"
+    if action == "add":
+        ok, msg = watchlist_service.add(code, user=user, note=note)
+    elif action == "remove":
+        ok, msg = watchlist_service.remove(code, user=user)
+    elif action == "restore":
+        ok, msg = watchlist_service.restore(code, user=user)
+    else:
+        return {"ok": False,
+                "error": f"不支持的 action={action!r}（add/remove/restore）"}, 400
+    return {"ok": ok, "message": msg}, 200 if ok else 409
 
 
 def _render_template(template_name: str, **context) -> str:
@@ -322,7 +480,10 @@ def _load_negative_expectation() -> dict:
         "SELECT count(*) AS pos FROM signal_outcome "
         "WHERE rule_ret_a IS NOT NULL AND rule_ret_a > 0"
     )
-    hit_rate = round(int(hit_df.iloc[0]["pos"]) / n * 100, 1) if not hit_df.empty and n > 0 else None
+    if not hit_df.empty and n > 0:
+        hit_rate = round(int(hit_df.iloc[0]["pos"]) / n * 100, 1)
+    else:
+        hit_rate = None
     return {"mean": mean_a, "median": median_a, "n": n, "hit_rate": hit_rate}
 
 
@@ -607,6 +768,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(*holdings_payload(parsed))
             return
 
+        # CPT 参考买卖点（R4，docs/18 §7.5）：恒只读
+        if parsed.path == "/api/cpt/points":
+            self._send_json(*cpt_points_payload(parsed))
+            return
+
+        # 关注列表（R4，docs/18 §7.5）：GET 恒只读
+        if parsed.path == "/api/watchlist":
+            self._send_json(*watchlist_payload(parsed))
+            return
+
         # Trade API (LKL-Trade 决策/结果交换)
         if parsed.path == "/api/trade/decisions":
             payload, status = trade_api.handle_trade_decisions(parsed.query)
@@ -681,7 +852,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"<html><body><h1>404 Not Found</h1></body></html>")
 
     def do_POST(self) -> None:
-        """POST handler (Trade API results submission)."""
+        """POST handler：Trade API 结果回执 + 关注列表写操作（R4，docs/18 §7.5）。"""
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/trade/results":
@@ -691,10 +862,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(payload, status)
             return
 
+        if parsed.path == "/api/watchlist":
+            payload, status = _handle_watchlist_post(self)
+            self._send_json(payload, status)
+            return
+
         self.send_response(404)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b'{"error": "not found"}')
+        self.wfile.write(b'{"ok": false, "error": "not found"}')
 
     def _handle_status(self) -> None:
         """返回 emotion-core 状态数据（可带 ?date=）。"""

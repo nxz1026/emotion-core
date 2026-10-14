@@ -536,6 +536,13 @@ def to_payload(d: Decision) -> dict[str, Any]:
             "market_price": d.market_price,
             "pnl_pct": d.pnl_pct,
         },
+        "inputs": {
+            "cost": d.inputs.get("cost"),
+            "shares": d.inputs.get("shares"),
+            "capital": d.inputs.get("capital"),
+            "sizing_params": d.inputs.get("sizing_params"),
+            "cpt_ensure_used": d.facts.get("cpt_ensure_used"),
+        },
         "action": d.action,
         "action_label": d.action_label,
         "ladder": _ladder_scan(d.ladder),

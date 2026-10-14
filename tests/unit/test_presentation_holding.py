@@ -181,12 +181,27 @@ class TestHoldingsPayload:
 
 
 class TestRouteWiring:
-    """两条分支必须真的挂在 `DashboardHandler.do_GET` 上（防接线被误删）。"""
+    """持仓 / CPT 点位 / 关注列表四条分支必须真的挂在 `DashboardHandler` 上。"""
 
     def test_do_get_dispatches_both_paths(self):
         src = inspect.getsource(server.DashboardHandler.do_GET)
         assert '"/api/holding"' in src and "holding_payload(parsed)" in src
         assert '"/api/holdings"' in src and "holdings_payload(parsed)" in src
+
+    def test_do_get_dispatches_cpt_points(self):
+        """R4：`/api/cpt/points` 必须挂在 do_GET 上。"""
+        src = inspect.getsource(server.DashboardHandler.do_GET)
+        assert '"/api/cpt/points"' in src and "cpt_points_payload(parsed)" in src
+
+    def test_do_get_dispatches_watchlist(self):
+        """R4：`/api/watchlist` GET 必须挂在 do_GET 上。"""
+        src = inspect.getsource(server.DashboardHandler.do_GET)
+        assert '"/api/watchlist"' in src and "watchlist_payload(parsed)" in src
+
+    def test_do_post_dispatches_watchlist(self):
+        """R4：`/api/watchlist` POST 必须挂在 do_POST 上。"""
+        src = inspect.getsource(server.DashboardHandler.do_POST)
+        assert '"/api/watchlist"' in src and "_handle_watchlist_post(self)" in src
 
     def test_branches_precede_the_api_fallback(self):
         src = inspect.getsource(server.DashboardHandler.do_GET)
@@ -205,6 +220,212 @@ class TestRouteWiring:
         assert "未知 API 路径" in src
         # 兜底只剩一处调用点（`/api/status` 分支），catch-all 不再调它
         assert src.count("self._handle_status()") == 1
+
+
+# ─────────────────────── R4 参数化 + 关注列表 + CPT 点位 ───────────────────────
+
+class TestOptPct:
+    """`_opt_pct`：闭区间校验（docs/18 §7.5）。"""
+
+    def test_valid_in_bounds(self):
+        assert server._opt_pct(urlparse("/x?risk_pct=0.02"), "risk_pct", 0.001,
+                               0.05) == 0.02
+
+    def test_boundary_values(self):
+        assert server._opt_pct(urlparse("/x?risk_pct=0.001"), "risk_pct", 0.001,
+                               0.05) == 0.001
+        assert server._opt_pct(urlparse("/x?risk_pct=0.05"), "risk_pct", 0.001,
+                               0.05) == 0.05
+
+    def test_none_when_missing(self):
+        assert server._opt_pct(urlparse("/x"), "risk_pct", 0.001, 0.05) is None
+        assert server._opt_pct(urlparse("/x?risk_pct="), "risk_pct", 0.001,
+                               0.05) is None
+
+    def test_rejects_out_of_bounds(self):
+        with pytest.raises(ValueError, match="risk_pct"):
+            server._opt_pct(urlparse("/x?risk_pct=0.99"), "risk_pct", 0.001, 0.05)
+
+    def test_rejects_non_numeric(self):
+        with pytest.raises(ValueError, match="risk_pct"):
+            server._opt_pct(urlparse("/x?risk_pct=abc"), "risk_pct", 0.001, 0.05)
+
+
+class TestOptUser:
+    def test_default_when_missing(self):
+        assert server._opt_user(urlparse("/x")) == "default"
+
+    def test_explicit_user(self):
+        assert server._opt_user(urlparse("/x?user=alice")) == "alice"
+
+    def test_empty_string_defaults(self):
+        assert server._opt_user(urlparse("/x?user=")) == "default"
+
+
+class TestHoldingPayloadSizingParams:
+    """`holding_payload` 透传 sizing_params / ensure_factors / user。"""
+
+    def test_sizing_params_forwarded(self, monkeypatch):
+        seen: dict = {}
+        monkeypatch.setattr(hs, "decide",
+                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        parsed = urlparse("/api/holding?code=601811&risk_pct=0.02&liq_pct=0.01"
+                          "&max_position_pct=0.5")
+        server.holding_payload(parsed)
+        assert seen["sizing_params"] == {"risk_pct": 0.02, "liq_pct": 0.01,
+                                         "max_position_pct": 0.5}
+
+    def test_partial_sizing_params(self, monkeypatch):
+        seen: dict = {}
+        monkeypatch.setattr(hs, "decide",
+                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        server.holding_payload(urlparse("/api/holding?code=601811&risk_pct=0.03"))
+        assert seen["sizing_params"] == {"risk_pct": 0.03}
+
+    def test_no_sizing_params_when_absent(self, monkeypatch):
+        seen: dict = {}
+        monkeypatch.setattr(hs, "decide",
+                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        server.holding_payload(urlparse("/api/holding?code=601811"))
+        assert seen["sizing_params"] is None
+
+    def test_out_of_bounds_raises_400(self, monkeypatch):
+        monkeypatch.setattr(hs, "decide", lambda *a, **kw: pytest.fail("不应调用"))
+        body, status = server.holding_payload(
+            urlparse("/api/holding?code=601811&risk_pct=0.99"))
+        assert status == 400 and "risk_pct" in body["error"]
+
+    def test_ensure_factors_forwarded(self, monkeypatch):
+        seen: dict = {}
+        monkeypatch.setattr(hs, "decide",
+                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        server.holding_payload(urlparse("/api/holding?code=601811&ensure_factors=1"))
+        assert seen["ensure_factors"] is True
+
+    def test_user_forwarded(self, monkeypatch):
+        seen: dict = {}
+        monkeypatch.setattr(hs, "decide",
+                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        server.holding_payload(urlparse("/api/holding?code=601811&user=alice"))
+        assert seen["cpt_user"] == "alice"
+
+
+class TestCptPointsPayload:
+    """`cpt_points_payload`：CPT 参考买卖点（恒只读）。"""
+
+    def test_cpt_available(self, monkeypatch):
+        snap = {"overlays": {"bis": [{"direction": -1, "low": 16.0}],
+                               "zhongshus": [{"low": 15.5, "high": 27.0}],
+                               "fractals": [], "trend_types": []},
+                "data_quality": {"severity": "ok"}, "signal": {},
+                "runtime": {}, "config": {}}
+        rec = {"available": True, "action": "watch", "price_ratio": 1.061,
+               "signal_type": "first_buy", "divergence_status": None,
+               "headline": "结构位参考", "reason": "中枢下沿",
+               "status": "ok", "action_label": "观望", "disclaimer": "test"}
+        advice = {"suggested_points": {"buy_reference": 15.0},
+                  "human_text": "近低关注"}
+        import emotion_core.services.cpt_client as cpt_mod
+        monkeypatch.setattr(cpt_mod, "fetch_snapshot", lambda code, **kw: snap)
+        monkeypatch.setattr(cpt_mod, "fetch_recommendation", lambda code, **kw: rec)
+        monkeypatch.setattr(cpt_mod, "price_ratio_of", lambda r: 1.061)
+        monkeypatch.setattr(cpt_mod, "snapshot_overlays", lambda s: s["overlays"])
+        monkeypatch.setattr(cpt_mod, "data_quality_note", lambda s: None)
+        monkeypatch.setattr(cpt_mod, "track_advice", lambda code, **kw: advice)
+        monkeypatch.setattr(cpt_mod, "points_view", lambda a: a.get("suggested_points"))
+        monkeypatch.setattr(cpt_mod, "human_text", lambda a: a.get("human_text"))
+        parsed = urlparse("/api/cpt/points?code=601811")
+        body, status = server.cpt_points_payload(parsed)
+        assert status == 200 and body["ok"] is True
+        assert body["cpt_available"] is True
+        assert body["levels"]["buy_reference"] == 14.901
+        assert body["human_text"] == "近低关注"
+
+    def test_cpt_unavailable(self, monkeypatch):
+        import emotion_core.services.cpt_client as cpt_mod
+        monkeypatch.setattr(cpt_mod, "fetch_snapshot", lambda code, **kw: None)
+        body, status = server.cpt_points_payload(urlparse("/api/cpt/points?code=601811"))
+        assert status == 200 and body["ok"] is True
+        assert body["cpt_available"] is False
+
+    def test_invalid_param_400(self, monkeypatch):
+        import emotion_core.services.cpt_client as cpt_mod
+        monkeypatch.setattr(cpt_mod, "fetch_snapshot", lambda code, **kw: None)
+        body, status = server.cpt_points_payload(urlparse("/api/cpt/points?"))
+        assert status == 400 and body["ok"] is False
+
+
+class TestWatchlistPayload:
+    """`watchlist_payload`：关注列表（恒只读）。"""
+
+    def test_success(self, monkeypatch):
+        items = [{"code": "601811", "name": "新华文轩", "note": ""}]
+        import emotion_core.services.watchlist_service as wl_mod
+        monkeypatch.setattr(wl_mod, "list_codes", lambda user: (items, True))
+        body, status = server.watchlist_payload(urlparse("/api/watchlist"))
+        assert status == 200 and body["ok"] is True
+        assert body["count"] == 1 and body["cpt_available"] is True
+
+    def test_cpt_unavailable(self, monkeypatch):
+        import emotion_core.services.watchlist_service as wl_mod
+        monkeypatch.setattr(wl_mod, "list_codes", lambda user: ([], False))
+        body, status = server.watchlist_payload(urlparse("/api/watchlist"))
+        assert status == 200 and body["ok"] is True
+        assert body["count"] == 0 and body["cpt_available"] is False
+
+
+class TestWatchlistPost:
+    """`_handle_watchlist_post`：add / remove / restore（R4，docs/18 §7.5）。"""
+
+    def _handler(self, path, body=b"", content_length=None):
+        """构造一个伪 handler 供 `_handle_watchlist_post` 调用。"""
+        from unittest.mock import MagicMock
+        h = MagicMock()
+        h.headers = {"Content-Length": content_length if content_length is not None
+                     else len(body)}
+        h.rfile = MagicMock()
+        h.rfile.read.return_value = body
+        h.path = path
+        return h
+
+    def test_add(self, monkeypatch):
+        import emotion_core.services.watchlist_service as wl_mod
+        monkeypatch.setattr(wl_mod, "add",
+                            lambda code, user="default", note="": (True, "ok"))
+        payload, status = server._handle_watchlist_post(
+            self._handler("/api/watchlist", b'{"action":"add","code":"601811"}'))
+        assert status == 200 and payload["ok"] is True
+
+    def test_remove(self, monkeypatch):
+        import emotion_core.services.watchlist_service as wl_mod
+        monkeypatch.setattr(wl_mod, "remove",
+                            lambda code, user="default": (True, "ok"))
+        payload, status = server._handle_watchlist_post(
+            self._handler("/api/watchlist", b'{"action":"remove","code":"601811"}'))
+        assert status == 200
+
+    def test_restore(self, monkeypatch):
+        import emotion_core.services.watchlist_service as wl_mod
+        monkeypatch.setattr(wl_mod, "restore",
+                            lambda code, user="default": (True, "ok"))
+        payload, status = server._handle_watchlist_post(
+            self._handler("/api/watchlist", b'{"action":"restore","code":"601811"}'))
+        assert status == 200
+
+    def test_invalid_action_400(self):
+        payload, status = server._handle_watchlist_post(
+            self._handler("/api/watchlist", b'{"action":"frobnicate","code":"601811"}'))
+        assert status == 400 and payload["ok"] is False
+
+    def test_bad_json_400(self):
+        payload, status = server._handle_watchlist_post(
+            self._handler("/api/watchlist", b'not json'))
+        assert status == 400
+
+    def test_body_too_large_413(self):
+        payload, status = server._handle_watchlist_post(
+            self._handler("/api/watchlist", b"x" * 5000, content_length=5000))
+        assert status == 413
 
 
 def _referenced_assets() -> set[str]:

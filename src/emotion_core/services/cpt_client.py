@@ -226,11 +226,13 @@ def fetch_snapshot(
     *,
     timeout: float = CPT_TIMEOUT,
     ensure_factors: bool | None = None,
+    user: str | None = None,
 ) -> dict[str, Any] | None:
     """`overlays`（adj 域）+ `candles` + `signal` + `data_quality`；失败 → None。
 
     ``ensure_factors=True`` 才拼 ``?ensure_factors=1``（联网补因子 + 写库，慢），
     ``False``/``None`` 恒不拼（默认只读，D5 / 模块 docstring）。
+    ``user`` → `X-CPT-User` 头（用户维度的关注列表/追踪）。
     """
     norm = _norm_code(code)
     if norm is None:
@@ -238,19 +240,21 @@ def fetch_snapshot(
     params: dict[str, str] = {"code": norm}
     if ensure_factors is True:
         params["ensure_factors"] = "1"
-    return _get_json(_SNAPSHOT_PATH, params, timeout)
+    return _get_json(_SNAPSHOT_PATH, params, timeout, user=user)
 
 
-def fetch_recommendation(code: str, *, timeout: float = CPT_TIMEOUT) -> dict[str, Any] | None:
+def fetch_recommendation(code: str, *, timeout: float = CPT_TIMEOUT,
+                         user: str | None = None) -> dict[str, Any] | None:
     """CPT 结论原样（D7 并排展示）+ `price_ratio`；失败 → None。
 
     ⚠️ 该端点每次 GET 都会调 `_persist_recommendation`；调用方须先过
     `recommendation_enabled()` 与用户开关（§8.2）。
+    `user` → `X-CPT-User` 头。
     """
     norm = _norm_code(code)
     if norm is None:
         return None
-    return _get_json(_RECOMMENDATION_PATH, {"code": norm}, timeout)
+    return _get_json(_RECOMMENDATION_PATH, {"code": norm}, timeout, user=user)
 
 
 def overlay_usable(snapshot: dict[str, Any] | None) -> bool:
