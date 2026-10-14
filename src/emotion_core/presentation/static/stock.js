@@ -101,6 +101,14 @@
   // ②缺数显示「—」不显示 0 ③CPT 结论并排不合并（D7）。
   const HOLDING_KEY = (code) => "emotion.holding." + code;
   const HOLD_FIELDS = ["holding-cost", "holding-shares", "holding-capital"];
+  const SIZING_FIELDS = ["holding-risk-pct", "holding-liq-pct", "holding-max-pos-pct"];
+  const SIZING_KEY = {
+    "holding-risk-pct": "risk_pct",
+    "holding-liq-pct": "liq_pct",
+    "holding-max-pos-pct": "max_position_pct",
+  };
+  const SIZING_DEFAULTS = (window.STOCK_SIZING_DEFAULTS
+    || { risk_pct: 1.0, liq_pct: 1.0, max_position_pct: 30.0 });
   // 空态引导：卡片一出现就只有一排输入框 + 「—」，不写一句用户不知道要点「计算」。
   // 成功渲染时 renderHolding 会把 hint 清空（失败才占用它报原因）。
   const HOLD_EMPTY_HINT = "填成本价与数量后点「计算」；总资金可留空（只给比例）";
@@ -152,6 +160,13 @@
     if (shares !== null) p.set("shares", shares);
     if (capital !== null) p.set("capital", capital);
     if (TRADE_DATE) p.set("as_of", TRADE_DATE);
+    // sizing 参数：前端用百分比（如 1.0 = 1%），后端用小数（0.01）
+    SIZING_FIELDS.forEach((id) => {
+      const raw = ($(id).value || "").trim();
+      if (!raw) return;
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) p.set(SIZING_KEY[id], String(n / 100));
+    });
     return p.toString();
   }
 
@@ -234,6 +249,25 @@
         ? "复权比 —" : `复权比 ${cpt.price_ratio}`,
       cpt.note || "",
     ].filter(Boolean).join(" · ") : "";
+    // CPT 结构化点位（R4 · /api/cpt/points 契约 §9.3）
+    const pts = cpt.points || {};
+    const ptsEl = $("holding-cpt-points");
+    if (ptsEl) {
+      if (hasCpt && (pts.buy_reference || pts.sell_reference || pts.stop_price
+        || pts.target_price || pts.human_text || pts.empty_reason)) {
+        const rows = [];
+        if (pts.buy_reference) rows.push(`<div class="cpt-pt"><span class="cpt-label">买参考</span><span class="cpt-val">${price3(pts.buy_reference)}</span></div>`);
+        if (pts.sell_reference) rows.push(`<div class="cpt-pt"><span class="cpt-label">卖参考</span><span class="cpt-val">${price3(pts.sell_reference)}</span></div>`);
+        if (pts.stop_price) rows.push(`<div class="cpt-pt"><span class="cpt-label">止损</span><span class="cpt-val">${price3(pts.stop_price)}</span></div>`);
+        if (pts.target_price) rows.push(`<div class="cpt-pt"><span class="cpt-label">目标</span><span class="cpt-val">${price3(pts.target_price)}</span></div>`);
+        if (pts.basis) rows.push(`<div class="cpt-pt cpt-pt-full"><span class="cpt-label">口径</span><span class="cpt-val muted">${esc(pts.basis)}</span></div>`);
+        if (pts.human_text) rows.push(`<div class="cpt-pt cpt-pt-full"><span class="cpt-label">人话</span><span class="cpt-val cpt-human">${esc(pts.human_text)}</span></div>`);
+        if (pts.empty_reason) rows.push(`<div class="cpt-pt cpt-pt-full"><span class="cpt-label">原因</span><span class="cpt-val muted">${esc(pts.empty_reason)}</span></div>`);
+        ptsEl.innerHTML = rows.join("");
+      } else {
+        ptsEl.innerHTML = "";
+      }
+    }
 
     $("holding-disclaimer").textContent = d.disclaimer || "";
   }
@@ -270,6 +304,7 @@
   function bindHoldingForm(initial) {
     const code = (initial && initial.code) || "";
     $("holding-card").style.display = "block";
+    bindWatchlistToggle(code);
     if (!holdingBound) {
       holdingBound = true;
       $("holding-calc").addEventListener("click", () => analyzeHolding(holdingCode));
@@ -288,6 +323,69 @@
     $("holding-source").textContent = saved.cost ? "（上次输入）" : "";
     $("holding-hint").textContent = saved.cost ? HOLD_READY_HINT : HOLD_EMPTY_HINT;
     if (!saved.cost && code) prefillFromPosition(code);
+  }
+
+  // ── 关注列表（R4 · POST /api/watchlist）──────────────────────────────────
+  let watchlistTracked = null;   // null = 未知；true/false = 已知状态
+
+  async function refreshWatchlistToggle(code) {
+    const btn = $("watchlist-toggle");
+    if (!btn || !code) return;
+    try {
+      const res = await fetch(`${BASE}/api/watchlist?code=${encodeURIComponent(code)}&_t=${Date.now()}`);
+      const d = await res.json();
+      watchlistTracked = !!(d && d.tracked);
+    } catch (err) {
+      watchlistTracked = null;
+    }
+    renderWatchlistToggle(code, btn);
+  }
+
+  function renderWatchlistToggle(code, btn) {
+    if (!code) {
+      btn.style.display = "none";
+      return;
+    }
+    btn.style.display = "inline-block";
+    const tracked = watchlistTracked === true;
+    btn.textContent = tracked ? "★ 已关注" : "☆ 关注";
+    btn.classList.toggle("active", tracked);
+    btn.dataset.tracked = String(tracked);
+  }
+
+  async function toggleWatchlist(code) {
+    const btn = $("watchlist-toggle");
+    if (!code || !btn) return;
+    const tracked = watchlistTracked === true;
+    const action = tracked ? "remove" : "add";
+    btn.disabled = true;
+    btn.textContent = tracked ? "移除中…" : "添加中…";
+    try {
+      const res = await fetch(`${BASE}/api/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: action, code: code }),
+      });
+      if (res.ok) {
+        watchlistTracked = !tracked;
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(`操作失败：${(d && d.error) || res.statusText}`);
+      }
+    } catch (err) {
+      alert(`请求失败：${err}`);
+    }
+    renderWatchlistToggle(code, btn);
+    btn.disabled = false;
+  }
+
+  function bindWatchlistToggle(code) {
+    const btn = $("watchlist-toggle");
+    if (btn && !btn.dataset.bound) {
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", () => toggleWatchlist(holdingCode));
+    }
+    if (code) refreshWatchlistToggle(code);
   }
 
   function renderBuyPoint(bp) {

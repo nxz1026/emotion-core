@@ -86,3 +86,32 @@ def test_intuitive_page_offers_input_when_no_signal(monkeypatch):
                                             "ladder_total": 0}})
     html = server.render_dashboard("intuitive")
     assert f'action="{server.BASE_PATH}/stock"' in html
+
+
+# ── R4 前端：sizing 参数 + 关注列表 ─────────────────────────────────────────
+
+def test_stock_page_has_sizing_inputs():
+    html = server.render_dashboard("stock")
+    assert 'id="holding-risk-pct"' in html
+    assert 'id="holding-liq-pct"' in html
+    assert 'id="holding-max-pos-pct"' in html
+    assert "sizing 参数" in html
+
+
+def test_stock_page_has_watchlist_toggle():
+    html = server.render_dashboard("stock")
+    assert 'id="watchlist-toggle"' in html
+    assert "关注" in html
+
+
+def test_stock_page_injects_sizing_defaults():
+    html = server.render_dashboard("stock")
+    assert "STOCK_SIZING_DEFAULTS" in html
+    assert '"risk_pct": 1.0' in html
+    assert '"liq_pct": 1.0' in html
+    assert '"max_position_pct": 30.0' in html
+
+
+def test_stock_page_has_cpt_points_container():
+    html = server.render_dashboard("stock")
+    assert 'id="holding-cpt-points"' in html

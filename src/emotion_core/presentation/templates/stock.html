@@ -29,7 +29,10 @@
                 <h2 id="verdict-title">—</h2>
                 <p class="muted" id="verdict-sub">—</p>
             </div>
-            <span class="badge" id="verdict-badge">—</span>
+            <div class="verdict-actions">
+                <button type="button" class="btn btn-sm" id="watchlist-toggle" title="加入/移出关注列表">☆ 关注</button>
+                <span class="badge" id="verdict-badge">—</span>
+            </div>
         </div>
         <p class="verdict-oneliner" id="verdict-oneliner"></p>
         <div class="stock-grid">
@@ -53,6 +56,14 @@
             <button type="button" id="holding-calc">计算</button>
             <label class="holding-remember"><input id="holding-remember" type="checkbox" checked> 记住</label>
         </div>
+        <details class="holding-sizing">
+            <summary>sizing 参数（可选，默认 1% / 1% / 30%）</summary>
+            <div class="holding-sizing-grid">
+                <label>风险% <input id="holding-risk-pct" type="number" step="0.1" min="0.1" max="5" placeholder="1.0"></label>
+                <label>流动性% <input id="holding-liq-pct" type="number" step="0.1" min="0.1" max="5" placeholder="1.0"></label>
+                <label>单票上限% <input id="holding-max-pos-pct" type="number" step="1" min="5" max="100" placeholder="30"></label>
+            </div>
+        </details>
         <p class="muted" id="holding-hint"></p>
         <div id="holding-body" style="display:none">
             <div class="holding-head">
@@ -70,6 +81,7 @@
             <details><summary>依据（<span id="holding-reason-count">0</span> 条）</summary>
                 <ul class="reason-list" id="holding-reasons"></ul></details>
             <details id="holding-cpt-box"><summary>CPT 并排结论（原样，不参与本系统判定）</summary>
+                <div id="holding-cpt-points" class="holding-cpt-points"></div>
                 <p class="muted" id="holding-cpt"></p></details>
             <p class="muted" id="holding-disclaimer"></p>
         </div>
@@ -136,6 +148,8 @@
 {% endblock %}
 {% block scripts %}
 <script>window.STOCK_BASE_PATH = "{{ base_path }}";
-  window.STOCK_TRADE_DATE = "{{ prefill_date }}";</script>
+  window.STOCK_TRADE_DATE = "{{ prefill_date }}";
+  window.STOCK_SIZING_DEFAULTS = {"risk_pct": 1.0, "liq_pct": 1.0, "max_position_pct": 30.0};
+  window.STOCK_SIZING_BOUNDS = {"risk_pct": [0.1, 5.0], "liq_pct": [0.1, 5.0], "max_position_pct": [5.0, 100.0]};</script>
 <script src="{{ base_path }}/static/stock.js"></script>
 {% endblock %}

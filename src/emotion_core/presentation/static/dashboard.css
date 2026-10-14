@@ -582,3 +582,38 @@ pre code {
   cursor: pointer; color: var(--text-secondary); font-size: 14px;
 }
 .holding-card details[open] summary { margin-bottom: 8px; }
+.holding-sizing { margin-top: 10px; }
+.holding-sizing summary {
+  cursor: pointer; color: var(--text-secondary); font-size: 12px; padding: 2px 0;
+}
+.holding-sizing-grid {
+  display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+}
+.holding-sizing-grid label {
+  display: flex; flex-direction: column; font-size: 11px;
+  color: var(--text-muted); gap: 2px;
+}
+.holding-sizing-grid input {
+  width: 70px; padding: 4px 6px; border: 1px solid var(--border-color);
+  border-radius: 4px; font-size: 12px;
+}
+.verdict-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+#watchlist-toggle {
+  padding: 4px 10px; border: 1px solid var(--border-color); border-radius: 6px;
+  background: var(--bg-primary); cursor: pointer; font-size: 12px;
+  color: var(--text-secondary); transition: all 0.15s; white-space: nowrap;
+}
+#watchlist-toggle:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+#watchlist-toggle.active { background: var(--warning-bg); border-color: var(--warning); color: var(--warning); }
+#watchlist-toggle:disabled { opacity: 0.5; cursor: wait; }
+.holding-cpt-points {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;
+}
+.cpt-pt {
+  display: flex; flex-direction: column; padding: 4px 8px;
+  background: var(--bg-tertiary); border-radius: 4px; font-size: 12px;
+}
+.cpt-pt-full { flex-basis: 100%; }
+.cpt-label { color: var(--text-muted); font-size: 11px; }
+.cpt-val { font-weight: 500; }
+.cpt-human { color: var(--text-secondary); font-style: italic; }
