@@ -613,7 +613,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--no-persist", dest="no_persist", action="store_true",
                     help="不写库（默认即不写；显式给 --persist 才写）")
     ap.add_argument("--persist", action="store_true", help="写 holding_decision（幂等）")
+    # R4 sizing 参数（不传则用默认 1%%/1%%/30%%；传了必须在 SIZING_BOUNDS 区间内）
+    ap.add_argument("--risk-pct", dest="risk_pct", type=float,
+                    help="单笔风险占总资金比例（如 0.02 = 2%%）；默认 0.01")
+    ap.add_argument("--liq-pct", dest="liq_pct", type=float,
+                    help="流动性折损比例；默认 0.01")
+    ap.add_argument("--max-position-pct", dest="max_position_pct", type=float,
+                    help="单票仓位上限占总资金比例（如 0.5 = 50%%）；默认 0.30")
+    ap.add_argument("--ensure-factors", dest="ensure_factors", action="store_true",
+                    help="调 CPT 前先补因子（写 CPT 库；默认只读）")
+    ap.add_argument("--user", default=DEFAULT_USER, help="CPT 用户标识（默认 default）")
     args = ap.parse_args(argv)
+
+    # R4 sizing 参数校验（与 SIZING_BOUNDS 同一口径；越界报错而非静默回落）
+    sizing_params: dict[str, float] | None = None
+    if args.risk_pct is not None or args.liq_pct is not None or args.max_position_pct is not None:
+        sizing_params = {}
+        if args.risk_pct is not None:
+            lo, hi = SIZING_BOUNDS["risk_pct"]
+            if not (lo <= args.risk_pct <= hi):
+                ap.error(f"--risk-pct 需要在 {lo}-{hi} 之间")
+            sizing_params["risk_pct"] = args.risk_pct
+        if args.liq_pct is not None:
+            lo, hi = SIZING_BOUNDS["liq_pct"]
+            if not (lo <= args.liq_pct <= hi):
+                ap.error(f"--liq-pct 需要在 {lo}-{hi} 之间")
+            sizing_params["liq_pct"] = args.liq_pct
+        if args.max_position_pct is not None:
+            lo, hi = SIZING_BOUNDS["max_position_pct"]
+            if not (lo <= args.max_position_pct <= hi):
+                ap.error(f"--max-position-pct 需要在 {lo}-{hi} 之间")
+            sizing_params["max_position_pct"] = args.max_position_pct
 
     if args.all and args.code:
         ap.error("--code 与 --all 不能同时给")
@@ -625,17 +655,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     persist = bool(args.persist) and not args.dry_run and not args.no_persist
     try:
         if args.all:
-            out = analyze_holdings(capital=args.capital, as_of=as_of, use_cpt=not args.no_cpt)
+            out = analyze_holdings(capital=args.capital, as_of=as_of, use_cpt=not args.no_cpt,
+                                   sizing_params=sizing_params, cpt_user=args.user)
             if persist:
                 # `analyze_holdings` 按契约恒 persist=False（只读报告）；要落库就按它算出的
                 # 成本/数量重跑一遍 decide(persist=True)，同一交易日同 code 幂等。
                 out = [decide(d.code, cost=d.inputs.get("cost"),
                               shares=d.inputs.get("shares"), capital=args.capital,
-                              as_of=as_of, use_cpt=not args.no_cpt, persist=True)
+                              as_of=as_of, use_cpt=not args.no_cpt, persist=True,
+                              sizing_params=sizing_params, ensure_factors=args.ensure_factors,
+                              cpt_user=args.user)
                        for d in out]
         else:
             d = decide(args.code, cost=args.cost, shares=args.shares, capital=args.capital,
-                       as_of=as_of, use_cpt=not args.no_cpt, persist=persist)
+                       as_of=as_of, use_cpt=not args.no_cpt, persist=persist,
+                       sizing_params=sizing_params, ensure_factors=args.ensure_factors,
+                       cpt_user=args.user)
             out = [d]
     except ValueError as exc:
         print(f"参数错误：{exc}", file=sys.stderr)

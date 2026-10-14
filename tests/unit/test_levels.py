@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from emotion_core.algorithms import levels as lv
@@ -154,3 +156,31 @@ class TestConstantsMatchCpt:
         """与 CPT `track_points.py` 同值；改了必须同步两侧。"""
         assert (lv.BUY_BUFFER, lv.SELL_BUFFER, lv.STOP_LOSS_RATIO) == (1.02, 0.97, 0.95)
         assert (lv.BI_LOOKBACK, lv.ZHONGSHU_LOOKBACK) == (3, 2)
+
+
+class TestConstantsMatchCptLive:
+    """从 CPT 仓源码 import 真实常量，防两侧漂移（R4 S6）。"""
+    @pytest.fixture(autouse=True)
+    def _add_cpt_path(self):
+        import os
+        cpt_path = "/home/ubuntu/DSH/Chan_Pattern_Trader"
+        if os.path.isdir(cpt_path) and cpt_path not in sys.path:
+            sys.path.insert(0, cpt_path)
+        yield
+
+    def test_lookback_matches_cpt(self):
+        try:
+            from cpt.application.track_points import _BI_LOOKBACK, _ZHONGSHU_LOOKBACK
+        except ImportError:
+            pytest.skip("CPT 仓不可用（非同一机器）")
+        assert lv.BI_LOOKBACK == _BI_LOOKBACK
+        assert lv.ZHONGSHU_LOOKBACK == _ZHONGSHU_LOOKBACK
+
+    def test_buffers_match_cpt(self):
+        try:
+            from cpt.application.track_points import BUY_BUFFER, SELL_BUFFER, STOP_LOSS_RATIO
+        except ImportError:
+            pytest.skip("CPT 仓不可用")
+        assert lv.BUY_BUFFER == BUY_BUFFER
+        assert lv.SELL_BUFFER == SELL_BUFFER
+        assert lv.STOP_LOSS_RATIO == STOP_LOSS_RATIO

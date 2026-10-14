@@ -411,3 +411,59 @@ class TestDecideSizingParams:
         # use_cpt=False 时 CPT 调用被跳过，ensure_factors 不会触发 fetch
         # 但 cpt_ensure_used 只记录「是否意图确保」，实际调用受 use_cpt 控制
         assert d.facts.get("cpt_ensure_used") is False  # use_cpt=False → 不调
+
+
+# ── R4 CLI 扩展（sizing 参数 / user / ensure_factors）──────────────────────
+
+# ── R4 CLI 扩展（sizing 参数 / user / ensure_factors）──────────────────────
+
+class TestCliR4:
+    """CLI 新增参数：--risk-pct / --liq-pct / --max-position-pct / --user / --ensure-factors。"""
+
+    def _stub_io(self, monkeypatch):
+        """为 CLI 桩出 IO 依赖，避免连库/出网。"""
+        box = {
+            "trade_date": D,
+            "basic": {"name": "测试股", "is_st": False, "float_shares": 1e9, "in_market": True},
+            "bar": {"close": 10.0, "amount": 2e8},
+            "drv": None, "stat": None, "pos": None,
+            "writes": [], "cpt_calls": 0,
+            "levels": hs.Levels(buy_reference=15.0, stop_price=14.0,
+                                target_price=27.0, basis="cpt_structure", detail="d"),
+        }
+        monkeypatch.setattr(hs, "_latest_trade_date", lambda: box["trade_date"])
+        monkeypatch.setattr(hs, "_basic", lambda code: box["basic"])
+        monkeypatch.setattr(hs, "_bar", lambda code, d: box["bar"])
+        monkeypatch.setattr(hs, "_derived", lambda code, d: box["drv"])
+        monkeypatch.setattr(hs, "_market", lambda d: box["stat"])
+        monkeypatch.setattr(hs.holding_store, "holding_for", lambda code: box["pos"])
+        monkeypatch.setattr(hs.holding_store, "upsert_decision",
+                            lambda d: (box["writes"].append(d), 1)[1])
+        monkeypatch.setattr(hs.cpt_client, "cpt_enabled", lambda: False)
+
+        def _structure(overlays, price_ratio, *, close):
+            return box["levels"]
+        monkeypatch.setattr(hs, "structure_levels", _structure)
+        return box
+
+    def test_risk_pct_passes_through(self, monkeypatch):
+        self._stub_io(monkeypatch)
+        rc = hs.main(["--code", "601811", "--risk-pct", "0.02",
+                      "--capital", "1000000", "--json"])
+        assert rc == 0
+
+    def test_risk_pct_out_of_bounds_errors(self, monkeypatch):
+        self._stub_io(monkeypatch)
+        with pytest.raises(SystemExit) as exc:
+            hs.main(["--code", "601811", "--risk-pct", "0.99"])
+        assert exc.value.code == 2
+
+    def test_user_passes_through(self, monkeypatch):
+        self._stub_io(monkeypatch)
+        rc = hs.main(["--code", "601811", "--user", "alice", "--json"])
+        assert rc == 0
+
+    def test_ensure_factors_flag(self, monkeypatch):
+        self._stub_io(monkeypatch)
+        rc = hs.main(["--code", "601811", "--ensure-factors", "--no-cpt", "--json"])
+        assert rc == 0
