@@ -245,3 +245,24 @@ class TestStaticAssetWiring:
                     ".holding-ladder-row.buy .side", ".holding-card details",
                     ".cal-day.no-data"):
             assert sel in css, f"{sel} 必须在被模板加载的 dashboard.css 里"
+
+
+class TestHoldingEmptyStateHint:
+    """空态引导：卡片首次出现时只有一排输入框 + 一个「—」。
+
+    2026-10-14 无头审计：卡片在 `bindHoldingForm` 里就被 `display:block` 显出来，而
+    `holding-body` 要等点「计算」才渲染 ⇒ 首屏是一片空白输入框，用户看不出下一步。
+    本测试钉住「空态给引导 / 已回填给提示 / 成功渲染清掉」三条接线。
+    """
+
+    def test_hint_wired_for_empty_ready_and_cleared_states(self):
+        js = (Path(server.__file__).parent / "static" / "stock.js").read_text(encoding="utf-8")
+        assert 'const HOLD_EMPTY_HINT = "填成本价与数量后点「计算」' in js
+        assert 'const HOLD_READY_HINT = "点「计算」查看决策";' in js
+        # 空态与「已回填」各挂一次；仓位预填成功后再挂一次 ready
+        assert js.count('= saved.cost ? HOLD_READY_HINT : HOLD_EMPTY_HINT;') == 1
+        assert js.count('$("holding-hint").textContent = HOLD_READY_HINT;') == 1
+        # 成功渲染必须把引导清空，否则引导会与结果同屏
+        assert js.count('$("holding-hint").textContent = "";') == 1
+        # 失败路径仍然只写错误原因，不被引导覆盖
+        assert '"无法计算："' in js

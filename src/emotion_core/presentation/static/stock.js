@@ -101,6 +101,10 @@
   // ②缺数显示「—」不显示 0 ③CPT 结论并排不合并（D7）。
   const HOLDING_KEY = (code) => "emotion.holding." + code;
   const HOLD_FIELDS = ["holding-cost", "holding-shares", "holding-capital"];
+  // 空态引导：卡片一出现就只有一排输入框 + 「—」，不写一句用户不知道要点「计算」。
+  // 成功渲染时 renderHolding 会把 hint 清空（失败才占用它报原因）。
+  const HOLD_EMPTY_HINT = "填成本价与数量后点「计算」；总资金可留空（只给比例）";
+  const HOLD_READY_HINT = "点「计算」查看决策";
   let holdingBound = false;
   let holdingCode = "";
 
@@ -257,6 +261,7 @@
       $("holding-cost").value = h.cost;
       if (h.shares !== null && h.shares !== undefined) $("holding-shares").value = h.shares;
       $("holding-source").textContent = "（来自持仓表）";
+      $("holding-hint").textContent = HOLD_READY_HINT;
     } catch (err) {
       // 预填失败静默：用户手填即可
     }
@@ -281,6 +286,7 @@
     $("holding-shares").value = saved.shares || "";
     $("holding-capital").value = saved.capital || "";
     $("holding-source").textContent = saved.cost ? "（上次输入）" : "";
+    $("holding-hint").textContent = saved.cost ? HOLD_READY_HINT : HOLD_EMPTY_HINT;
     if (!saved.cost && code) prefillFromPosition(code);
   }
 
