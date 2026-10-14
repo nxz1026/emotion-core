@@ -253,9 +253,9 @@ class TestGetStatic:
     def test_css_content_type(self, monkeypatch, tmp_path):
         static_dir = tmp_path / "static"
         static_dir.mkdir()
-        (static_dir / "style.css").write_text("body {}", encoding="utf-8")
+        (static_dir / "dashboard.css").write_text("body {}", encoding="utf-8")
         monkeypatch.setattr(server, "STATIC_DIR", static_dir)
-        content, ct = server.get_static("style.css")
+        content, ct = server.get_static("dashboard.css")
         assert b"body {}" in content
         assert ct == "text/css"
 

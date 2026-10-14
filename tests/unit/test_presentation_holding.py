@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import inspect
+import re
 from datetime import date
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -203,3 +205,43 @@ class TestRouteWiring:
         assert "未知 API 路径" in src
         # 兜底只剩一处调用点（`/api/status` 分支），catch-all 不再调它
         assert src.count("self._handle_status()") == 1
+
+
+def _referenced_assets() -> set[str]:
+    """模板里 `{{ base_path }}/static/<name>` 引用到的静态资产名。"""
+    root = Path(server.__file__).parent
+    names: set[str] = set()
+    for tpl in (root / "templates").glob("*.html"):
+        names |= set(re.findall(r"/static/([\w.-]+)", tpl.read_text(encoding="utf-8")))
+    return names
+
+
+class TestStaticAssetWiring:
+    """静态资产接线：模板引用的必须存在，且 `static/` 里不留孤儿文件。
+
+    2026-10-14 审计 A1：R3 持仓卡片的 `.holding-*` 样式**全写在孤儿文件
+    `static/style.css`**，而模板只加载 `static/dashboard.css` ⇒ 卡片功能在、
+    样式全无（实测 `.holding-form` 的 `padding/border-radius/background` 全是浏览器
+    默认值，按钮是个灰疙瘩）。本测试把「引用 → 文件存在 → 样式真的写在被加载的那份
+    CSS 里」钉死，防止同样的写法再次出现。
+    """
+
+    def test_assets_referenced_by_templates_exist(self):
+        root = Path(server.__file__).parent
+        assert _referenced_assets() == {"dashboard.css", "stock.js"}
+        missing = sorted(n for n in _referenced_assets()
+                         if not (root / "static" / n).is_file())
+        assert missing == []
+
+    def test_no_orphan_static_file(self):
+        root = Path(server.__file__).parent
+        present = {p.name for p in (root / "static").iterdir() if p.is_file()}
+        assert present - _referenced_assets() == set()
+
+    def test_card_and_calendar_rules_live_in_the_loaded_stylesheet(self):
+        path = Path(server.__file__).parent / "static" / "dashboard.css"
+        css = path.read_text(encoding="utf-8")
+        for sel in (".holding-form", ".holding-action", ".holding-add",
+                    ".holding-ladder-row.buy .side", ".holding-card details",
+                    ".cal-day.no-data"):
+            assert sel in css, f"{sel} 必须在被模板加载的 dashboard.css 里"

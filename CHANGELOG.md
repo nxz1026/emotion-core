@@ -238,6 +238,31 @@ Commits：`d3348c8` + `7be5916` + `54e1765` + `5d8f5c8`
 - 新增 `_to_int()` / `_to_float()` 两个容错转换（None / NaN / 不可解析 → 0 / 0.0），替换 `volume` 与 `turnover_rate` 两处；补 6 个单测（含「停牌股全空列」回归）。
 - 补跑 `--date 2026-10-13 --from-step derive` → 14 步全 OK，`derived_bar` / `market_stat` 到达 2026-10-13。
 
+### 修复 · 2026-10-14 面板元素级无头审计（A1–A6：持仓卡片样式落在孤儿文件 + 边界链接 + API 兜底）
+
+以 playwright 按**元素**为单位逐页审计（直观 / 逻辑 / 算法 / 策略 / 个股，5 路由 × 3 标的），
+下面只列真实缺陷（全页 `None` 那类是误报——实为 `<code>` 里的算法说明正文）：
+
+- **A1（真 bug）** R3 持仓卡片的 `.holding-*` 全部写在 `static/style.css`，而模板只加载
+  `static/dashboard.css` ⇒ 卡片功能在、样式全无（表单退回 `block`、按钮是个灰疙瘩）。
+  整段迁入 `dashboard.css`；实测 `form.display=flex / gap=14px`、`input.borderRadius=6px`、
+  `button.backgroundColor=rgb(9,105,218)`。
+- **A2（真 bug）** 快照导航切到边界日时渲染出 `href="…?date=None"`（点进去等于不带日期），
+  只靠 `pointer-events:none` 挡点击。改为输出 `<span class="btn-link disabled" aria-disabled="true">`，
+  实测 `date=None` 归零。
+- **A3（真 bug）** 持仓「分析」在旧面板进程下显示字面量 `undefined · undefined`；
+  `renderHolding()` 增载荷形状校验，缺字段时提示「面板进程可能早于后端代码，需重启服务」。
+- **A4** 删除两个孤儿静态文件 `static/style.css`、`static/app.js`（零引用；主题变量在
+  `dashboard.css` 另有完整一份、主题切换 `base.html` 已内联同款实现）。
+- **A5** 未识别的 `/api/*` 由「兜底成 status 载荷（`ok:true`）」收紧为
+  `404 {"ok": false, "error": "未知 API 路径：…"}`；兜底只留给 `/api/status`（门户「今日速览」依赖）。
+- **A6** 日历「无快照」日的 `.cal-day.no-data` 补 `opacity:.5`，与图例 `.dot-none` 同口径。
+
+文档订正：`docs/11-代码架构设计.md:157`、`docs/09-展示层设计.md:204` 的静态资产名改为实际
+文件（`dashboard.css` + `stock.js`）；新增回归测试 `TestStaticAssetWiring`（模板引用的资产必须
+存在、`static/` 不留孤儿文件、卡片与日历规则必须在**被加载的那份** CSS 里）。全量
+`pytest tests/unit tests/architecture` → **1945 passed**。
+
 ---
 
 ## 2026-10-07 · （第二段：systemd 对齐 + close 撤销 + doctor 可失败 + 文档以实测为准）

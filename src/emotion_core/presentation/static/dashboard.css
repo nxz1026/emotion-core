@@ -522,6 +522,7 @@ pre code {
 .cal-day.has-data:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
 .cal-day.latest { border-color: var(--success); color: var(--success); }
 .cal-day.selected { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+.cal-day.no-data { opacity: .5; }   /* 与图例 .dot-none 同口径：无快照日淡显 */
 .cal-day.out { opacity: .35; }
 .cal-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
