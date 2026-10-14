@@ -72,8 +72,8 @@ class TestUpsert:
         sql, params = rec.calls[0]
         assert "ON CONFLICT (trade_date, code) DO UPDATE" in sql
         assert "created_at       = now()" in sql        # 每次刷新
-        assert sql.count("%s::jsonb") == 4              # ladder/reasons/facts/inputs
-        assert len(params) == 21
+        assert sql.count("%s::jsonb") == 5              # ladder/reasons/facts/inputs/sizing_params
+        assert len(params) == 22
         # 列顺序：trade_date, code, cost_price, shares, market_price, pnl_pct, ...
         assert params[:6] == (D, "601811", 8.0, 1000, 21.14, 1.6)
         assert params[6:11] == ("HOLD", "持有观察", "risk+liq+maxpos", 13300, 0.1999)
@@ -81,7 +81,8 @@ class TestUpsert:
         assert json.loads(params[16]) == [
             {"side": "BUY", "price": 15.029, "pct": 0.4, "shares": 5300, "why": "买参考"}]
         assert json.loads(params[19]) == {"cost": 8.0, "shares": 1000, "capital": 1e6}
-        assert params[20] == "structure_ready"
+        # params[20] = sizing_params (jsonb); params[21] = cpt_status
+        assert params[21] == "structure_ready"
 
     def test_cost_and_shares_come_from_inputs_so_unheld_is_null(self, monkeypatch):
         rec = _Rec()

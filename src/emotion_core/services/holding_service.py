@@ -46,12 +46,14 @@ from emotion_core.algorithms.sizing import (
     LIQ_PCT,
     MAX_POSITION_PCT,
     RISK_PCT,
+    SIZING_BOUNDS,
     lot_size,
     plan_shares,
 )
 from emotion_core.data import holding_store
 from emotion_core.domain.holding import ACTION_LABELS, Decision, Ladder, Levels, Sizing
 from emotion_core.services import cpt_client
+from emotion_core.services.cpt_client import CPT_ENSURE_TIMEOUT, DEFAULT_USER
 from emotion_core.utils.db import connect_ro
 
 log = logging.getLogger("emotion_core.services.holding_service")
@@ -84,6 +86,37 @@ _NO_SIZING: Final[Sizing] = Sizing(
     suggested_shares=None, position_pct=None, suggested_amount=None,
     method="none", detail="无有效参考价 → 不给股数（F6 不猜）",
 )
+
+
+# ── R4 sizing 参数化校验（docs/18 §7.3/§7.4） ───────────────────────────
+def _resolve_sizing_params(
+    sizing_params: dict[str, Any] | None,
+) -> tuple[dict[str, float], list[str]]:
+    """校验 `sizing_params` 三字段（risk_pct / liq_pct / max_position_pct）。
+
+    越界字段回落默认值并在 ``reasons`` 里用 ``sizing_param_ignored`` 提示。
+    返回 ``(实际用的 dict, 需要追加的 degrade 文本列表)``。
+    """
+    if not isinstance(sizing_params, dict) or not sizing_params:
+        return {}, []
+    resolved: dict[str, float] = {}
+    problems: list[str] = []
+    for key, (lo, hi) in SIZING_BOUNDS.items():
+        raw = sizing_params.get(key)
+        if raw is None:
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            problems.append(f"{key}={raw!r} 不是数字，已忽略")
+            continue
+        if not lo <= val <= hi:
+            problems.append(
+                f"{key}={val} 超出合法范围 [{lo}, {hi}]，已回落默认值"
+            )
+            continue
+        resolved[key] = val
+    return resolved, problems
 
 # ── SQL（只读；全部 %s 占位符） ──────────────────────────────────────
 _BASIC_SQL = "SELECT name, is_st, float_shares, in_market FROM stock_basic WHERE code = %s"
@@ -303,8 +336,19 @@ def decide(
     as_of: date | None = None,
     use_cpt: bool = True,
     persist: bool = True,
+    # ── R4 扩展（docs/18 §7.4） ─────────────────────────────────────────
+    sizing_params: dict[str, Any] | None = None,
+    ensure_factors: bool = False,
+    cpt_user: str = DEFAULT_USER,
 ) -> Decision:
-    """单标的持仓决策（docs/17 §5.3 的 10 步，顺序不得调换）。"""
+    """单标的持仓决策（docs/17 §5.3 的 10 步 + docs/18 §7.4 扩展，顺序不得调换）。
+
+    `sizing_params` 可传 ``{"risk_pct", "liq_pct", "max_position_pct"}`` 任意子集；
+    越界字段回落默认值并在 ``reasons`` 记 ``sizing_param_ignored``。
+    `ensure_factors=True`` 会调 ``cpt_client.fetch_snapshot(..., ensure_factors=True)``
+    （仅 CPT 显式开启 factor 按需刷新；UI 配合「运行提示」展示，见 docs/18 §7.5）。
+    ``cpt_user`` 是 CPT 关注列表的 user_id（默认 ``"default"``）。
+    """
     norm = _norm_code(code)
     trade_date = as_of or _latest_trade_date()
     inputs = _inputs(cost=cost, shares=shares, capital=capital, trade_date=trade_date)
@@ -343,6 +387,13 @@ def decide(
                             "text": f"成本/数量取自 position 在仓快照（{pos.entry_date}）",
                             "src": "position.status='OPEN'"})
 
+    # 4.5) R4 sizing 参数化校验（docs/18 §7.3/§7.4）。
+    resolved_sizing, sizing_problems = _resolve_sizing_params(sizing_params)
+    inputs["sizing_params"] = dict(resolved_sizing)
+    for p in sizing_problems:
+        reasons.append({"kind": "sizing_param_ignored", "text": p,
+                        "src": "docs/18 §7.3 SIZING_BOUNDS"})
+
     drv = _derived(norm, trade_date)
     stat = _market(trade_date)
 
@@ -350,8 +401,15 @@ def decide(
     overlays = None
     price_ratio = None
     cpt_view: dict[str, Any] | None = None
+    cpt_ensure_used = False
     if use_cpt and cpt_client.cpt_enabled():
-        snap = cpt_client.fetch_snapshot(norm)
+        snap_timeout = CPT_ENSURE_TIMEOUT if ensure_factors else cpt_client.CPT_TIMEOUT
+        snap = cpt_client.fetch_snapshot(
+            norm, timeout=snap_timeout,
+            ensure_factors=True if ensure_factors else None,
+            user=cpt_user,
+        )
+        cpt_ensure_used = ensure_factors
         if snap is None:
             reasons.append({"kind": "degrade", "text": "CPT snapshot 取数失败 → 价位走兜底",
                             "src": "cpt:8010"})
@@ -361,7 +419,7 @@ def decide(
                 reasons.append({"kind": "degrade", "text": note, "src": "cpt:8010 data_quality"})
             overlays = cpt_client.snapshot_overlays(snap)
         if cpt_client.recommendation_enabled():
-            rec = cpt_client.fetch_recommendation(norm)
+            rec = cpt_client.fetch_recommendation(norm, user=cpt_user)
             if rec is None:
                 reasons.append({"kind": "degrade",
                                 "text": "CPT recommendation 取数失败 → 结构位不可换算",
@@ -375,12 +433,17 @@ def decide(
                         "text": "price_ratio=None（快照与 daily_bar 不在同一天）→ 结构位不可换算",
                         "src": "docs/17 §6.1"})
 
-    # 6) 价位 → 7) 数量
+    # 6) 价位 → 7) 数量（R4 sizing 参数化，docs/18 §7.4）。
     levels = structure_levels(overlays, price_ratio, close=close)
     reasons.append({"kind": "structure", "text": levels.detail,
                     "src": f"levels.basis={levels.basis}"})
-    sizing = plan_shares(capital=capital, entry=levels.buy_reference or close,
-                         stop=levels.stop_price, amount=amount, board=_sizing_board(norm))
+    sizing = plan_shares(
+        capital=capital, entry=levels.buy_reference or close,
+        stop=levels.stop_price, amount=amount, board=_sizing_board(norm),
+        risk_pct=resolved_sizing.get("risk_pct", RISK_PCT),
+        liq_pct=resolved_sizing.get("liq_pct", LIQ_PCT),
+        max_position_pct=resolved_sizing.get("max_position_pct", MAX_POSITION_PCT),
+    )
     if sizing.detail:
         reasons.append({"kind": "sizing", "text": sizing.detail, "src": f"method={sizing.method}"})
     if capital is None:
@@ -427,6 +490,7 @@ def decide(
         "cpt_divergence": (cpt_view or {}).get("divergence_status"),
         "cpt_price_ratio": price_ratio,
         "levels_basis": levels.basis,
+        "cpt_ensure_used": cpt_ensure_used,
     }
     d = Decision(
         code=norm, trade_date=trade_date, action=action,
@@ -445,12 +509,14 @@ def decide(
 
 
 def analyze_holdings(
-    *, capital: float | None = None, as_of: date | None = None, use_cpt: bool = True
+    *, capital: float | None = None, as_of: date | None = None, use_cpt: bool = True,
+    sizing_params: dict[str, Any] | None = None, cpt_user: str = DEFAULT_USER,
 ) -> list[Decision]:
     """全部在仓（`position.status='OPEN'`）逐个决策，不落库（只读报告）。"""
     return [
         decide(h.code, cost=h.cost, shares=h.shares, capital=capital,
-               as_of=as_of, use_cpt=use_cpt, persist=False)
+               as_of=as_of, use_cpt=use_cpt, persist=False,
+               sizing_params=sizing_params, cpt_user=cpt_user)
         for h in holding_store.open_holdings()
     ]
 

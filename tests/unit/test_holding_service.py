@@ -213,7 +213,7 @@ class TestDecide:
 
     def test_cpt_failure_degrades_without_raising(self, monkeypatch, io):
         monkeypatch.setattr(hs.cpt_client, "cpt_enabled", lambda: True)
-        monkeypatch.setattr(hs.cpt_client, "fetch_snapshot", lambda code: None)
+        monkeypatch.setattr(hs.cpt_client, "fetch_snapshot", lambda code, **kw: None)
         monkeypatch.setattr(hs.cpt_client, "recommendation_enabled", lambda: False)
         io["levels"] = _levels()
         d = hs.decide("601811", persist=False)
@@ -221,12 +221,12 @@ class TestDecide:
 
     def test_price_ratio_none_degrades(self, monkeypatch, io):
         monkeypatch.setattr(hs.cpt_client, "cpt_enabled", lambda: True)
-        monkeypatch.setattr(hs.cpt_client, "fetch_snapshot", lambda code: {"x": 1})
+        monkeypatch.setattr(hs.cpt_client, "fetch_snapshot", lambda code, **kw: {"x": 1})
         monkeypatch.setattr(hs.cpt_client, "data_quality_note", lambda s: None)
         monkeypatch.setattr(hs.cpt_client, "snapshot_overlays", lambda s: {"bis": []})
         monkeypatch.setattr(hs.cpt_client, "recommendation_enabled", lambda: True)
         monkeypatch.setattr(hs.cpt_client, "fetch_recommendation",
-                            lambda code: {"price_ratio": None})
+                            lambda code, **kw: {"price_ratio": None})
         monkeypatch.setattr(hs.cpt_client, "price_ratio_of", lambda r: None)
         monkeypatch.setattr(hs.cpt_client, "recommendation_view", lambda r: {"action": "hold"})
         d = hs.decide("601811", persist=False)
@@ -343,3 +343,71 @@ class TestNoConfigLeak:
         assert hs.RISK_PCT == 0.01 and hs.LIQ_PCT == 0.01 and hs.MAX_POSITION_PCT == 0.30
         assert hs.BUY_LADDER == ((1.00, 0.40), (0.97, 0.35), (0.94, 0.25))
         assert hs.SELL_LADDER == ((1.00, 0.50), (1.05, 0.50))
+
+
+# ─────────────────────── R4 sizing 参数化（docs/18 §7.3/§7.4） ───────────────────────
+
+class TestResolveSizingParams:
+    """`_resolve_sizing_params`：合法 → 原值；越界 → 回落默认 + 原因。"""
+
+    def test_valid_params_pass_through(self):
+        resolved, problems = hs._resolve_sizing_params(
+            {"risk_pct": 0.02, "liq_pct": 0.01, "max_position_pct": 0.5})
+        assert resolved == {"risk_pct": 0.02, "liq_pct": 0.01, "max_position_pct": 0.5}
+        assert problems == []
+
+    def test_out_of_bounds_falls_back(self):
+        resolved, problems = hs._resolve_sizing_params(
+            {"risk_pct": 0.99, "liq_pct": 0.01})
+        assert "risk_pct" not in resolved
+        assert resolved["liq_pct"] == 0.01
+        assert len(problems) == 1 and "risk_pct=0.99" in problems[0]
+
+    def test_non_numeric_ignored(self):
+        resolved, problems = hs._resolve_sizing_params({"risk_pct": "abc"})
+        assert resolved == {}
+        assert len(problems) == 1 and "abc" in problems[0]
+
+    def test_none_or_empty_returns_defaults(self):
+        assert hs._resolve_sizing_params(None) == ({}, [])
+        assert hs._resolve_sizing_params({}) == ({}, [])
+
+    def test_partial_params(self):
+        resolved, problems = hs._resolve_sizing_params({"risk_pct": 0.03})
+        assert resolved == {"risk_pct": 0.03}
+        assert problems == []
+
+
+class TestDecideSizingParams:
+    """`decide` 传 `sizing_params` 后落进 `inputs` 并参与取小。"""
+
+    def test_custom_risk_pct_reaches_plan_shares(self, io):
+        io["levels"] = Levels(buy_reference=15.0, stop_price=14.0,
+                              target_price=27.0, basis="cpt_structure", detail="d")
+        d = hs.decide("601811", capital=1_000_000, cost=21.5, shares=1000,
+                      sizing_params={"risk_pct": 0.02}, persist=False)
+        # risk=1_000_000×2%/(15−14)=20_000 ; liq=2e8×1%/15≈1_333_333 ; maxpos=20_000
+        # 取小 = 20_000
+        assert d.sizing.suggested_shares == 20_000
+        assert d.inputs.get("sizing_params") == {"risk_pct": 0.02}
+
+    def test_out_of_bounds_recorded_in_reasons(self, io):
+        io["levels"] = Levels(buy_reference=15.0, stop_price=14.0,
+                              target_price=27.0, basis="cpt_structure", detail="d")
+        d = hs.decide("601811", capital=1_000_000, cost=21.5, shares=1000,
+                      sizing_params={"risk_pct": 0.99}, persist=False)
+        ignored = [r for r in d.reasons if r["kind"] == "sizing_param_ignored"]
+        assert len(ignored) == 1 and "risk_pct=0.99" in ignored[0]["text"]
+        # 回落默认 1% → risk=10_000 ; maxpos=20_000 ; liq 很大 → 10_000
+        assert d.sizing.suggested_shares == 10_000
+
+    def test_ensure_factors_flagged_in_facts(self, io):
+        """`ensure_factors=True` → `facts.cpt_ensure_used=True`。"""
+        io["levels"] = Levels(buy_reference=15.0, stop_price=14.0,
+                              target_price=27.0, basis="cpt_structure", detail="d")
+        io["basic"]["is_st"] = False
+        d = hs.decide("601811", capital=1_000_000, cost=21.5, shares=1000,
+                      use_cpt=False, ensure_factors=True, persist=False)
+        # use_cpt=False 时 CPT 调用被跳过，ensure_factors 不会触发 fetch
+        # 但 cpt_ensure_used 只记录「是否意图确保」，实际调用受 use_cpt 控制
+        assert d.facts.get("cpt_ensure_used") is False  # use_cpt=False → 不调

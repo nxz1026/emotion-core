@@ -1,23 +1,28 @@
-"""数量计算（R3 持仓决策，docs/17 §6.3；决策 **D1**）：固定风险 + 流动性上限 + 单票上限，取小。
+"""数量计算（R3/R4 持仓决策，docs/17 §6.3 + docs/18 §7.3；决策 **D1**）：
+固定风险 + 流动性上限 + 单票上限，取小。
 
 三条约束（任一条的输入无效就**退出该条**，并在 `Sizing.method` / `detail` 里写明）：
 
 | 约束 | 算式 | 含义 |
 |---|---|---|
-| 风险 `risk` | `capital × RISK_PCT ÷ (entry − stop)` | 打到止损时亏损 ≈ 总资金的 `RISK_PCT` |
-| 流动性 `liq` | `amount × LIQ_PCT ÷ entry` | 不超过当日成交额的 `LIQ_PCT` |
-| 单票上限 `maxpos` | `capital × MAX_POSITION_PCT ÷ entry` | 单票市值占总资金上限 |
+| 风险 `risk` | `capital × risk_pct ÷ (entry − stop)` | 打到止损时亏损 ≈ 总资金的 `risk_pct` |
+| 流动性 `liq` | `amount × liq_pct ÷ entry` | 不超过当日成交额的 `liq_pct` |
+| 单票上限 `maxpos` | `capital × max_position_pct ÷ entry` | 单票市值占总资金上限 |
 
 `method` = 实际参与取小的约束名用 `+` 连接（如 `risk+liq+maxpos`）。
 
 **D2**：`capital` 未传时不给绝对股数，只给风险反推的仓位比例上限
-`RISK_PCT ÷ ((entry − stop) ÷ entry)`（再与 `MAX_POSITION_PCT` 取小），**不阻塞**。
+`risk_pct ÷ ((entry − stop) ÷ entry)`（再与 `max_position_pct` 取小），**不阻塞**。
 **D9**：科创板按 `lot=200` 向下取整（真实规则是「200 起 + 1 股递增」，此处取保守近似）。
 守 F6：`entry` / `stop` / `amount` 无效时不猜，对应约束直接不参与。**全部约束的输入
 都无效时不给股数**：有总资金但只剩 `maxpos` → `maxpos_only`（只把上限写进 `detail`）；
 没给总资金 → `risk_only_pct`（按风险反推比例）或 `liquidity_only`；`entry` 无效 → `none`。
 
 `0` 与 `None` 的区别：`0` = 约束算出来确实是 0（例如成交额太小）；`None` = 缺输入、算不出。
+
+R4 参数化（docs/18 §7.3）：三参数（`risk_pct` / `liq_pct` / `max_position_pct`）可由调用方
+经 ``sizing_params`` 传入；越界时 ``holding_service`` 回落默认值并在 ``reasons`` 记
+``sizing_param_ignored``，绝不抛。
 """
 from __future__ import annotations
 
@@ -29,6 +34,13 @@ from emotion_core.domain.holding import Sizing
 RISK_PCT: Final[float] = 0.01          # 单笔最大亏损占总资金
 LIQ_PCT: Final[float] = 0.01           # 不超过当日成交额的 1%
 MAX_POSITION_PCT: Final[float] = 0.30  # 单票占总资金上限
+
+# ── R4 参数化合法区间（docs/18 §7.3；越界由 holding_service 回落默认） ──
+SIZING_BOUNDS: Final[dict[str, tuple[float, float]]] = {
+    "risk_pct": (0.001, 0.05),
+    "liq_pct": (0.001, 0.05),
+    "max_position_pct": (0.05, 1.0),
+}
 
 # ── 每手股数（D9） ──────────────────────────────────────────────────────────
 LOT_MAIN: Final[int] = 100
@@ -68,13 +80,19 @@ def plan_shares(
     stop: float | None,
     amount: float | None,
     board: str = "main",
+    risk_pct: float = RISK_PCT,
+    liq_pct: float = LIQ_PCT,
+    max_position_pct: float = MAX_POSITION_PCT,
+    lot: int | None = None,
 ) -> Sizing:
     """按 D1 三条约束取小，给出建议股数 / 仓位比例 / 金额。
 
     `entry` 建议传 `Levels.buy_reference`（到价才买），缺则传当日 `close`。
     `stop` 传 `Levels.stop_price`。`amount` 是当日成交额（**元**）。
+    `risk_pct` / `liq_pct` / `max_position_pct` 由调用方（holding_service）校验后传入；
+    `lot` 缺省时按 board 自动取值。
     """
-    lot = lot_size(board)
+    resolved_lot = lot if lot is not None else lot_size(board)
     e = _num(entry)
     if e is None:
         return Sizing(
@@ -90,13 +108,13 @@ def plan_shares(
     cand: dict[str, int] = {}
 
     if c is not None and s is not None and s < e:
-        cand["risk"] = _floor_lot(c * RISK_PCT / (e - s), lot)
+        cand["risk"] = _floor_lot(c * risk_pct / (e - s), resolved_lot)
         used.append("risk")
     if a is not None:
-        cand["liq"] = _floor_lot(a * LIQ_PCT / e, lot)
+        cand["liq"] = _floor_lot(a * liq_pct / e, resolved_lot)
         used.append("liq")
     if c is not None:
-        cand["maxpos"] = _floor_lot(c * MAX_POSITION_PCT / e, lot)
+        cand["maxpos"] = _floor_lot(c * max_position_pct / e, resolved_lot)
         used.append("maxpos")
 
     shown = " ".join(f"{k}={v}" for k, v in cand.items())
@@ -143,5 +161,5 @@ def plan_shares(
         position_pct=round(n * e / c, 4),
         suggested_amount=round(n * e, 2),
         method="+".join(used),
-        detail=f"{shown} → 取小 {n}（每手 {lot} 股向下取整）",
+        detail=f"{shown} → 取小 {n}（每手 {resolved_lot} 股向下取整）",
     )

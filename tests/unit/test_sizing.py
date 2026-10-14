@@ -163,3 +163,28 @@ class TestConstantsStayOutOfConfig:
         for name in ("RISK_PCT", "LIQ_PCT", "MAX_POSITION_PCT",
                      "FALLBACK_BUY_PCT", "FALLBACK_STOP_PCT"):
             assert not hasattr(config.CONFIG, name), f"{name} 不该进 CONFIG"
+
+
+class TestSizingBounds:
+    """R4 参数化合法区间（docs/18 §7.3）。"""
+
+    def test_bounds_values(self):
+        assert sz.SIZING_BOUNDS == {
+            "risk_pct": (0.001, 0.05),
+            "liq_pct": (0.001, 0.05),
+            "max_position_pct": (0.05, 1.0),
+        }
+
+    def test_plan_shares_accepts_custom_pct(self):
+        # risk_pct=2% → risk=1_000_000×2%/(20−18)=10_000 ; maxpos=15_000 ; liq 很大
+        s = sz.plan_shares(
+            capital=1_000_000, entry=20.0, stop=18.0, amount=3e8, risk_pct=0.02,
+        )
+        assert s.suggested_shares == 10_000
+
+    def test_plan_shares_board_arg_unchanged(self):
+        # 已有调用方零改动：board 仍按位置参数工作
+        s = sz.plan_shares(
+            capital=1_000_000, entry=20.0, stop=18.0, amount=1_000_000, board="star",
+        )
+        assert s.suggested_shares == 400  # liq 获胜，lot=200 → floor(500, 200) = 400

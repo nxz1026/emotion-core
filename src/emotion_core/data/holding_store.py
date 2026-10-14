@@ -33,12 +33,12 @@ INSERT INTO holding_decision (
     trade_date, code, cost_price, shares, market_price, pnl_pct,
     action, action_label, sizing_method, suggested_shares, position_pct,
     suggested_amount, buy_reference, stop_price, target_price, price_basis,
-    ladder, reasons, facts, inputs, cpt_status
+    ladder, reasons, facts, inputs, sizing_params, cpt_status
 ) VALUES (
     %s, %s, %s, %s, %s, %s,
     %s, %s, %s, %s, %s,
     %s, %s, %s, %s, %s,
-    %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s
+    %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s
 )
 ON CONFLICT (trade_date, code) DO UPDATE SET
     cost_price       = EXCLUDED.cost_price,
@@ -53,12 +53,13 @@ ON CONFLICT (trade_date, code) DO UPDATE SET
     suggested_amount = EXCLUDED.suggested_amount,
     buy_reference    = EXCLUDED.buy_reference,
     stop_price       = EXCLUDED.stop_price,
-    target_price     = EXCLUDED.target_price,
+    target_price      = EXCLUDED.target_price,
     price_basis      = EXCLUDED.price_basis,
     ladder           = EXCLUDED.ladder,
     reasons          = EXCLUDED.reasons,
     facts            = EXCLUDED.facts,
     inputs           = EXCLUDED.inputs,
+    sizing_params    = EXCLUDED.sizing_params,
     cpt_status       = EXCLUDED.cpt_status,
     created_at       = now()
 RETURNING id
@@ -117,6 +118,7 @@ def upsert_decision(d: Decision) -> int:
         json.dumps(list(d.reasons), ensure_ascii=False),
         json.dumps(d.facts, ensure_ascii=False),
         json.dumps(d.inputs, ensure_ascii=False),
+        json.dumps(d.inputs.get("sizing_params") or {}, ensure_ascii=False),
         d.cpt_status,
     )
     with transaction() as conn:

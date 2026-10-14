@@ -439,6 +439,8 @@ DDL: dict[str, str] = {
             reasons          jsonb       NOT NULL DEFAULT '[]'::jsonb,
             facts            jsonb       NOT NULL DEFAULT '{}'::jsonb,
             inputs           jsonb       NOT NULL DEFAULT '{}'::jsonb,
+            -- R4 sizing 参数化：用户实际传入的 risk_pct/liq_pct/max_position_pct（越界则回落默认）
+            sizing_params    jsonb       NOT NULL DEFAULT '{}'::jsonb,
             cpt_status       text,
             created_at       timestamptz NOT NULL DEFAULT now(),
             UNIQUE (trade_date, code)
