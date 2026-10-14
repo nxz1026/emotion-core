@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+### 变更 · 2026-10-14 ST PIT 批量回补入口（Wind）· 数据未落库
+
+- `services/ref_security_status.py` 新增 `backfill_security_status_bulk()`：用 `search_stocks` 按半年窗口枚举「实施ST / 撤销ST」，替代逐股烧配额的 `get_stock_events` 路径（全量 2024 起约 20 次调用）。
+  - 单窗返回触顶 `search_stocks` 100 行硬上限时自动二分窗口重问。
+  - 起始日快照（种子）按 5 个板块拆问「YYYY-MM-DD 处于风险警示板的股票」；缺这一步，2024-01-01 前已 ST、窗口内只发生「撤销」的股票会被误判为全年非 ST。
+  - 踩坑：窗口边界非自然周期时 Wind 把日期列名写成动态的 `2025年1月1日到2025年6月30日撤销日期`，按列名全名取值会让整个窗口静默解析出 0 事件 → 改为「列名包含」匹配（`_pick`）。
+  - 撤销事件的精简列形只提供 `证券简称`（**当前**简称，非当时简称），不能用来推断档位 → 档位留 `None`，区间折叠层按「延续上一档位」保守处理。
+  - 单窗网络失败重试 1 次后跳过；额度类失败中止枚举但继续落库已取到的数据。
+- `scripts/backfill_st_pit_wind.py`：命令行入口，`PYTHONPATH=src ... .venv/bin/python scripts/backfill_st_pit_wind.py 2024-01-01`（按 code 全量替换，幂等）。
+- 测试：`tests/unit/test_ref_security_status.py` 新增 `TestNormalizeStatus` / `TestParseBulkRows` / `TestBuildIntervals`，覆盖动态列名、精简列形、同日零长度区间、档位不可知延续；`pytest tests/unit/test_ref_security_status.py` → 29 passed。
+- **数据侧未完成**：2026-10-14 首次实跑在第 ~12 次调用后遇 `Wind 额度/限流（backend_error）：账户积分余额不足`（充值 https://market.windalice.com/#/user/credits），只取到种子 116 只 + 实施事件 273 条、**撤销事件 0 条**。缺撤销事件会让所有 ST 区间永久不闭合，故已 `TRUNCATE ref_security_status` 回滚为空表（回滚前 380 行 / 297 只，其中未闭合区间 297 条）。充值后重跑该脚本即可。
+
 ### 新增 · 2026-10-14 题材源接入（新浪概念）+ 人气 / 连板回补
 
 - **题材源激活（拍板 ①）**：新增 `data/providers/sina_concept.py`（概念节点清单
