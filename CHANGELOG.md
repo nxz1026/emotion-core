@@ -6,12 +6,20 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-15 Wind 逐日对账二分丢票（`0.01亿元` 下界问句不可解析）
+
+> 首次实跑暴露：`2026-08-17` 台账记 `ok` 却有 7 只漏票（`only_self=7`），`2026-09-21` 同形态。
+
+- **根因**：根问句下界取 `ROOT_CAP_FLOOR=0.01` 时，左子片问句被 Wind 判成「没找到数据」（与「零匹配」同形），该片被当成合法空片 ⇒ **静默丢票**；同时确认问句里的「在 X 亿元到 Y 亿元之间」Wind 也不认（回包没有表）。
+- **修复**：① 下界改 `1.0`（亿元，对 A 股等价于不设限）；② 两侧问句统一为「总市值大于等于X亿元且总市值小于等于Y亿元」（闭合边界，切点重复交给并集去重）；③ 新增 `_window_contains` 交叉验证：空子片若落在「父触顶片已知有票」的市值区间内 → 新状态 **`suspect`**（**不进** `DONE_STATUSES`，下次运行自动重抓；`truncated` 仍只记不重试以免白烧额度）；④ `scripts/backfill_limit_state_wind.py` 加 `--redo`、suspect/`only_self` 告警。
+- **实测**：`2026-08-17` `--redo` 重抓 `wind=103 self=110 only_self=7`，7 只当日涨幅 = 9.99%~10.05%（主板 6 只）/ 19.99%（创业板 `301282`），正是各自板块的涨停幅度，确为本库口径下的真涨停 ⇒ 丢票出自二分的问句解析、与 Wind 名单无关；`2026-09-21` 重抓 `wind=106 self=104 only_wind=2 only_self=0`，2 只为北交所 `920427/920478`（不在 `stock_basic`/`derived_bar` 覆盖范围，属口径差异）。`2026-08-17` 台账已手工置 `suspect` 待重抓（下次运行自动覆盖）。
+
 ### 新增 · 2026-10-15 Wind 逐日涨跌停对账通道（拍板 ③）
 
 > 背景：`derived_bar.is_limit_up` 照搬 lkl 的涨停口径，**缺 ST ±5% 档**（`docs/04 §3` 记为已知偏差，2025-06-03 实测低估约 15.2%）。本次落一条**配额友好、可断点续跑**的 Wind 对账通道，仍不改判定逻辑。
 
 - **`services/limit_state_wind.py`（新建）**：`build_question/parse_rows/split_point` 纯函数 + `fetch_day`（Wind `stock_data.search_stocks`，单日 1 次调用；返回触顶 100 行时按**市值对数二分**递归切片；`max_calls` 预算耗尽 → `exhausted`）+ `self_limit_codes`（只读 `derived_bar` 自算名单）+ `persist_day`（写名单 + 状态台账，**出错时不清空既有名单**）。
-- **`data/schema.py`**：新增 `ref_limit_state`（PK `(date, code, direction)`）与 `ref_limit_state_run`（PK `(date, direction)`；状态 `ok/truncated/exhausted/error`）+ `idx_ref_limit_state_code`；生产库已建（32 → 34 张表）。
+- **`data/schema.py`**：新增 `ref_limit_state`（PK `(date, code, direction)`）与 `ref_limit_state_run`（PK `(date, direction)`；状态 `ok/truncated/suspect/exhausted/error`）+ `idx_ref_limit_state_code`；生产库已建（32 → 34 张表）。
 - **`scripts/backfill_limit_state_wind.py`（新建）**：从最新交易日往回拉；`--max-calls` 预算（默认 40，`EMOTION_WIND_DAILY_CALL_BUDGET` 可覆盖）；已 `ok/truncated` 的 (date, direction) 自动跳过 ⇒ **同一条命令每天重复跑即断点续拉**；`--dry-run` 只打计划；`--direction up|down|both`。
 - **实测**：2025-06-03 `wind=83 self=67 only_wind=16 only_self=0`（库内 12 只当日涨幅 4.87%~5.13%，**自算零假阳性**）；2025-06-04 `wind=87 self=71 only_wind=16 only_self=0`。新增 `tests/unit/test_limit_state_wind.py` 15 项（解析 / 二分 / 预算耗尽 / 市值无区分度 / 错误传播 / 落库守卫）。
 - **文档**：`docs/04` §3 追加 2026-10-15 更新段（Wind 问句能力、100 行硬上限与市值切片、落表与续跑方式、实测数字）。

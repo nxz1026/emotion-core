@@ -44,12 +44,25 @@ TOOL_NAME = "search_stocks"
 ROW_CAP = 100
 #: 二分最大深度（防御市值无区分度时无限递归）。
 MAX_DEPTH = 16
+#: 单日单方向的最大叶子数硬闸（防「切片后结果没变」导致的指数级调用爆炸）。
+MAX_LEAVES = 64
 #: 方向 → 问句用词。
 LIMIT_WORD = {"up": "涨停", "down": "跌停"}
 DIRECTIONS = tuple(LIMIT_WORD)
-#: 台账状态：ok=名单完整；truncated=有叶子仍触顶；exhausted=预算耗尽；error=调用失败。
+#: 根问句的市值下界（亿元）。实测**不带市值约束**的问句回包只有
+#: `[Wind代码, 证券简称, 〈日期〉涨跌停状态]` 三列、**不含总市值**，触顶时无从二分
+#: （2026-08-17 因此被判 `truncated`）；加一个极宽下界即可让回包带上总市值列，
+#: 对 A 股等价于不设限（没有总市值 <1 亿元的票）。
+#:
+#: 取 1.0 而非 0.01：实测下界写成 `0.01亿元` 时**问句解析失败**（回 `没找到数据`），
+#: 左子片会静默丢票（2026-08-17 实测丢 7 只，只有 only_self 能暴露）。
+ROOT_CAP_FLOOR = 1.0
+#: 台账状态：ok=名单完整；truncated=有叶子仍触顶（真·切不动，不值得天天重试）；
+#: suspect=出现过「已知有票的区间却回空」的自相矛盾（问句解析类丢票，值钱、该重试）；
+#: exhausted=预算耗尽；error=调用失败。
 STATUS_OK = "ok"
 STATUS_TRUNCATED = "truncated"
+STATUS_SUSPECT = "suspect"
 STATUS_EXHAUSTED = "exhausted"
 STATUS_ERROR = "error"
 
@@ -63,6 +76,7 @@ class LimitFetchResult:
     calls: int = 0
     leaves: int = 0
     truncated: bool = False
+    suspect: bool = False
     exhausted: bool = False
     error: str = ""
 
@@ -72,6 +86,8 @@ class LimitFetchResult:
             return STATUS_ERROR
         if self.exhausted:
             return STATUS_EXHAUSTED
+        if self.suspect:
+            return STATUS_SUSPECT
         if self.truncated:
             return STATUS_TRUNCATED
         return STATUS_OK
@@ -95,11 +111,14 @@ def build_question(day: date, direction: str, lo: float | None = None,
     if lo is None and hi is None:
         return base
     if lo is not None and hi is not None:
-        return (f"筛选{day.isoformat()}{word}且总市值在{lo:.2f}亿元到"
-                f"{hi:.2f}亿元之间的A股股票")
+        # 实测「总市值在 X 亿元到 Y 亿元之间」Wind 会当成没结果（回 '没找到数据'），
+        # 「（大于等于 X 且）小于等于 Y」才认；闭合边界让相邻片在切点重复，
+        # 由 fetch_day 的并集去重吸收，宁可重复不可漏。
+        return (f"筛选{day.isoformat()}{word}且总市值大于等于{lo:.2f}亿元"
+                f"且总市值小于等于{hi:.2f}亿元的A股股票")
     if lo is not None:
         return f"筛选{day.isoformat()}{word}且总市值大于{lo:.2f}亿元的A股股票"
-    return f"筛选{day.isoformat()}{word}且总市值小于{hi:.2f}亿元的A股股票"
+    return f"筛选{day.isoformat()}{word}且总市值小于等于{hi:.2f}亿元的A股股票"
 
 
 def _find_table(payload: Any) -> dict | None:
@@ -134,14 +153,27 @@ def _index_of(names: list[str], pred: Callable[[str], bool]) -> int | None:
     return None
 
 
+def has_table(payload: Any) -> bool:
+    """回包是否含可解析的表块。
+
+    Wind 对「零匹配」直接回字符串 ``'没找到数据'``（无表），与问句没解析出来**同形**，
+    故无表只能说明「本次没有行」，不能说明「通道坏了」。
+    """
+    return _find_table(payload) is not None
+
+
 def parse_rows(payload: Any) -> list[tuple[str, float | None]]:
-    """回包 → ``[(本地代码, 总市值亿元|None)]``（认不出代码的行丢弃）。"""
+    """回包 → ``[(本地代码, 总市值亿元|None)]``（认不出代码的行丢弃）。
+
+    市值列名实测带序号后缀（``2026年8月17日总市值1``，旁边还有 ``市值币种``），
+    故用**包含**匹配而非 ``endswith("总市值")``；单位实测为亿元（中国人寿 11180.1376）。
+    """
     block = _find_table(payload)
     if not block:
         return []
     names = [str(c.get("name", "")) for c in block.get("columns", []) or []]
     idx_code = _index_of(names, lambda n: "代码" in n)
-    idx_cap = _index_of(names, lambda n: n.endswith("总市值"))
+    idx_cap = _index_of(names, lambda n: "总市值" in n)
     if idx_code is None:
         return []
     out: list[tuple[str, float | None]] = []
@@ -161,18 +193,34 @@ def parse_rows(payload: Any) -> list[tuple[str, float | None]]:
     return out
 
 
+def _window_contains(caps: list[float], lo: float | None, hi: float | None) -> bool:
+    """已知市值里是否有落在 ``(lo, hi)`` 内（严格开区间，切点上的值不算）。"""
+    return any((lo is None or cap > lo) and (hi is None or cap < hi) for cap in caps)
+
+
 def split_point(lo: float | None, hi: float | None,
                 values: list[float]) -> float | None:
     """触顶切片点：按**观测到的**市值区间取对数中点（无区分度 → None）。
 
     取对数中点是因为 A 股总市值跨 3 个数量级，等比切分才能把「千亿大盘」
     与「十亿小票」摊平到同一片里各 <100 行。
+
+    优先用观测值而非窗口边界：子窗口在切片那一侧**不继承父窗口的窄边界**
+    （见 `fetch_day`），所以按观测区间切仍然完整覆盖父窗口；反之若拿一个离观测
+    很远的边界当端点（例如根窗口下界 0.01 亿元 vs 观测最小 8 亿元），对数中点会
+    退化到几乎不动，二分不收敛。观测值无区分度时才退回窗口边界。
     """
     vals = sorted(v for v in values if v is not None and v > 0)
-    if not vals:
-        return None
-    a = lo if lo is not None and lo > 0 else vals[0]
-    b = hi if hi is not None and hi > 0 else vals[-1]
+    if vals:
+        a, b = vals[0], vals[-1]
+    else:
+        a = lo if lo is not None and lo > 0 else None
+        b = hi if hi is not None and hi > 0 else None
+        if a is None or b is None:
+            return None
+    if not (b > a):
+        a = lo if lo is not None and lo > 0 else a
+        b = hi if hi is not None and hi > 0 else b
     if not (b > a):
         return None
     mid = math.sqrt(a * b)
@@ -200,7 +248,9 @@ def fetch_day(client: WindClient, day: date, direction: str = "up",
         raise ValueError(f"未知方向：{direction!r}（可选 {DIRECTIONS}）")
     result = LimitFetchResult(day=day, direction=direction)
     seen: set[str] = set()
-    stack: list[tuple[float | None, float | None, int]] = [(None, None, 0)]
+    known_caps: list[float] = []
+    signatures: set[tuple[int, float | None, float | None]] = set()
+    stack: list[tuple[float | None, float | None, int]] = [(ROOT_CAP_FLOOR, None, 0)]
     while stack:
         if max_calls is not None and result.calls >= max_calls:
             result.exhausted = True
@@ -209,21 +259,44 @@ def fetch_day(client: WindClient, day: date, direction: str = "up",
         question = build_question(day, direction, lo, hi)
         try:
             call = client.call(SERVER_TYPE, TOOL_NAME, {"question": question})
-            rows = parse_rows(call.data)
+            result.calls += 1
+            if getattr(call, "ok", True) is False:
+                result.error = (f"Wind 调用失败 code={getattr(call, 'code', '')} "
+                                f"{getattr(call, 'message', '')}")[:200]
+                break
+            if not has_table(call.data):
+                # Wind 对「真的没有匹配」与「问句没解析出来」回同一句 '没找到数据'，形状
+                # 完全一样。根问句（只带一个极宽下界）在全 A 口径下不可能一只都没有，
+                # 故根问句无表 = 问句/通道异常；子片的空由下面的 known_caps 交叉验证兜。
+                if depth == 0:
+                    result.error = f"根问句无结果表：{question}"[:200]
+                    break
+                rows = []
+            else:
+                rows = parse_rows(call.data)
         except Exception as exc:  # noqa: BLE001 —— 记错并停：预算/额度问题由调用方判定
             result.calls += 1
             result.error = f"{type(exc).__name__}: {exc}"[:200]
             break
-        result.calls += 1
         result.leaves += 1
         seen.update(code for code, _ in rows)
         if len(rows) < ROW_CAP:
+            if not rows and _window_contains(known_caps, lo, hi):
+                # 空片落在一个「父触顶片明明有票」的市值区间里 → 不是真的空，
+                # 是问句没被解析（实测 2026-08-17 左子片就这么静默丢了 7 只）。
+                result.suspect = True
             if sleep_sec:
                 time.sleep(sleep_sec)
             continue
         # 触顶：本片已知先收下，再二分继续（并集去重，不依赖边界是否闭区间）
-        cut = split_point(lo, hi, [cap for _, cap in rows if cap is not None])
-        if cut is None or depth >= MAX_DEPTH:
+        caps = [cap for _, cap in rows if cap is not None]
+        known_caps.extend(caps)
+        signature = (len(rows), min(caps) if caps else None, max(caps) if caps else None)
+        no_progress = signature in signatures
+        signatures.add(signature)
+        cut = split_point(lo, hi, caps)
+        if cut is None or depth >= MAX_DEPTH or no_progress or result.leaves >= MAX_LEAVES:
+            # 无进展 = 子片回包与已见片完全同形（市值区间没起作用），再切只会指数爆炸。
             result.truncated = True
             if sleep_sec:
                 time.sleep(sleep_sec)

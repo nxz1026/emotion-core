@@ -51,10 +51,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--sleep", type=float, default=0.5, help="每次调用后的礼貌间隔秒")
     p.add_argument("--oldest-first", action="store_true", help="从最旧开始（默认从最新往回）")
     p.add_argument("--dry-run", action="store_true", help="只打印计划，不调用、不落库")
+    p.add_argument("--redo", action="store_true",
+                   help="忽略已抓取状态，窗口内全部重抓（用于重跑 truncated/修口径后回填）")
     return p.parse_args(argv)
 
 
-def target_dates(start: date, end: date, direction: str) -> list[date]:
+def target_dates(start: date, end: date, direction: str, redo: bool = False) -> list[date]:
     """待办日期：库内真实有行情的交易日，去掉已 `ok/truncated` 的。"""
     df = query_df(
         "SELECT DISTINCT d.date FROM derived_bar d"
@@ -62,6 +64,8 @@ def target_dates(start: date, end: date, direction: str) -> list[date]:
         " WHERE d.date BETWEEN %s AND %s ORDER BY d.date",
         (start, end))
     days = [row for row in df["date"]]
+    if redo:
+        return days
     done = query_df(
         "SELECT date FROM ref_limit_state_run"
         " WHERE direction = %s AND status = ANY(%s) AND date BETWEEN %s AND %s",
@@ -82,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
 
     runs: list[tuple[date, str]] = []
     for direction in directions:
-        days = target_dates(start, end, direction)
+        days = target_dates(start, end, direction, redo=args.redo)
         days.sort(reverse=not args.oldest_first)
         runs.extend((d, direction) for d in days)
 
@@ -120,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
               f" self={stats['n_self']:4d} only_wind={stats['n_only_wind']:3d}"
               f" only_self={stats['n_only_self']:3d} calls={result.calls}"
               f" leaves={result.leaves} {time.time() - t0:.0f}s")
+        if stats["status"] == lsw.STATUS_SUSPECT:
+            print("⚠ suspect：有子片在「已知有票的市值区间」回空（问句解析丢票），"
+                  "名单不完整；suspect 不在 DONE_STATUSES 里，下次运行会自动重抓。")
+        if stats["n_only_self"]:
+            print(f"⚠ only_self={stats['n_only_self']}：本库判涨停而 Wind 未列；"
+                  "若确认是本库口径（ST ±5%）之外的真涨停，说明 Wind 侧漏票。")
         if result.exhausted:
             print("→ 预算耗尽：本次到此为止。")
             break

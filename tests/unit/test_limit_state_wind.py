@@ -9,9 +9,10 @@ import pytest
 from emotion_core.services import limit_state_wind as lsw
 
 DAY = date(2025, 6, 3)
-BOUNDS_RE = re.compile(r"总市值在([\d.]+)亿元到([\d.]+)亿元之间")
+BOUNDS_RE = re.compile(
+    r"总市值大于等于([\d.]+)亿元且总市值小于等于([\d.]+)亿元")
 ABOVE_RE = re.compile(r"总市值大于([\d.]+)亿元")
-BELOW_RE = re.compile(r"总市值小于([\d.]+)亿元")
+BELOW_RE = re.compile(r"总市值小于等于([\d.]+)亿元")
 
 
 def parse_bounds(question: str) -> tuple[float | None, float | None]:
@@ -61,13 +62,28 @@ class TestPure:
         assert lsw.build_question(DAY, "up") == "筛选2025-06-03涨停的A股股票"
         assert lsw.build_question(DAY, "down") == "筛选2025-06-03跌停的A股股票"
         both = lsw.build_question(DAY, "up", 20.0, 100.0)
-        assert "20.00亿元到100.00亿元之间" in both
+        # 实测「在 X 亿元到 Y 亿元之间」Wind 认不出（回 '没找到数据'）；闭合且式才认。
+        assert "总市值大于等于20.00亿元且总市值小于等于100.00亿元" in both
         assert "大于5.00亿元" in lsw.build_question(DAY, "up", 5.0)
-        assert "小于5.00亿元" in lsw.build_question(DAY, "up", None, 5.0)
+        assert "小于等于5.00亿元" in lsw.build_question(DAY, "up", None, 5.0)
 
     def test_parse_rows_realistic(self):
         rows = lsw.parse_rows(payload([("600519", 11180.1376), ("000001", 2000.0)]))
         assert rows == [("600519", 11180.1376), ("000001", 2000.0)]
+
+    def test_parse_rows_market_cap_with_suffix_and_currency_column(self):
+        """实测列名带序号后缀（`2026年8月17日总市值1`）且旁边有 `市值币种`。"""
+        raw = {"data": {"data": [{
+            "columns": [{"name": "Wind代码"}, {"name": "证券简称"},
+                        {"name": "2026年8月17日总市值1"}, {"name": "市值币种"},
+                        {"name": "2026年8月17日涨跌停状态"}],
+            "rows": [["000001.SZ", "平安银行", 2500.5, "CNY", 1]],
+        }]}}
+        assert lsw.parse_rows(raw) == [("000001", 2500.5)]
+        assert lsw.has_table(raw) is True
+
+    def test_has_table_false_for_error_payload(self):
+        assert lsw.has_table({"data": [{"error": "问句无法识别"}]}) is False
 
     def test_parse_rows_without_cap_column(self):
         raw = {"data": {"data": [{"columns": [{"name": "Wind代码"}],
@@ -82,7 +98,11 @@ class TestPure:
     def test_split_point_geometric(self):
         assert lsw.split_point(None, None, [1.0, 100.0]) == pytest.approx(10.0)
         assert lsw.split_point(20.0, 100.0, [50.0]) == pytest.approx((20.0 * 100.0) ** 0.5)
-        assert lsw.split_point(None, 40.0, [4.0, 30.0]) == pytest.approx((4.0 * 40.0) ** 0.5)
+        # 观测值优先于窗口边界：切点要落在本片真实市值区间内（否则无法前进）。
+        assert lsw.split_point(None, 40.0, [4.0, 30.0]) == pytest.approx((4.0 * 30.0) ** 0.5)
+        # 无市值可读且下界未知 → 无法切（调用方按 truncated 处理）；有下界则回退几何中点。
+        assert lsw.split_point(None, 40.0, []) is None
+        assert lsw.split_point(20.0, 40.0, []) == pytest.approx((20.0 * 40.0) ** 0.5)
 
     def test_split_point_degenerate(self):
         assert lsw.split_point(None, None, [7.0, 7.0]) is None
@@ -97,7 +117,8 @@ class TestFetchDay:
         assert result.calls == 1 and result.leaves == 1
         assert result.status == lsw.STATUS_OK
         assert result.codes == ["600001", "600002"]
-        assert client.questions == ["筛选2025-06-03涨停的A股股票"]
+        # 首次问句带总市值下界：无约束问句实测不回「总市值」列，无法二分。
+        assert client.questions == [lsw.build_question(DAY, "up", lsw.ROOT_CAP_FLOOR, None)]
 
     def test_recurses_by_market_cap_when_capped(self):
         universe = [(f"{600000 + i}", float(i + 1)) for i in range(150)]
@@ -131,8 +152,61 @@ class TestFetchDay:
         result = lsw.fetch_day(client, DAY)
         assert result.status == lsw.STATUS_TRUNCATED
         assert result.truncated is True and result.exhausted is False
-        assert result.calls == 1
+        # 子片与父片同形（市值区间没起作用）→ 立刻停，不再指数级二分。
+        assert result.calls == 3
         assert len(result.codes) == lsw.ROW_CAP
+
+    def test_root_no_table_payload_is_error(self):
+        """根问句无表 = 通道/问句异常（实测零匹配与解析失败都回 '没找到数据'）。"""
+        client = FakeClient(lambda q: "没找到数据")
+        result = lsw.fetch_day(client, DAY)
+        assert result.status == lsw.STATUS_ERROR
+        assert "根问句无结果表" in result.error
+        assert result.codes == []
+
+    def test_window_contains_is_strict_about_cut(self):
+        # 切点上的值不算「落在窗口内」：否则相邻两片会在边界上互相误报。
+        assert lsw._window_contains([5.0], 1.0, 10.0) is True
+        assert lsw._window_contains([5.0], 5.0, 10.0) is False
+        assert lsw._window_contains([5.0], 1.0, 5.0) is False
+        assert lsw._window_contains([5.0], None, 10.0) is True
+        assert lsw._window_contains([], 1.0, 10.0) is False
+
+    def test_empty_child_inside_known_range_marks_suspect(self):
+        """子片回 '没找到数据' 但父触顶片在该区间明明有票 → 判 suspect，不当成空。
+
+        2026-08-17 实测：下界写成 0.01 亿元的左子片被 Wind 判成「没找到数据」，
+        结果 110 只涨停里只落了 103 只（7 只只有 only_self 能看出来）。
+        suspect 不进 DONE_STATUSES，下次运行会自动重抓。
+        """
+        universe = [(f"{600000 + i}", float(i + 1)) for i in range(150)]
+
+        def answer(question):
+            lo, hi = parse_bounds(question)
+            hit = [(c, v) for c, v in universe
+                   if (lo is None or v >= lo) and (hi is None or v <= hi)]
+            if hi is not None and hi < 50.0:
+                return "没找到数据"          # 假装问句没被解析（空区间才是合法空片）
+            return payload(hit[:lsw.ROW_CAP])
+
+        result = lsw.fetch_day(FakeClient(answer), DAY)
+        assert result.status == lsw.STATUS_SUSPECT
+        assert result.suspect is True and result.truncated is False
+        assert lsw.STATUS_SUSPECT not in (lsw.STATUS_OK, lsw.STATUS_TRUNCATED)
+
+    def test_suspect_outranks_truncated_in_status(self):
+        result = lsw.LimitFetchResult(day=DAY, direction="up",
+                                      suspect=True, truncated=True)
+        assert result.status == lsw.STATUS_SUSPECT
+        assert result.complete is False
+
+    def test_leaf_cap_stops_runaway_split(self):
+        """市值几乎相同但区间被忽略时，叶子硬闸必须兜住调用数。"""
+        rows = [(f"{600000 + i}", float(50 + i % 3)) for i in range(lsw.ROW_CAP)]
+        client = FakeClient(lambda q: payload(rows))
+        result = lsw.fetch_day(client, DAY)
+        assert result.calls <= lsw.MAX_LEAVES + lsw.MAX_LEAVES
+        assert result.status == lsw.STATUS_TRUNCATED
 
     def test_client_error_is_captured(self):
         def boom(question):
