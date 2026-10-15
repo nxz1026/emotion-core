@@ -50,6 +50,11 @@ PROMOTION_LAYERS: tuple[tuple[str, int, int | None], ...] = (
 )
 
 # 昨日每只主板非次新连板股 → 今日结果（板数 / 是否换手 / 今日涨幅%）
+#
+# 已知偏差（2026-10-15 拍板：只记录、不补）：perf 只挡了 `yc.close > 0`，没挡
+# `tc.close > 0` ⇒ `daily_bar` 里当日 close=0 的股票会算出 -100%，把该层
+# `fail_perf`（晋级失败股「今日」均涨幅）往负方向拖。实测 2026-10-08 的 1->2 层
+# 有 1 只，该层均值被拉到 -4.3594。要补就是加 `AND tc.close > 0`，属独立决定。
 _PAIRS_SQL = """
 SELECT y.cont_days AS y_cont,
        COALESCE(t.cont_days, 0) AS t_cont,
