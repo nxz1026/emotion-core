@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+### 新增 · 2026-10-15 Wind 逐日涨跌停对账通道（拍板 ③）
+
+> 背景：`derived_bar.is_limit_up` 照搬 lkl 的涨停口径，**缺 ST ±5% 档**（`docs/04 §3` 记为已知偏差，2025-06-03 实测低估约 15.2%）。本次落一条**配额友好、可断点续跑**的 Wind 对账通道，仍不改判定逻辑。
+
+- **`services/limit_state_wind.py`（新建）**：`build_question/parse_rows/split_point` 纯函数 + `fetch_day`（Wind `stock_data.search_stocks`，单日 1 次调用；返回触顶 100 行时按**市值对数二分**递归切片；`max_calls` 预算耗尽 → `exhausted`）+ `self_limit_codes`（只读 `derived_bar` 自算名单）+ `persist_day`（写名单 + 状态台账，**出错时不清空既有名单**）。
+- **`data/schema.py`**：新增 `ref_limit_state`（PK `(date, code, direction)`）与 `ref_limit_state_run`（PK `(date, direction)`；状态 `ok/truncated/exhausted/error`）+ `idx_ref_limit_state_code`；生产库已建（32 → 34 张表）。
+- **`scripts/backfill_limit_state_wind.py`（新建）**：从最新交易日往回拉；`--max-calls` 预算（默认 40，`EMOTION_WIND_DAILY_CALL_BUDGET` 可覆盖）；已 `ok/truncated` 的 (date, direction) 自动跳过 ⇒ **同一条命令每天重复跑即断点续拉**；`--dry-run` 只打计划；`--direction up|down|both`。
+- **实测**：2025-06-03 `wind=83 self=67 only_wind=16 only_self=0`（库内 12 只当日涨幅 4.87%~5.13%，**自算零假阳性**）；2025-06-04 `wind=87 self=71 only_wind=16 only_self=0`。新增 `tests/unit/test_limit_state_wind.py` 15 项（解析 / 二分 / 预算耗尽 / 市值无区分度 / 错误传播 / 落库守卫）。
+- **文档**：`docs/04` §3 追加 2026-10-15 更新段（Wind 问句能力、100 行硬上限与市值切片、落表与续跑方式、实测数字）。
+
 ### 变更 · 2026-10-15 题材属性桶剔除（拍板 ①）
 
 > 用户拍板：**剔掉属性桶噪声**。`algorithms/theme.py` 的 STYLE_ONLY 一直逐字照搬 lkl，而新浪概念清单里的「参股 / 含X股 / 业绩预 / 解禁 / 资质 / 指数名额」类桶会被当题材落进题材组与逐票 `primary_theme`，实测当日的题材组几乎被这类桶占满。

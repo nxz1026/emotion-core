@@ -16,7 +16,7 @@
   `data_revision` `watchlist` `ops_raw_manifest`（Wind 原始响应 JSON）
   `ops_quota_ledger`（Wind 调用记账）
 - 参考数据：`ref_limit_rule`（涨跌幅制度）`ref_security_status`（ST/*ST 历史）
-  `ref_dividend`（除权除息日）`ref_rs`（相对强弱）
+  `ref_dividend`（除权除息日）`ref_rs`（相对强弱）`ref_limit_state`（Wind 逐日涨跌停名单）
 
 注：生产 `emotion_core` 库的 `public` schema 实测 **41 张** = 31 张本仓 DDL +
 CPT（Chan_Pattern_Trader）共用的 10 张 `cpt_*`。**这不是矛盾**：「本仓定义几张」
@@ -410,6 +410,29 @@ DDL: dict[str, str] = {
             benchmark    text NOT NULL DEFAULT '000300',
             UNIQUE (code, as_of_date, benchmark)
         )""",
+    "ref_limit_state": """
+        CREATE TABLE IF NOT EXISTS ref_limit_state(
+            date       date NOT NULL,
+            code       text NOT NULL,
+            direction  text NOT NULL CHECK (direction IN ('up', 'down')),
+            source     text NOT NULL DEFAULT 'wind',
+            fetched_at timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (date, code, direction)
+        )""",
+    "ref_limit_state_run": """
+        CREATE TABLE IF NOT EXISTS ref_limit_state_run(
+            date        date NOT NULL,
+            direction   text NOT NULL CHECK (direction IN ('up', 'down')),
+            status      text NOT NULL,
+            n_wind      integer,
+            n_self      integer,
+            n_only_wind integer,
+            n_only_self integer,
+            calls       integer,
+            note        text,
+            fetched_at  timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (date, direction)
+        )""",
     "holding_decision": """
         CREATE TABLE IF NOT EXISTS holding_decision (
             id               bigserial PRIMARY KEY,
@@ -467,6 +490,8 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_ref_rs_code_date ON ref_rs (code, as_of_date)",
     "CREATE INDEX IF NOT EXISTS idx_holding_decision_code_date"
     " ON holding_decision (code, trade_date DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_ref_limit_state_code"
+    " ON ref_limit_state (code, date)",
 )
 
 

@@ -17,6 +17,7 @@ class TestSchema:
             "pipeline_state", "data_revision", "watchlist",
             "trade_calendar",
             "ref_limit_rule", "ref_security_status", "ref_dividend", "ref_rs",
+            "ref_limit_state", "ref_limit_state_run",
             "ops_raw_manifest", "ops_quota_ledger",
         }
         assert set(schema.DDL.keys()) == expected
