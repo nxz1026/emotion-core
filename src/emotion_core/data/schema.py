@@ -429,6 +429,7 @@ DDL: dict[str, str] = {
             n_only_wind integer,
             n_only_self integer,
             calls       integer,
+            retries     integer NOT NULL DEFAULT 0,
             note        text,
             fetched_at  timestamptz NOT NULL DEFAULT now(),
             PRIMARY KEY (date, direction)

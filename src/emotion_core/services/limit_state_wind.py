@@ -333,6 +333,12 @@ def persist_day(result: LimitFetchResult) -> dict:
         "n_only_self": len(self_codes - wind_codes),
     }
     with transaction() as conn:
+        prev = conn.execute(
+            "SELECT retries FROM ref_limit_state_run"
+            " WHERE date = %s AND direction = %s",
+            (result.day, result.direction)).fetchone()
+        # retries = 该 (日期,方向) 的重抓次数：首次落库 0，之后每重写一次 +1。
+        retries = (int(prev[0]) + 1) if prev else 0
         if not result.error:
             conn.execute(
                 "DELETE FROM ref_limit_state WHERE date = %s AND direction = %s",
@@ -345,13 +351,15 @@ def persist_day(result: LimitFetchResult) -> dict:
                         [(result.day, code, result.direction) for code in result.codes])
         conn.execute(
             "INSERT INTO ref_limit_state_run (date, direction, status, n_wind,"
-            " n_self, n_only_wind, n_only_self, calls, note)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " n_self, n_only_wind, n_only_self, calls, retries, note)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
             " ON CONFLICT (date, direction) DO UPDATE SET status = EXCLUDED.status,"
             " n_wind = EXCLUDED.n_wind, n_self = EXCLUDED.n_self,"
             " n_only_wind = EXCLUDED.n_only_wind, n_only_self = EXCLUDED.n_only_self,"
-            " calls = EXCLUDED.calls, note = EXCLUDED.note, fetched_at = now()",
+            " calls = EXCLUDED.calls, retries = EXCLUDED.retries,"
+            " note = EXCLUDED.note, fetched_at = now()",
             (result.day, result.direction, result.status, counts["n_wind"],
              counts["n_self"], counts["n_only_wind"], counts["n_only_self"],
-             result.calls, result.error or None))
-    return {**counts, "status": result.status, "calls": result.calls}
+             result.calls, retries, result.error or None))
+    return {**counts, "status": result.status, "calls": result.calls,
+            "retries": retries}

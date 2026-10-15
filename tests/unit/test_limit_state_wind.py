@@ -236,12 +236,25 @@ class FakeCursor:
         self.conn.sql.append((sql, rows))
 
 
+class FakeResult:
+    """`execute()` 的返回值：只实现 `fetchone()`（persist_day 用它读旧 retries）。"""
+
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
 class FakeConn:
-    def __init__(self):
+    def __init__(self, prev_retries=None):
         self.sql: list[tuple] = []
+        self.prev_retries = prev_retries
 
     def execute(self, sql, params=None):
         self.sql.append((sql, params))
+        prev = self.prev_retries
+        return FakeResult((prev,) if prev is not None else None)
 
     def cursor(self):
         return FakeCursor(self)
@@ -269,10 +282,31 @@ class TestPersistDay:
                                       codes=["600001", "600002"], calls=2)
         stats = lsw.persist_day(result)
         assert stats == {"n_wind": 2, "n_self": 1, "n_only_wind": 1,
-                         "n_only_self": 0, "status": lsw.STATUS_OK, "calls": 2}
+                         "n_only_self": 0, "status": lsw.STATUS_OK, "calls": 2,
+                         "retries": 0}
         joined = " ".join(str(s) for s, _ in fake_db.sql)
         assert "DELETE FROM ref_limit_state" in joined
         assert "INSERT INTO ref_limit_state_run" in joined
+
+    def test_first_write_has_retries_zero(self, fake_db):
+        """首次落库（台账无此行）retries=0，且写进了 SQL 参数。"""
+        lsw.persist_day(lsw.LimitFetchResult(day=DAY, direction="up",
+                                             codes=["600001"], calls=1))
+        insert = [p for s, p in fake_db.sql
+                  if "INSERT INTO ref_limit_state_run" in s][0]
+        assert insert[-2] == 0                      # 倒数第二 = retries
+
+    def test_refetch_increments_retries(self, fake_db):
+        """同一 (日期,方向) 重写一次 → retries 旧值 +1（截断/丢票的自动重试靠它计数）。"""
+        fake_db.prev_retries = 2
+        stats = lsw.persist_day(lsw.LimitFetchResult(day=DAY, direction="up",
+                                                     codes=["600001"], calls=1,
+                                                     truncated=True))
+        assert stats["retries"] == 3
+        assert stats["status"] == lsw.STATUS_TRUNCATED
+        insert = [p for s, p in fake_db.sql
+                  if "INSERT INTO ref_limit_state_run" in s][0]
+        assert insert[-2] == 3
 
     def test_error_does_not_wipe_existing_rows(self, fake_db):
         result = lsw.LimitFetchResult(day=DAY, direction="up", calls=1,

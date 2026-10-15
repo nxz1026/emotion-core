@@ -33,7 +33,12 @@ from emotion_core.services.wind_client import WindClient  # noqa: E402
 from emotion_core.utils.db import query_df  # noqa: E402
 
 DEFAULT_BUDGET = 40
+#: 已"完成"的状态：`ok` 永不重抓；`truncated`/`suspect` 只在重抓次数没到上限前重抓
+#: （见 `target_dates` 的 max_retries），到顶就当成完成、不再烧额度。
 DONE_STATUSES = (lsw.STATUS_OK, lsw.STATUS_TRUNCATED)
+#: 需要重试的状态（真·切不动的 truncated 与疑似问句解析丢票的 suspect）。
+RETRY_STATUSES = (lsw.STATUS_TRUNCATED, lsw.STATUS_SUSPECT)
+DEFAULT_MAX_RETRIES = 2
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -53,11 +58,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true", help="只打印计划，不调用、不落库")
     p.add_argument("--redo", action="store_true",
                    help="忽略已抓取状态，窗口内全部重抓（用于重跑 truncated/修口径后回填）")
+    p.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES,
+                   help=f"truncated/suspect 的重抓次数上限（默认 {DEFAULT_MAX_RETRIES}，"
+                        "到顶即视为完成、不再自动重试）")
     return p.parse_args(argv)
 
 
-def target_dates(start: date, end: date, direction: str, redo: bool = False) -> list[date]:
-    """待办日期：库内真实有行情的交易日，去掉已 `ok/truncated` 的。"""
+def target_dates(start: date, end: date, direction: str, redo: bool = False,
+                 max_retries: int = DEFAULT_MAX_RETRIES) -> list[date]:
+    """待办日期：库内真实有行情的交易日，去掉已完成（或重试到顶）的。
+
+    `ok` 永不重抓；`truncated`（叶子仍触顶）与 `suspect`（问句解析丢票）在
+    `retries < max_retries` 之前每天都会被排进来重抓，到顶即视为完成——这样
+    「修好解析后自动补上丢的票」，又不会被一块永远切不动的叶子天天烧额度。
+    `exhausted`/`error` 不受上限约束（下次继续就有进展）。
+    """
     df = query_df(
         "SELECT DISTINCT d.date FROM derived_bar d"
         " JOIN trade_calendar c ON c.date = d.date AND c.is_open"
@@ -68,8 +83,10 @@ def target_dates(start: date, end: date, direction: str, redo: bool = False) -> 
         return days
     done = query_df(
         "SELECT date FROM ref_limit_state_run"
-        " WHERE direction = %s AND status = ANY(%s) AND date BETWEEN %s AND %s",
-        (direction, list(DONE_STATUSES), start, end))
+        " WHERE direction = %s AND (status = %s"
+        "       OR (status = ANY(%s) AND retries >= %s))"
+        "   AND date BETWEEN %s AND %s",
+        (direction, lsw.STATUS_OK, list(RETRY_STATUSES), max_retries, start, end))
     done_set = {row for row in done["date"]} if len(done) else set()
     return [d for d in days if d not in done_set]
 
@@ -86,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
 
     runs: list[tuple[date, str]] = []
     for direction in directions:
-        days = target_dates(start, end, direction, redo=args.redo)
+        days = target_dates(start, end, direction, redo=args.redo,
+                            max_retries=args.max_retries)
         days.sort(reverse=not args.oldest_first)
         runs.extend((d, direction) for d in days)
 
@@ -123,10 +141,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{day} {direction}: {stats['status']:9s} wind={stats['n_wind']:4d}"
               f" self={stats['n_self']:4d} only_wind={stats['n_only_wind']:3d}"
               f" only_self={stats['n_only_self']:3d} calls={result.calls}"
-              f" leaves={result.leaves} {time.time() - t0:.0f}s")
+              f" retries={stats['retries']} leaves={result.leaves}"
+              f" {time.time() - t0:.0f}s")
         if stats["status"] == lsw.STATUS_SUSPECT:
             print("⚠ suspect：有子片在「已知有票的市值区间」回空（问句解析丢票），"
-                  "名单不完整；suspect 不在 DONE_STATUSES 里，下次运行会自动重抓。")
+                  f"名单不完整；重抓次数 <{args.max_retries} 时下次运行会自动重抓。")
+        if stats["status"] == lsw.STATUS_TRUNCATED:
+            print(f"⚠ truncated：有叶子到顶仍触顶（市值无区分度）；"
+                  f"重抓次数 <{args.max_retries} 时会再试，到顶即视为完成。")
         if stats["n_only_self"]:
             print(f"⚠ only_self={stats['n_only_self']}：本库判涨停而 Wind 未列；"
                   "若确认是本库口径（ST ±5%）之外的真涨停，说明 Wind 侧漏票。")

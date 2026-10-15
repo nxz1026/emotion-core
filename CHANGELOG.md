@@ -23,6 +23,7 @@
 - **`scripts/backfill_limit_state_wind.py`（新建）**：从最新交易日往回拉；`--max-calls` 预算（默认 40，`EMOTION_WIND_DAILY_CALL_BUDGET` 可覆盖）；已 `ok/truncated` 的 (date, direction) 自动跳过 ⇒ **同一条命令每天重复跑即断点续拉**；`--dry-run` 只打计划；`--direction up|down|both`。
 - **实测**：2025-06-03 `wind=83 self=67 only_wind=16 only_self=0`（库内 12 只当日涨幅 4.87%~5.13%，**自算零假阳性**）；2025-06-04 `wind=87 self=71 only_wind=16 only_self=0`。新增 `tests/unit/test_limit_state_wind.py` 15 项（解析 / 二分 / 预算耗尽 / 市值无区分度 / 错误传播 / 落库守卫）。
 - **文档**：`docs/04` §3 追加 2026-10-15 更新段（Wind 问句能力、100 行硬上限与市值切片、落表与续跑方式、实测数字）。
+- **重试上限（台账 `retries` 列）**：`ok` 永不重抓；`truncated`/`suspect` 在 `retries < --max-retries`（默认 2）前每天自动重抓、到顶即视为完成 —— 既让「修好解析后自动补票」，又不会被永远切不动的叶子天天烧额度；`exhausted`/`error` 不受上限影响（下次继续必有进展）。
 - **每日渐进回补**：已建 DSH 自动化「Wind 逐日涨跌停对账（每日渐进回补）」（`daily 18:30 Asia/Shanghai`，`--direction both --max-calls 40`，权限 workspace-write）⇒ 额度每天有限，靠同一条命令重复跑续拉（m00753 决策③）。
 - **已知偏差（拍板②：不补）**：`algorithms/promotion.py` 的 `_PAIRS_SQL` 里 perf 未挡 `tc.close > 0`（当日 `close=0` 会算出 -100%，拖低该层 `fail_perf`；2026-10-08 的 1->2 层实测 1 只、均值 -4.3594）—— 就地注释记录，不改口径。
 
