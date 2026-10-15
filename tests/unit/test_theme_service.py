@@ -59,3 +59,49 @@ class TestColumnContracts:
     def test_theme_spot_table_registered(self):
         assert "theme_spot" in schema.DDL
         assert any("idx_theme_spot_date" in s for s in schema._INDEXES)
+
+
+class TestCleanTagRow:
+    """写库前剔 STYLE_ONLY（含属性桶扩展）：2026-10-14 拍板。
+
+    背景（生产实测）：当日 24 个题材组里 7 个是属性桶（参股金融 / 含B股 / 本月解禁 /
+    业绩预降…），逐票 `primary_theme` 也会被桶占位（成分股最多的概念往往是桶）。
+    """
+
+    def test_attribute_bucket_dropped_from_primary(self):
+        row = {"code": "600000", "primary_theme": "参股金融",
+               "secondary_themes": ["机器人概念", "含B股"], "source": "sina_concept"}
+        got = theme_service._clean_tag_row(row)
+        assert got["primary_theme"] == "机器人概念"      # 桶被剔，真题材升位
+        assert got["secondary_themes"] == []
+        assert got["code"] == "600000"
+        assert got["source"] == "sina_concept"            # 其余字段原样带过
+
+    def test_all_noise_keeps_row_with_null_primary(self):
+        row = {"code": "600519", "primary_theme": "基金重仓",
+               "secondary_themes": ["业绩预升"], "source": "sina_concept"}
+        got = theme_service._clean_tag_row(row)
+        assert got["primary_theme"] is None               # 无有效题材：行保留，记覆盖
+        assert got["secondary_themes"] == []
+
+    def test_region_theme_kept(self):
+        """地域族是真题材（炒地图），刻意不剔——本判据有意留的边界。"""
+        row = {"code": "600758", "primary_theme": "成渝特区",
+               "secondary_themes": ["振兴沈阳", "参股金融"], "source": "sina_concept"}
+        got = theme_service._clean_tag_row(row)
+        assert got["primary_theme"] == "成渝特区"
+        assert got["secondary_themes"] == ["振兴沈阳"]
+
+    def test_order_preserved(self):
+        row = {"code": "000001", "primary_theme": "机器人概念",
+               "secondary_themes": ["固态电池", "含H股", "白酒概念"],
+               "source": "sina_concept"}
+        got = theme_service._clean_tag_row(row)
+        assert got["primary_theme"] == "机器人概念"
+        assert got["secondary_themes"] == ["固态电池", "白酒概念"]
+
+    def test_original_row_not_mutated(self):
+        row = {"code": "000002", "primary_theme": "参股金融",
+               "secondary_themes": ["含B股"], "source": "sina_concept"}
+        theme_service._clean_tag_row(row)
+        assert row["primary_theme"] == "参股金融"

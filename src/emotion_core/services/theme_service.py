@@ -39,6 +39,23 @@ def _fetch_spots(provider, trade_date: date) -> list[dict]:
         return []
 
 
+def _clean_tag_row(row: dict) -> dict:
+    """写库前剔 STYLE_ONLY（含属性桶扩展）：primary/secondary 只留有效题材。
+
+    保序：primary 在前、secondary 顺序不变。全部标签皆噪声 → `primary_theme=None`
+    且 `secondary_themes=[]`——该票当日无有效题材，行仍保留以记录覆盖
+    （`_row_themes` 对 NULL 主名展开零行，不会污染后续聚合）。
+    """
+    primary = row.get("primary_theme")
+    secondary = list(row.get("secondary_themes") or [])
+    valid = theme.theme_filter(
+        [t for t in ([primary] if primary else []) + secondary if t])
+    out = dict(row)
+    out["primary_theme"] = valid[0] if valid else None
+    out["secondary_themes"] = valid[1:]
+    return out
+
+
 def run(trade_date: date) -> int:
     """题材展开聚合 + 落库。
 
@@ -59,8 +76,14 @@ def run(trade_date: date) -> int:
         log.info("theme_service %s: 无题材数据", trade_date)
         return 0
 
+    # 聚合仍吃**原始**标签：aggregate 内部自行 is_style 剔除（与 lkl 同位置同判据），
+    # 提前过滤会改变 _row_themes 的展开口径取序（primary 由末位变首位），
+    # 进而改动并列最高板 top_code 的取序（模块文档 ★）。
     result = theme.aggregate(tags)
     spots = _fetch_spots(provider, trade_date)
+    # 落库行只留有效题材（2026-10-14 拍板）：provider 负责「如其所是地取回来」，
+    # 判据单一真相在 algorithms/theme.py，服务层在写入口收口。
+    rows = [_clean_tag_row(r) for r in tags]
 
     with transaction() as conn:
         conn.execute("DELETE FROM theme_group WHERE date = %s", (trade_date,))
@@ -73,7 +96,7 @@ def run(trade_date: date) -> int:
                 f" VALUES ({', '.join(['%s'] * len(_TAG_COLS))})",
                 [(trade_date, r["code"], r.get("primary_theme"),
                   list(r.get("secondary_themes") or []),
-                  r.get("source") or "unknown") for r in tags],
+                  r.get("source") or "unknown") for r in rows],
             )
         for theme_name, stats in result.items():
             conn.execute(

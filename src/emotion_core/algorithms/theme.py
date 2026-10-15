@@ -28,6 +28,11 @@ STYLE_ONLY 三重判据（黑名单 / 前缀 / 包含）、题材展开口径（
    dragon_env.py 同先例；loader 补齐读入口后下沉。
 4. CONFIG 尚未收录 THEME_STYLE_* 键，经 `_cfg` 取 lkl config.py 原值（dragon_env 同先例）；
    键一旦进 utils/config.py 自动生效（本次范围限本文件 + test_theme.py 两文件）。
+5. **属性桶扩展（2026-10-14 用户拍板，唯一一处有意偏离 lkl 的判定规则）**：
+   在 lkl 三重判据之上加 `THEME_STYLE_BLACKLIST_ATTR`（参股 / 股东背景 / 业绩预 /
+   含X股 / 解禁 / 资质 / 指数名额），因为新浪概念清单里这类桶会被当题材落进主题组。
+   地域族不动（炒地图是真题材）。Rust core 保持 lkl 原值作为对账基准，不跟随本扩展；
+   故 `tests/oracle/test_theme_rust_vs_python.py` 仍只对 lkl 原值集合做逐值对账。
 
 ★ 确定性：lkl 的 `group_stats` 用 `max(members, key=...)` 取 top_code，**并列时取行序首个**；
 lkl 的 `_aggregate_rows` / `aggregate` SQL **没有 ORDER BY**，故并列最高板的 top_code 由
@@ -82,10 +87,40 @@ THEME_STYLE_CONTAINS: tuple[str, ...] = _cfg("THEME_STYLE_CONTAINS", (
     "重仓", "标的", "综合", "点位贡献", "指数", "国资",
     "微盘", "小盘", "大盘", "中盘", "等权"))  # R4：市值/指数族漏网
 
+# ── 属性桶扩展（emotion-core 自有，**加在 lkl 原值之上**；2026-10-14 用户拍板）──
+# 判据：名称描述「股票的身份 / 交易状态 / 财务状态 / 股本结构 / 指数名额」，
+# 而非「产业 / 技术 / 产品 / 政策主题」。lkl 原值只挡了 ST板块 / 融资融券 /
+# 重仓 / 市值族，新浪概念清单里的参股 / 含X股 / 业绩预 / 解禁 / 资质 / 指数名额
+# 会混进题材组与逐票 primary_theme（实测 2026-10-14：题材组 24 → 18 个，
+# 剔掉参股金融 / 金融参股 / 含B股 / 本月解禁 / 业绩预降 / 准ST股 共 6 个；
+# 逐票侧 3265 行里 516 行只剩属性桶标签，primary 落 NULL）。
+#
+# 地域族（成渝特区 / 振兴沈阳 / 朝鲜改革 / 水域改革 …）**刻意不动**：A 股
+# 「炒地图」是被真实交易的地域题材族，不属于属性桶；要剔需另行拍板。
+#
+# 与 Rust core 的关系：`core/src/theme.rs` 的 is_style 保持 lkl 原值不变（它是对账
+# 基准），本扩展只在 Python 层生效；若将来 Rust 也承担题材过滤，须同步移植本表。
+THEME_STYLE_BLACKLIST_ATTR: frozenset[str] = _cfg(
+    "THEME_STYLE_BLACKLIST_ATTR",
+    frozenset({
+        # 参股 / 股东背景
+        "参股金融", "金融参股", "参股保险", "参股券商", "参股银行",
+        "外资背景", "高校背景", "民营背景", "国资背景",
+        # 财务 / 业绩属性
+        "业绩预升", "业绩预降", "业绩预增", "业绩预减", "业绩预告",
+        # 股本 / 事件属性
+        "含B股", "含H股", "含GDR", "含红筹", "本月解禁", "下月解禁", "解禁",
+        "送转潜力", "未股改", "股期概念",
+        # 交易状态 / 资质 / 指数名额
+        "准ST股", "摘帽概念", "三板精选", "专精特新",
+        "央企50", "科创50", "双创50", "中证500", "中证1000",
+    }))
+
 
 def is_style(tag: str) -> bool:
-    """STYLE_ONLY 噪声：黑名单 / 全A* 前缀 / *重仓* 包含。"""
+    """STYLE_ONLY 噪声：lkl 三重判据（黑名单 / 全A* 前缀 / *重仓* 包含）+ 属性桶扩展。"""
     return (tag in THEME_STYLE_BLACKLIST
+            or tag in THEME_STYLE_BLACKLIST_ATTR
             or tag.startswith(THEME_STYLE_PREFIXES)
             or any(s in tag for s in THEME_STYLE_CONTAINS))
 

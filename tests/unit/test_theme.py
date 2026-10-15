@@ -45,6 +45,45 @@ class TestStyleOnly:
         tags = ["机器人", "昨日涨停", "基金重仓股", "固态电池", "上证50"]
         assert theme.theme_filter(tags) == ["机器人", "固态电池"]
 
+
+class TestAttributeBuckets:
+    """属性桶扩展（2026-10-14 拍板）：lkl 三重判据之上叠加的自有黑名单。
+
+    这层判据**有意偏离 lkl**，所以 Rust 对账测试（oracle）只覆盖 lkl 原值集合，
+    本文件是它唯一的钉子。地域族刻意不在此列——见下面 test_region_not_filtered。
+    """
+
+    @pytest.mark.parametrize("tag", [
+        "参股金融", "金融参股",           # 参股
+        "外资背景", "高校背景",           # 股东背景
+        "业绩预升", "业绩预降",           # 财务属性
+        "含B股", "含H股", "含GDR",       # 股本属性
+        "本月解禁", "送转潜力", "未股改",   # 事件 / 股本属性
+        "准ST股", "摘帽概念",             # 交易状态
+        "专精特新", "三板精选",            # 资质 / 板属性
+        "央企50", "科创50",              # 指数名额
+    ])
+    def test_attribute_bucket_is_noise(self, tag):
+        assert theme.is_style(tag) is True
+
+    @pytest.mark.parametrize("tag", [
+        "机器人概念", "固态电池", "白酒概念", "华为汽车",
+        "成渝特区", "振兴沈阳", "朝鲜改革", "水域改革", "雄安新区", "京津冀",
+    ])
+    def test_region_and_real_themes_not_filtered(self, tag):
+        """地域族（炒地图）与真题材不剔：这是本扩展有意留的边界。"""
+        assert theme.is_style(tag) is False
+
+    def test_extension_is_separate_from_lkl_set(self):
+        """扩展表与 lkl 原值表**不合并**：合并会让 Rust 对账测试的
+        参数化遍历（sorted(theme.THEME_STYLE_BLACKLIST)）逐值断言失败。"""
+        assert theme.THEME_STYLE_BLACKLIST.isdisjoint(
+            theme.THEME_STYLE_BLACKLIST_ATTR)
+
+    def test_filter_mixed(self):
+        assert theme.theme_filter(["参股金融", "机器人概念", "含B股", "固态电池"]) == [
+            "机器人概念", "固态电池"]
+
     def test_filter_all_noise(self):
         assert theme.theme_filter(["昨日涨停", "打板"]) == []
 

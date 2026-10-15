@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+### 变更 · 2026-10-15 题材属性桶剔除（拍板 ①）
+
+> 用户拍板：**剔掉属性桶噪声**。`algorithms/theme.py` 的 STYLE_ONLY 一直逐字照搬 lkl，而新浪概念清单里的「参股 / 含X股 / 业绩预 / 解禁 / 资质 / 指数名额」类桶会被当题材落进题材组与逐票 `primary_theme`，实测当日的题材组几乎被这类桶占满。
+
+- **`algorithms/theme.py`**：新增 `THEME_STYLE_BLACKLIST_ATTR`（`_cfg` 取值、可被 `utils/config.py` 覆盖）+ `is_style` 加一条判据。lkl 原三重判据（黑名单 / `全A*` 前缀 / `*重仓*` 包含）原样保留；**地域族（成渝特区 / 振兴沈阳 / 朝鲜改革 / 水域改革…）刻意不动**——炒地图是真实地域题材。这是本仓**唯一一处有意偏离 lkl 的判定规则**；Rust core `core/src/theme.rs` 保持 lkl 原值作为对账基准，`tests/oracle/test_theme_rust_vs_python.py` 无需改动。
+- **`services/theme_service.py`**：新增 `_clean_tag_row`，在**写库前**用 `theme.theme_filter` 收口（`aggregate` 仍吃原始标签，避免改变 `_row_themes` 展开口径进而动到并列最高板 `top_code` 的取序）；全标签皆噪声的票仍保留行、`primary_theme` 落 NULL。
+- **实测**（生产库 2026-10-14，`EMOTION_THEME_PROVIDER=sina_concept`，175 概念 / 3265 票）：**题材组 24 → 18**（剔掉参股金融、金融参股、含B股、本月解禁、业绩预降、准ST股），逐票 3265 行里 primary 非空 2749（516 行只剩属性桶标签）。
+- `tests/unit/test_theme.py`、`tests/unit/test_theme_service.py` 同步扩充。
+
 ### 新增 · 2026-10-15 情绪+缠论整合（emotion-core 侧 R4 S1–S7）
 
 > 唯一设计依据：`docs/18-情绪+缠论整合-功能与代码设计.md`。CPT 侧（C1/S0/C2①–④）已先落地。
