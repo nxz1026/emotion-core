@@ -1,0 +1,12 @@
+# emotion-core Wind 额度渐进拉取 —— **兜底**执行体（主执行体是两个 DSH 自动化）。
+# 仓库源文件：deploy/cron/emotion-core-wind；安装位置：/etc/cron.d/emotion-core-wind
+# 装法：cp deploy/cron/emotion-core-wind /etc/cron.d/emotion-core-wind（需 root，chmod 644）
+#
+# 时间：12:30 UTC = 20:30 北京。刻意排在两个 DSH 自动化之后
+#   · 18:30 北京  automation_f1148b4b…「Wind 逐日涨跌停对账」（对账 40 次）
+#   · 19:00 北京  automation_97b54cfa…「ST PIT 回补」（ST PIT 20 次）
+# 三者共用同一个 Wind 日额度；自动化在场时它们先吃额度，本 cron 捡剩下的（脚本自带
+# 断点续跑，已完成部分自动跳过）。自动化没跑成（DSH 不在线 / 模型报错）时，这里兜住。
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+30 12 * * * ubuntu /home/ubuntu/bin/wind-pull-daily.sh >> /home/ubuntu/logs/wind-pull-daily.cron.log 2>&1

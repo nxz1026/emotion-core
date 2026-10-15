@@ -97,6 +97,22 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 3. **五个 timer 全部 `enabled + active`**，按北京时间 17:20/17:45/17:50/18:00/18:05+08:50 触发。
 
 > 逐单元实测表、nginx 路由、数据现状、备份路径见 **`docs/15` §部署状态**（唯一权威）。
+
+### cron：Wind 额度渐进拉取（2026-10-15 装，兜底位）
+
+Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一份额度、都必须可断点续跑：
+
+| 执行体 | 时间（北京） | 预算 | 说明 |
+|---|---|---|---|
+| DSH 自动化 `automation_f1148b4b…`「Wind 逐日涨跌停对账」 | 18:30 | 对账 40 次 | **主**；`--direction both`，落 `ref_limit_state`/`ref_limit_state_run` |
+| DSH 自动化 `automation_97b54cfa…`「ST PIT 回补」 | 19:00 | ST PIT 20 次 | **主**；落 `ref_security_status`（+`_window`/`_event`） |
+| cron `/etc/cron.d/emotion-core-wind` → `/home/ubuntu/bin/wind-pull-daily.sh` | 20:30 | 对账 40 + ST PIT 20 | **兜底**：自动化没跑成时接住，已完成部分自动跳过 |
+
+- 仓内真相源：`deploy/bin/wind-pull-daily.sh`（串行 + `flock` 防重入 + 退出码恒 0）与 `deploy/cron/emotion-core-wind`。
+- 装法：脚本 `cp` 到 `/home/ubuntu/bin/`；cron 文件需 root（ubuntu 直写 `/etc/cron.d` 被拒），本机走
+  `docker run --rm -i --privileged --pid=host -v /:/host alpine:3.20 chroot /host sh -c 'cat > /etc/cron.d/emotion-core-wind …' < deploy/cron/emotion-core-wind`。
+- 锁文件在 `/home/ubuntu/logs/wind-pull-daily.lock`：**不能放 `/tmp`** —— 本机 cron 在宿主 `/tmp`、DSH/手工跑在容器 `/tmp`，两个命名空间，放 `/tmp` 等于没锁。
+- 日志：`/home/ubuntu/logs/wind-pull-daily.log`（脚本自身）与 `wind-pull-daily.cron.log`（cron 重定向）。
 > 契约由 `tests/architecture/test_systemd_units.py` 钉住：禁 `python -c`、`-m` 目标
 > 必须真有入口、`OnCalendar` 必须自带时区、单元引用不得指向不存在的单元。
 

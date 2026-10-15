@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 新增 · 2026-10-15 Wind 额度渐进拉取 cron（兜底执行体）
+
+> 背景：Wind 日额度加不了（用户拍板「慢慢拉，加个 cron 来做」）。两条链共用同一份额度，主执行体是两个 DSH 自动化（18:30 对账 40 次、19:00 ST PIT 20 次），cron 只做兜底。
+
+- **`deploy/bin/wind-pull-daily.sh`**（新）：串行跑 `scripts/backfill_limit_state_wind.py --direction both --max-calls 40` 与 `scripts/backfill_st_pit_wind.py --max-calls 20`，对账优先；`flock` 防重入（锁在 `/home/ubuntu/logs/wind-pull-daily.lock` —— **不能放 `/tmp`**：本机 cron 在宿主 `/tmp`、DSH/手工跑在容器 `/tmp`，两个命名空间）；`set -uo pipefail`（不用 `-e`）、退出码恒 0（撞额度是预期结果）。
+- **`deploy/cron/emotion-core-wind`**（新，装为 `/etc/cron.d/emotion-core-wind`）：`30 12 * * *`（=20:30 北京，排在两个自动化之后捡剩余额度）；已用 docker+chroot 装好并验证 cron 会按 ubuntu 身份执行。
+- **`README.md`**：运维小节新增「cron：Wind 额度渐进拉取（兜底位）」表（三个执行体的时间/预算/落表）+ 装法 + 锁文件与日志路径。
+
 ### 新增 · 2026-10-15 ST PIT 预算化回补（窗口台账 + 断点续跑）
 
 > 背景：`derived_bar` 要补 ST ±5% 档必须先有 ST PIT；旧路径逐股 `get_stock_events` 要烧 5000+ 次调用，且 2026-10-14 首次实跑因额度耗尽得到 297 条**永不闭合**的开区间并整表回滚。
