@@ -1,6 +1,6 @@
 """建表 DDL（幂等）。emotion-core 数据层 schema。
 
-**31 张表**（2026-10-13 按 `len(DDL)` 实测；原文写「27」且下面的清单只列了
+**36 张表**（2026-10-15 按 `len(DDL)` 实测；原文写「27」且下面的清单只列了
 23 个 —— 三个数互相对不上），按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
 新库直接建最新 schema，不需要 _MIGRATIONS。
 
@@ -17,6 +17,7 @@
   `ops_quota_ledger`（Wind 调用记账）
 - 参考数据：`ref_limit_rule`（涨跌幅制度）`ref_security_status`（ST/*ST 历史）
   `ref_dividend`（除权除息日）`ref_rs`（相对强弱）`ref_limit_state`（Wind 逐日涨跌停名单）
+  `ref_security_status_event`/`ref_security_status_window`（ST 批量枚举的原始事件与窗口进度）
 
 注：生产 `emotion_core` 库的 `public` schema 实测 **41 张** = 31 张本仓 DDL +
 CPT（Chan_Pattern_Trader）共用的 10 张 `cpt_*`。**这不是矛盾**：「本仓定义几张」
@@ -410,6 +411,29 @@ DDL: dict[str, str] = {
             benchmark    text NOT NULL DEFAULT '000300',
             UNIQUE (code, as_of_date, benchmark)
         )""",
+    "ref_security_status_event": """
+        CREATE TABLE IF NOT EXISTS ref_security_status_event(
+            code        text NOT NULL,
+            date        date NOT NULL,
+            kind        text NOT NULL,
+            status      text,
+            reason      text,
+            source      text NOT NULL DEFAULT 'wind',
+            fetched_at  timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (code, date, kind)
+        )""",
+    "ref_security_status_window": """
+        CREATE TABLE IF NOT EXISTS ref_security_status_window(
+            kind        text NOT NULL,
+            start_date  date NOT NULL,
+            end_date    date NOT NULL,
+            status      text NOT NULL,
+            n_events    integer NOT NULL DEFAULT 0,
+            calls       integer NOT NULL DEFAULT 0,
+            note        text,
+            fetched_at  timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (kind, start_date, end_date)
+        )""",
     "ref_limit_state": """
         CREATE TABLE IF NOT EXISTS ref_limit_state(
             date       date NOT NULL,
@@ -485,6 +509,8 @@ _INDEXES: tuple[str, ...] = (
     " ON position (code) WHERE status = 'OPEN'",
     "CREATE INDEX IF NOT EXISTS idx_ref_limit_rule_market ON ref_limit_rule (market, board)",
     "CREATE INDEX IF NOT EXISTS idx_ref_security_status_code ON ref_security_status (code)",
+    "CREATE INDEX IF NOT EXISTS idx_ref_security_status_event_code"
+    " ON ref_security_status_event (code, date)",
     "CREATE INDEX IF NOT EXISTS idx_ops_raw_manifest_ts ON ops_raw_manifest (ts)",
     "CREATE INDEX IF NOT EXISTS idx_ops_quota_ledger_ts ON ops_quota_ledger (ts)",
     "CREATE INDEX IF NOT EXISTS idx_ref_dividend_code ON ref_dividend (code)",

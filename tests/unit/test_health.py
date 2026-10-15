@@ -34,6 +34,11 @@ class FakeQuery:
         self.outcome = None         # signal LEFT JOIN signal_outcome
         self.trading = None         # trade_calendar（_recent_trading_days）
         self.pool = None            # limit_pool_em max(date)（check_pool_stale）
+        # ★2026-10-15 新增两条检查的桩
+        self.limit_ledger = None    # ref_limit_state_run 窗口（对账台账）
+        self.theme = None           # theme_tag max(date)
+        self.theme_cov = None       # theme_tag 覆盖率（tagged / primary）
+        self.daily_bar = None       # daily_bar 当日票数（仅 coverage 用）
 
     @staticmethod
     def _frame(vals, col: str) -> pd.DataFrame:
@@ -59,6 +64,23 @@ class FakeQuery:
             return self._frame(self.trading, "date")
         if "FROM limit_pool_em" in sql:
             return self._frame(self.pool, "d")
+        if "FROM ref_limit_state_run" in sql:
+            if isinstance(self.limit_ledger, pd.DataFrame):
+                return self.limit_ledger
+            return pd.DataFrame(self.limit_ledger or [],
+                                columns=["date", "direction", "status", "n_wind",
+                                         "n_only_wind", "n_only_self"])
+        if "FROM theme_tag" in sql and "count(DISTINCT code)" in sql:
+            if isinstance(self.theme_cov, pd.DataFrame):
+                return self.theme_cov
+            return pd.DataFrame(self.theme_cov or [],
+                                columns=["tagged", "primary"])
+        if "FROM theme_tag" in sql:
+            return self._frame(self.theme, "d")
+        if "FROM daily_bar" in sql and "count(DISTINCT code)" in sql:
+            # ⚠️ 只认覆盖率这一支；普通的 daily_bar 查询**不**给分支（见上，
+            # 日历不能从被监控对象自己派生）。
+            return self._frame(self.daily_bar, "n")
         raise AssertionError(f"未预期的 SQL: {sql}")
 
 
@@ -154,12 +176,18 @@ def alerts_stub(monkeypatch) -> AlertsStub:
 def test_thresholds_and_checks_order_locked():
     assert (health.REPORT_GAP_DAYS, health.DATA_GAP_DAYS,
             health.OUTCOME_STALE_DAYS, health.POOL_STALE_DAYS) == (2, 2, 6, 2)
+    assert (health.LIMIT_AUDIT_DAYS, health.LIMIT_AUDIT_STALE_DAYS,
+            health.LIMIT_AUDIT_ONLY_WIND_PCT) == (10, 3, 5.0)
+    assert (health.THEME_STALE_DAYS, health.THEME_COVERAGE_MIN_PCT,
+            health.THEME_PRIMARY_MIN_PCT) == (2, 40.0, 60.0)
     assert [name for name, _ in health.CHECKS] == ["report", "data", "outcome",
-                                                  "pipeline", "pool"]
+                                                  "pipeline", "pool",
+                                                  "limit_audit", "theme"]
     assert [fn for _, fn in health.CHECKS] == [
         health.check_report_gap, health.check_data_gap,
         health.check_outcome_stale, health.check_pipeline_failed,
-        health.check_pool_stale]
+        health.check_pool_stale, health.check_limit_state_audit,
+        health.check_theme_coverage]
 
 
 # ────────────────────────── _trading_gap ──────────────────────────
@@ -322,6 +350,14 @@ class TestRun:
         db.pool = [date(2026, 9, 24)]                 # 与衍生层同步（gap 0 < 2）
         db.outcome = pd.DataFrame({"confirm_date": [date(2026, 9, 11)],
                                    "code": ["000017"]})
+        # ★2026-10-15 新增两条检查的「健康态」：台账有 ok 记录且与衍生层同步，
+        # 题材有标签且覆盖率达标 —— 它们不该在这个用例里冒出来。
+        db.limit_ledger = [{"date": date(2026, 9, 24), "direction": "up",
+                            "status": "ok", "n_wind": 83, "n_only_wind": 2,
+                            "n_only_self": 0}]
+        db.theme = [date(2026, 9, 24)]
+        db.theme_cov = [{"tagged": 3265, "primary": 2749}]
+        db.daily_bar = [5213]
         out = health.run(D0)
         assert len(out) == 2
         assert out[0].startswith("报告断档")
@@ -485,3 +521,113 @@ class TestCheckPipelineFailed:
     def test_included_in_run(self, monkeypatch):
         """必须真进 CHECKS：否则 watchdog 跑起来照样看不见主链已死。"""
         assert ("pipeline", health.check_pipeline_failed) in health.CHECKS
+
+
+# ──────────────── check_limit_state_audit（★2026-10-15 新增）────────────────
+
+class TestCheckLimitStateAudit:
+    def _ok(self, day, **kw):
+        row = {"date": day, "direction": "up", "status": "ok",
+               "n_wind": 83, "n_only_wind": 2, "n_only_self": 0}
+        row.update(kw)
+        return row
+
+    def test_empty_ledger_warns_never_started(self, db, gap):
+        detail = health.check_limit_state_audit(D0)
+        assert "对账台账为空" in detail
+        sql, params = db.calls[0]
+        assert "FROM ref_limit_state_run" in sql and "LIMIT %s" in sql
+        assert params == (D0, health.LIMIT_AUDIT_DAYS)
+
+    def test_known_st_bias_is_silent(self, db, gap):
+        """实测口径：only_wind 占 2.4%（ST ±5% 已知偏差）不该天天告警。"""
+        db.limit_ledger = [self._ok(D0)]
+        db.data = [D0]
+        assert health.check_limit_state_audit(D0) is None
+
+    def test_only_self_nonzero_always_warns(self, db, gap):
+        db.limit_ledger = [self._ok(D0, n_only_self=3)]
+        db.data = [D0]
+        detail = health.check_limit_state_audit(D0)
+        assert "only_self 合计 3 只" in detail
+
+    def test_only_wind_over_threshold_warns(self, db, gap):
+        db.limit_ledger = [self._ok(D0, n_wind=100, n_only_wind=6)]
+        db.data = [D0]
+        assert "only_wind 占比 6.00%" in health.check_limit_state_audit(D0)
+
+    def test_only_wind_at_threshold_is_silent(self, db, gap):
+        db.limit_ledger = [self._ok(D0, n_wind=100, n_only_wind=5)]
+        db.data = [D0]
+        assert health.check_limit_state_audit(D0) is None
+
+    def test_bad_status_days_named_and_kept_out_of_pct(self, db, gap):
+        """truncated/suspect 的计数不可信：只点名、不参与占比。"""
+        db.limit_ledger = [self._ok(D0, n_wind=100, n_only_wind=9,
+                                    status="suspect")]
+        db.data = [D0]
+        detail = health.check_limit_state_audit(D0)
+        assert "1 天名单不全待重抓" in detail and "suspect" in detail
+        assert "only_wind 占比" not in detail
+
+    def test_ledger_behind_derived_bar_warns(self, db, gap):
+        db.limit_ledger = [self._ok(date(2026, 9, 21))]
+        db.data = [D0]
+        gap.days = [date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24)]
+        detail = health.check_limit_state_audit(D0)
+        assert "落后 derived_bar" in detail and "3 个交易日" in detail
+
+    def test_included_in_run(self):
+        assert ("limit_audit", health.check_limit_state_audit) in health.CHECKS
+
+
+# ──────────────── check_theme_coverage（★2026-10-15 新增）────────────────
+
+class TestCheckThemeCoverage:
+    def test_no_theme_rows_ever_warns_not_self_produced(self, db, gap):
+        assert "theme_tag 无任何数据" in health.check_theme_coverage(D0)
+
+    def test_same_day_spin_warns_fake_ok(self, db, gap):
+        """derived_bar 已有当日数据、题材没有 ⇒ 步骤报 OK 却无产出。"""
+        db.data = [D0]
+        db.theme = [date(2026, 9, 24)]
+        detail = health.check_theme_coverage(D0)
+        assert "当日空转（假 OK）" in detail
+
+    def test_stale_beyond_threshold_warns(self, db, gap):
+        db.data = [date(2026, 9, 24)]      # 当日数据未落 ⇒ 不走「当日空转」分支
+        db.theme = [date(2026, 9, 21)]
+        gap.days = [date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24)]
+        assert "题材断档" in health.check_theme_coverage(D0)
+
+    def test_low_coverage_warns(self, db, gap):
+        day = date(2026, 9, 24)
+        db.data = [day]
+        db.theme = [day]
+        db.theme_cov = [{"tagged": 100, "primary": 90}]
+        db.daily_bar = [1000]
+        detail = health.check_theme_coverage(D0)
+        assert "标签覆盖率 100/1000 = 10.0%" in detail
+
+    def test_low_primary_ratio_warns(self, db, gap):
+        day = date(2026, 9, 24)
+        db.data = [day]
+        db.theme = [day]
+        db.theme_cov = [{"tagged": 1000, "primary": 500}]
+        db.daily_bar = [1000]
+        detail = health.check_theme_coverage(D0)
+        assert "primary_theme 非空占比 500/1000 = 50.0%" in detail
+
+    def test_healthy_state_silent_and_coverage_sql_locked(self, db, gap):
+        day = date(2026, 9, 24)
+        db.data = [day]
+        db.theme = [day]
+        db.theme_cov = [{"tagged": 3265, "primary": 2749}]
+        db.daily_bar = [5213]
+        assert health.check_theme_coverage(D0) is None
+        cov_sql, cov_params = [c for c in db.calls
+                               if "count(primary_theme)" in c[0]][0]
+        assert "WHERE date = %s" in cov_sql and cov_params == (day,)
+
+    def test_included_in_run(self):
+        assert ("theme", health.check_theme_coverage) in health.CHECKS

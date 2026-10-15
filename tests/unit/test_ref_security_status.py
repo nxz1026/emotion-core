@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from emotion_core.services import ref_security_status
+
+rs = ref_security_status   # 新用例用短名，旧用例保持原名
 
 
 class TestParseEvents:
@@ -303,3 +305,142 @@ class TestBuildIntervals:
     def test_open_interval_when_still_st(self):
         got = ref_security_status._build_intervals([self._ev(date(2026, 4, 30), "实施", "ST")])
         assert got[0]["effective_to"] is None
+
+
+# ─────────── 批量枚举：预算化 + 断点续跑（★2026-10-15 新增）───────────
+
+class TestWindowPlan:
+    def test_seeds_first_then_half_year_windows(self):
+        plan = rs.window_plan(date(2024, 1, 1), date(2024, 12, 31))
+        assert [k for k, _, _ in plan[:5]] == [f"seed:{g}" for g in rs._SEED_GROUPS]
+        assert all(s == e == date(2024, 1, 1) for k, s, e in plan[:5])
+        assert ("实施", date(2024, 1, 1), date(2024, 6, 30)) in plan
+        assert ("实施", date(2024, 7, 1), date(2024, 12, 31)) in plan
+        assert ("撤销", date(2024, 1, 1), date(2024, 6, 30)) in plan
+
+    def test_tail_window_clipped_to_end(self):
+        plan = rs.window_plan(date(2024, 1, 1), date(2024, 3, 15))
+        assert ("实施", date(2024, 1, 1), date(2024, 3, 15)) in plan
+        assert ("实施", date(2024, 7, 1), date(2024, 12, 31)) not in plan
+
+    def test_half_end_boundaries(self):
+        assert rs._half_end(date(2024, 1, 5)) == date(2024, 6, 30)
+        assert rs._half_end(date(2024, 6, 30)) == date(2024, 6, 30)
+        assert rs._half_end(date(2024, 7, 1)) == date(2024, 12, 31)
+        assert rs._half_end(date(2024, 12, 31)) == date(2024, 12, 31)
+
+
+class TestBudgetClient:
+    def test_counts_and_raises_at_budget(self):
+        seen: list[tuple] = []
+        inner = MagicMock()
+        inner.call.side_effect = lambda *a: seen.append(a) or "回执"
+        client = rs._BudgetClient(inner, 2)
+        assert client.call("stock_data", "search_stocks", {"q": 1}) == "回执"
+        client.call("stock_data", "search_stocks", {"q": 2})
+        with pytest.raises(rs._BudgetExhausted):
+            client.call("stock_data", "search_stocks", {"q": 3})
+        assert len(seen) == 2 and client.calls == 2
+
+    def test_none_budget_never_raises(self):
+        client = rs._BudgetClient(MagicMock(), None)
+        for _ in range(5):
+            client.call("s", "t", {})
+        assert client.calls == 5
+
+    def test_default_budget_env(self, monkeypatch):
+        monkeypatch.delenv("EMOTION_WIND_DAILY_CALL_BUDGET", raising=False)
+        assert rs._default_call_budget() == rs._DEFAULT_CALL_BUDGET
+        monkeypatch.setenv("EMOTION_WIND_DAILY_CALL_BUDGET", "7")
+        assert rs._default_call_budget() == 7
+        monkeypatch.setenv("EMOTION_WIND_DAILY_CALL_BUDGET", " 9 ")
+        assert rs._default_call_budget() == 9
+        monkeypatch.setenv("EMOTION_WIND_DAILY_CALL_BUDGET", "abc")
+        assert rs._default_call_budget() == rs._DEFAULT_CALL_BUDGET
+
+
+_PLAN4 = [("seed:沪市主板", date(2024, 1, 1), date(2024, 1, 1)),
+          ("实施", date(2024, 1, 1), date(2024, 6, 30)),
+          ("撤销", date(2024, 1, 1), date(2024, 6, 30)),
+          ("实施", date(2024, 7, 1), date(2024, 12, 31))]
+
+
+class TestBulkResume:
+    """预算用尽要能停在半路、下次接着跑；窗口没跑完**不许**重建区间表。"""
+
+    def _wire(self, monkeypatch, *, ok=None, enum_error=None):
+        state: dict = dict(ok or {})
+        marks: list[tuple] = []
+        rebuilt: list[int] = []
+        monkeypatch.setattr(rs, "_is_st_client", lambda: MagicMock())
+        monkeypatch.setattr(rs, "window_plan", lambda s, e: list(_PLAN4))
+        monkeypatch.setattr(rs, "_window_status", lambda: dict(state))
+        monkeypatch.setattr(rs, "_persist_events", lambda evs: len(evs))
+
+        def mark(kind, s, e, status, n, calls, note):
+            marks.append((kind, s, e, status))
+            if status == rs._WINDOW_OK:
+                state[(kind, s, e)] = rs._WINDOW_OK
+
+        def fetch(client, question, **kw):
+            client.call("stock_data", "search_stocks", {"question": question})
+            return [(["Wind代码", "证券简称"], [["600001.SH", "ST测试"]])]
+
+        def enum(client, kind, s, e, **kw):
+            client.call("stock_data", "search_stocks", {})
+            if enum_error and kind == enum_error:
+                raise rs.WindSourceError("后端 502")
+            return [{"code": "600001", "date": s, "kind": kind,
+                     "status": "ST", "reason": "x"}]
+
+        monkeypatch.setattr(rs, "_mark_window", mark)
+        monkeypatch.setattr(rs, "_fetch_with_retry", fetch)
+        monkeypatch.setattr(rs, "_enumerate_window", enum)
+        monkeypatch.setattr(rs, "rebuild_intervals_from_events",
+                            lambda: rebuilt.append(1) or (9, 9))
+        return marks, rebuilt, state
+
+    def test_budget_exhausted_stops_and_never_rebuilds(self, monkeypatch):
+        marks, rebuilt, state = self._wire(monkeypatch)
+        assert rs.backfill_security_status_bulk(
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0,
+            budget_calls=2) == (0, 0)
+        assert [m[3] for m in marks] == [rs._WINDOW_OK, rs._WINDOW_OK,
+                                        rs._WINDOW_EXHAUSTED]
+        assert rebuilt == []
+        assert len(state) == 2                     # 只完成前两个窗口
+
+    def test_resume_carries_progress_and_rebuilds(self, monkeypatch):
+        ok = {("seed:沪市主板", date(2024, 1, 1), date(2024, 1, 1)): rs._WINDOW_OK,
+              ("实施", date(2024, 1, 1), date(2024, 6, 30)): rs._WINDOW_OK}
+        marks, rebuilt, state = self._wire(monkeypatch, ok=ok)
+        assert rs.backfill_security_status_bulk(
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0) == (9, 9)
+        assert [m[0] for m in marks] == ["撤销", "实施"]   # 已 ok 的窗口不重抓
+        assert rebuilt == [1]
+        assert len(state) == 4
+
+    def test_source_error_marks_window_and_keeps_going(self, monkeypatch):
+        marks, rebuilt, _ = self._wire(monkeypatch, enum_error="撤销")
+        assert rs.backfill_security_status_bulk(
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0) == (0, 0)
+        statuses = {m[0]: m[3] for m in marks if m[3] != rs._WINDOW_OK}
+        assert statuses == {"撤销": rs._WINDOW_ERROR}
+        assert rebuilt == []                       # 有窗口没 ok ⇒ 不重建
+
+    def test_wind_quota_marks_and_stops(self, monkeypatch):
+        marks, rebuilt, _ = self._wire(monkeypatch)
+        def enum(client, kind, s, e, **kw):
+            if kind == "撤销":
+                raise rs.WindQuotaError("积分余额不足")
+            client.call("stock_data", "search_stocks", {})
+            return []
+        monkeypatch.setattr(rs, "_enumerate_window", enum)
+        assert rs.backfill_security_status_bulk(
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0) == (0, 0)
+        assert marks[-1][3] == rs._WINDOW_QUOTA
+        assert rebuilt == []
+
+    def test_no_client_returns_zero(self, monkeypatch):
+        monkeypatch.setattr(rs, "_is_st_client", lambda: None)
+        assert rs.backfill_security_status_bulk() == (0, 0)

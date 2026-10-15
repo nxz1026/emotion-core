@@ -38,6 +38,8 @@
    "health" 加入 pending 集合，同一轮后续 detail 全部跳过（lkl 原逻辑如此）。
 
 自持 SQL 1 处（lkl dates 原语句）：`_recent_trading_days`；其余 SQL 均为 lkl health 原语句。
+★2026-10-15 本仓新增两条检查（`check_limit_state_audit` / `check_theme_coverage`），
+SQL 与阈值为本仓自有——lkl 无 Wind 逐日对账、也没有新浪题材源，故不构成口径偏离。
 """
 from __future__ import annotations
 
@@ -59,6 +61,13 @@ REPORT_GAP_DAYS = 2          # 报告断档：>1 交易日前有报告即算断
 DATA_GAP_DAYS = 2            # 数据链：derived_bar 缺最近交易日
 OUTCOME_STALE_DAYS = 6       # 信号结果：>5 交易日前信号仍 incomplete
 POOL_STALE_DAYS = 2          # 东财三池：落后衍生层 1 个交易日即算断
+# ★2026-10-15 新增：对账与题材的消费端阈值（此前两者只落数据、无人消费）
+LIMIT_AUDIT_DAYS = 10            # 对账台账窗口：最近 N 条 (日期,方向)
+LIMIT_AUDIT_STALE_DAYS = 3       # 对账台账落后 derived_bar 的交易日数
+LIMIT_AUDIT_ONLY_WIND_PCT = 5.0  # only_wind 占 Wind 名单比例上限（%，已知 ST 偏差约 2.3）
+THEME_STALE_DAYS = 2             # 题材标签落后 derived_bar 的交易日数
+THEME_COVERAGE_MIN_PCT = 40.0    # 题材标签覆盖率下限（标签票数 / 当日有行情票数）
+THEME_PRIMARY_MIN_PCT = 60.0     # primary_theme 非空占标签行比例下限（实测 84%）
 
 
 def _recent_trading_days(d: date, n: int) -> list[date]:
@@ -201,9 +210,111 @@ def check_pool_stale(trade_date: date) -> str | None:
             if gap >= POOL_STALE_DAYS else None)
 
 
+def check_limit_state_audit(trade_date: date) -> str | None:
+    """Wind 逐日涨跌停对账的**消费端**告警（★2026-10-15 新增）。
+
+    对账通道（`services/limit_state_wind.py` + `scripts/backfill_limit_state_wind.py`）
+    只把名单与计数落进 `ref_limit_state` / `ref_limit_state_run`，**没有任何消费方**：
+    2026-08-17 那次「台账记 ok、实际丢 7 只」就是靠人肉 diff 才发现的。本条把它接进
+    每日健康检查，三种红灯（全部对照上游权威名单，不看行数）：
+
+    - `n_only_self > 0`：本库判涨停而 Wind 名单没有。实测 42 天全 0，一旦非 0
+      要么本库口径出了假阳性、要么 Wind 名单被截断 ⇒ 两种都必须看。
+    - `only_wind / n_wind` 超阈值：自算系统性漏票（典型=ST ±5% 档缺失，实测约 2.3%；
+      阈值 5% 能抓口径退化，又不会天天复报已知偏差）。
+    - 台账断更：最近抓取日落后 `derived_bar` 最近日 ≥ 阈值 ⇒ 每日自动化停了。
+
+    名单不全的日子（status `truncated`/`suspect`）不参与占比、单独点名：它们靠
+    `retries` 上限自动重抓，若长期停在窗口里说明重抓也没救。
+    """
+    df = query_df(
+        "SELECT date, direction, status, n_wind, n_only_wind, n_only_self"
+        " FROM ref_limit_state_run WHERE date <= %s"
+        " ORDER BY date DESC LIMIT %s", (trade_date, LIMIT_AUDIT_DAYS))
+    if df.empty:
+        return ("Wind 逐日涨跌停对账台账为空（ref_limit_state_run 无记录）——"
+                "逐日对账未启动或全部失败，derived_bar 涨停口径无权威校验")
+    rows = df.to_dict("records")
+    bad = [r for r in rows if str(r.get("status")) in ("truncated", "suspect")]
+    ok_rows = [r for r in rows if str(r.get("status")) == "ok"]
+    problems: list[str] = []
+    wind = sum(int(r["n_wind"] or 0) for r in ok_rows)
+    only_wind = sum(int(r["n_only_wind"] or 0) for r in ok_rows)
+    only_self = sum(int(r["n_only_self"] or 0) for r in ok_rows)
+    if only_self > 0:
+        problems.append(f"only_self 合计 {only_self} 只（本库判涨停而 Wind 未列）")
+    pct = only_wind / wind * 100 if wind else 0.0
+    if wind and pct > LIMIT_AUDIT_ONLY_WIND_PCT:
+        problems.append(f"only_wind 占比 {pct:.2f}%（阈值 {LIMIT_AUDIT_ONLY_WIND_PCT}%，"
+                        f"自算漏票 {only_wind}/{wind}）")
+    if bad:
+        days = "、".join(f"{r['date']}:{r['direction']}({r['status']})" for r in bad[:5])
+        problems.append(f"{len(bad)} 天名单不全待重抓：{days}")
+    got = query_df("SELECT max(date) AS d FROM derived_bar")
+    last_data = got["d"].iloc[0] if not got.empty else None
+    last_ledger = max(r["date"] for r in rows)
+    if last_data is not None:
+        gap = _trading_gap(last_data, last_ledger)
+        if gap >= LIMIT_AUDIT_STALE_DAYS:
+            problems.append(f"台账最近抓取日 {last_ledger}，落后 derived_bar"
+                            f" {last_data} 共 {gap} 个交易日（阈值 {LIMIT_AUDIT_STALE_DAYS}）")
+    if not problems:
+        return None
+    return (f"Wind 逐日涨跌停对账异常（窗口 {len(rows)} 条台账、"
+            f"{len(ok_rows)} 条可算）：" + "；".join(problems))
+
+
+def check_theme_coverage(trade_date: date) -> str | None:
+    """题材自产的空转/覆盖率告警（★2026-10-15 新增）。
+
+    题材此前是**假 OK**：`theme_service.run` 走 NullProvider 直接 `return 0`，
+    步骤照样记 OK，健康检查只看行数/状态抓不到。本条按三层判：
+
+    - **当日空转**：`derived_bar` 已有 `trade_date` 的数据、而 `theme_tag` 没有
+      当日行 ⇒ 题材步骤报了 OK 却没产出（provider 未激活/源失效）。以 derived_bar
+      为参照系，独立 cron 在盘中跑（数据未落）时不会误报。
+    - **断档**：`theme_tag` 最近日落后 `derived_bar` 最近日 ≥ 阈值。
+    - **覆盖率**：最近题材日的「有标签票数 / 当日有行情票数」低于阈值，或
+      `primary_theme` 非空占比过低（属性桶剔除后应稳定在 80% 以上）。
+    """
+    got = query_df("SELECT max(date) AS d FROM theme_tag")
+    have = query_df("SELECT max(date) AS d FROM derived_bar")
+    last_theme = got["d"].iloc[0] if not got.empty else None
+    last_data = have["d"].iloc[0] if not have.empty else None
+    if last_theme is None:
+        return ("theme_tag 无任何数据：题材未自产（provider 未激活或走 NullProvider"
+                "空转），题材组/题材标签全为空壳")
+    if last_data is not None and last_data == trade_date and last_theme < trade_date:
+        return (f"题材当日空转（假 OK）：derived_bar 已有 {trade_date} 数据，"
+                f"theme_tag 最新仍为 {last_theme}——题材步骤报 OK 但无产出")
+    if last_data is not None:
+        gap = _trading_gap(last_data, last_theme)
+        if gap >= THEME_STALE_DAYS:
+            return (f"题材断档：theme_tag 最近 {last_theme}，落后 derived_bar"
+                    f" {last_data} 共 {gap} 个交易日（阈值 {THEME_STALE_DAYS}）")
+    cov = query_df("SELECT count(DISTINCT code) AS tagged, count(primary_theme) AS primary"
+                   " FROM theme_tag WHERE date = %s", (last_theme,))
+    tagged = int(cov["tagged"].iloc[0]) if not cov.empty else 0
+    primary = int(cov["primary"].iloc[0]) if not cov.empty else 0
+    uni = query_df("SELECT count(DISTINCT code) AS n FROM daily_bar WHERE date = %s",
+                   (last_theme,))
+    total = int(uni["n"].iloc[0]) if not uni.empty else 0
+    problems: list[str] = []
+    if total and tagged / total * 100 < THEME_COVERAGE_MIN_PCT:
+        problems.append(f"标签覆盖率 {tagged}/{total} = {tagged / total * 100:.1f}%"
+                        f"（阈值 {THEME_COVERAGE_MIN_PCT}%）")
+    if tagged and primary / tagged * 100 < THEME_PRIMARY_MIN_PCT:
+        problems.append(f"primary_theme 非空占比 {primary}/{tagged} = "
+                        f"{primary / tagged * 100:.1f}%（阈值 {THEME_PRIMARY_MIN_PCT}%）")
+    if not problems:
+        return None
+    return f"题材覆盖率异常（{last_theme}）：" + "；".join(problems)
+
+
 CHECKS = (("report", check_report_gap), ("data", check_data_gap),
           ("outcome", check_outcome_stale), ("pipeline", check_pipeline_failed),
-          ("pool", check_pool_stale))
+          ("pool", check_pool_stale), ("limit_audit", check_limit_state_audit),
+          ("theme", check_theme_coverage))
 
 
 def run(trade_date: date | None = None) -> list[str]:

@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+### 新增 · 2026-10-15 ST PIT 预算化回补（窗口台账 + 断点续跑）
+
+> 背景：`derived_bar` 要补 ST ±5% 档必须先有 ST PIT；旧路径逐股 `get_stock_events` 要烧 5000+ 次调用，且 2026-10-14 首次实跑因额度耗尽得到 297 条**永不闭合**的开区间并整表回滚。
+
+- **`data/schema.py`**：新增 `ref_security_status_event`（原始「实施ST/撤销ST」事件）与 `ref_security_status_window`（窗口进度：`kind`=`seed/实施/撤销`、`status`=`ok/quota/error/partial`、`calls`、窗起止）两表；生产库已建（DDL 34 → **36** 张表）。
+- **`services/ref_security_status.py`**：新增 `bulk_progress(start, end)`（窗口台账汇总）与 `backfill_security_status_bulk(start=None, end=None, budget_calls=None, force=False)` —— 5 个板块种子 + 半年窗口 × 实施/撤销；每窗口 1 次 Wind `search_stocks`（触顶 100 行自动二分）；额度耗尽 → 该窗口记 `quota` 并**停在原地**（不抛错、不写区间表）；**只有全部窗口 `ok` 才用原始事件重建 `ref_security_status`** —— 半途重建正是 10-14 那次「297 条开区间」事故的成因。同一接口可多次调用续跑，`budget_calls` 计数由 `_BudgetClient` 包住 WindClient。
+- **`scripts/backfill_st_pit_wind.py`**：改用 `argparse`，支持 `--end/--max-calls/--force/--dry-run`；预算默认取 `EMOTION_WIND_DAILY_CALL_BUDGET`，再退回 40。
+- **每日渐进**：已建 DSH 自动化「ST PIT 回补（Wind 逐窗渐进，每日预算）」（`daily 19:00 Asia/Shanghai`，`--max-calls 20`，workspace-write），**排在 18:30 逐日对账之后**（额度共用，对账优先）。
+- **实测**：`--dry-run` = 17 个窗口（5 种子 + 2024H1~2026H2 实施 6 + 撤销 6）；真机 `--max-calls 4` 撞额度，窗口记 `quota`、剩 17 个待办、**区间表零写入**（旧事故形态不再复现）。新增 `tests/unit/test_ref_security_status.py` 的 `TestWindowPlan`/`TestBudgetClient`/`TestBulkResume` 共 11 项（窗口计划、预算计数、额度中止不重建、续跑后重建）。
+
+### 变更 · 2026-10-15 健康检查补两条（对账阈值告警 + 题材覆盖率兜底）
+
+- **`algorithms/health.py`**：`CHECKS` 由 5 条扩到 **7** 条 —— 新增 `check_limit_state_audit`（消费 `ref_limit_state_run`：`only_self > 0`、`only_wind/n_wind > 5%`、台账落后 `derived_bar` ≥ 3 交易日、`truncated/suspect` 待重抓名单点名；名单不全的日子不计入占比）+ `check_theme_coverage`（以 `derived_bar` 为参照系抓「题材当日空转/假 OK」、断档 ≥ 2 交易日、标签覆盖率 < 40%、`primary_theme` 非空 < 60%）。
+- 两条均为**本仓新增**（lkl 既无 Wind 逐日对账、也无新浪题材源），不构成口径偏离，模块 docstring 已注明；阈值常量：`LIMIT_AUDIT_DAYS=10`、`LIMIT_AUDIT_STALE_DAYS=3`、`LIMIT_AUDIT_ONLY_WIND_PCT=5.0`、`THEME_STALE_DAYS=2`、`THEME_COVERAGE_MIN_PCT=40.0`、`THEME_PRIMARY_MIN_PCT=60.0`。
+- 新增 `tests/unit/test_health.py` 的 `TestCheckLimitStateAudit`/`TestCheckThemeCoverage` 共 15 项（空台账、已知 ST 偏差静默、`only_self` 必报、占比阈值边界、坏状态点名且不入占比、当日空转、断档、低覆盖、`run()` 已含两条）。
+
 ### 修复 · 2026-10-15 Wind 逐日对账二分丢票（`0.01亿元` 下界问句不可解析）
 
 > 首次实跑暴露：`2026-08-17` 台账记 `ok` 却有 7 只漏票（`only_self=7`），`2026-09-21` 同形态。
