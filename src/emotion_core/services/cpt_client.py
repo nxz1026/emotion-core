@@ -24,12 +24,18 @@ R4 关注列表扩展见 `docs/18-情绪+缠论整合-功能与代码设计.md` 
   心跳（同内容同 `(code, level)` 在一个心跳窗口内不重复写）⇒ 稳态约「每心跳每标的 1 行」
   落 `cpt_recommendation`。本模块**只在需要 `price_ratio` 时才调它**，并由
   `holding_service` 暴露开关关闭（§8.2 `CPT_RECOMMENDATION_ENABLED`）。
-- `POST /api/dashboard/track`（add/remove/restore）：**写 `cpt_track`**。必须由调用方
+- `POST /api/dashboard/track/add|remove|restore`：**写 `cpt_track`**。必须由调用方
   （`watchlist_service`）校验后再调；`holding_service` 不调这些。
+  ⚠️ **R66 更正**：本模块自 S1 起把这些写操作发到**裸路径** `POST /api/dashboard/track`
+  + body `{"action": "add"}` —— 线上实测该路径 **405 method_not_allowed**（CPT 的
+  `_handle_track_post` 只认 `/add` `/remove` `/restore` 三条字面量，从不读 `action`），
+  也就是说「关注 / 取关 / 复活」自交付起**从未成功过**。已改为带后缀的三条路径，
+  并加跨仓门禁用例 `TestTrackWritePathsMatchCptLive`。
 - `GET /api/dashboard/track/{code}/advice`：要求该票已在 `cpt_track`（否则 404，
   `track_api.py:308`），且每次调用都写一条 `cpt_track_snapshot`（`:313`）。
   `cpt_client` 只在用户明确查看时才调它（`--ensure-factors` / 前端「刷新」）。
 """
+
 from __future__ import annotations
 
 import json
@@ -61,6 +67,13 @@ _FALSEY: Final = {"0", "false", "no", "off"}
 #: CPT 关注列表（R4 真源，N1 定案）。
 _TRACK_PREFIX: Final = "/api/dashboard/track"
 
+#: 写端点：CPT 的 `cpt/web/app.py::_handle_track_post` 只认这三条**字面量**路径，
+#: 且在注释里写了「显式写三个路径字面量：让 check_doc_drift 的字面 grep 能找到」。
+#: 裸路径 `/api/dashboard/track` 只服务 GET（list / 建议 / 历史）。
+TRACK_ADD_PATH: Final = f"{_TRACK_PREFIX}/add"
+TRACK_REMOVE_PATH: Final = f"{_TRACK_PREFIX}/remove"
+TRACK_RESTORE_PATH: Final = f"{_TRACK_PREFIX}/restore"
+
 #: 默认用户（CPT `track_api.DEFAULT_USER_ID` = "default"，两边保持一致）。
 DEFAULT_USER: Final = "default"
 
@@ -81,6 +94,9 @@ __all__ = (
     # ── R4 / docs/18 §7.1 ──
     "CPT_ENSURE_TIMEOUT",
     "DEFAULT_USER",
+    "TRACK_ADD_PATH",
+    "TRACK_REMOVE_PATH",
+    "TRACK_RESTORE_PATH",
     "track_list",
     "track_add",
     "track_remove",
@@ -171,8 +187,9 @@ def _get_json_any(
         log.warning("CPT %s 请求失败：%s（%s）", path, exc, params.get("code"))
         return None
     except Exception as exc:  # noqa: BLE001 - 契约是「绝不抛」，兜底也要把它换成 None
-        log.warning("CPT %s 未预期异常：%s: %s（%s）", path, type(exc).__name__, exc,
-                    params.get("code"))
+        log.warning(
+            "CPT %s 未预期异常：%s: %s（%s）", path, type(exc).__name__, exc, params.get("code")
+        )
         return None
     try:
         return json.loads(body)
@@ -207,8 +224,9 @@ def _post_json(
         log.warning("CPT %s 请求失败：%s（user=%s）", path, exc, _norm_user(user))
         return None
     except Exception as exc:  # noqa: BLE001 - 契约是「绝不抛」
-        log.warning("CPT %s 未预期异常：%s: %s（user=%s）", path, type(exc).__name__, exc,
-                    _norm_user(user))
+        log.warning(
+            "CPT %s 未预期异常：%s: %s（user=%s）", path, type(exc).__name__, exc, _norm_user(user)
+        )
         return None
     try:
         data = json.loads(raw)
@@ -243,8 +261,9 @@ def fetch_snapshot(
     return _get_json(_SNAPSHOT_PATH, params, timeout, user=user)
 
 
-def fetch_recommendation(code: str, *, timeout: float = CPT_TIMEOUT,
-                         user: str | None = None) -> dict[str, Any] | None:
+def fetch_recommendation(
+    code: str, *, timeout: float = CPT_TIMEOUT, user: str | None = None
+) -> dict[str, Any] | None:
     """CPT 结论原样（D7 并排展示）+ `price_ratio`；失败 → None。
 
     ⚠️ 该端点每次 GET 都会调 `_persist_recommendation`；调用方须先过
@@ -271,9 +290,7 @@ def overlay_usable(snapshot: dict[str, Any] | None) -> bool:
     overlays = snapshot.get("overlays")
     if not isinstance(overlays, dict):
         return False
-    return any(
-        isinstance(overlays.get(k), list) and overlays[k] for k in _OVERLAY_KEYS
-    )
+    return any(isinstance(overlays.get(k), list) and overlays[k] for k in _OVERLAY_KEYS)
 
 
 def snapshot_overlays(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -344,8 +361,18 @@ def recommendation_view(recommendation: dict[str, Any] | None) -> dict[str, Any]
     """
     if not isinstance(recommendation, dict):
         return None
-    keys = ("available", "action", "action_label", "headline", "reason", "price",
-            "status", "signal_type", "divergence_status", "disclaimer")
+    keys = (
+        "available",
+        "action",
+        "action_label",
+        "headline",
+        "reason",
+        "price",
+        "status",
+        "signal_type",
+        "divergence_status",
+        "disclaimer",
+    )
     view = {k: recommendation.get(k) for k in keys}
     if all(v is None for v in view.values()):
         return None
@@ -376,39 +403,39 @@ def track_list(*, user: str | None = DEFAULT_USER) -> list[dict[str, Any]] | Non
 
 
 def track_add(code: str, *, user: str | None = DEFAULT_USER, note: str = "") -> bool:
-    """POST `/api/dashboard/track` action=add → 是否成功。
+    """POST `/api/dashboard/track/add` → 是否成功。
 
     只代表「CPT 说它收了」；调用方需先做 code 校验与重复检查。
     """
     norm = _norm_code(code)
     if norm is None:
         return False
-    body = {"action": "add", "code": norm}
+    body: dict[str, Any] = {"code": norm}
     if note:
         body["note"] = str(note)[:200]
-    resp = _post_json(_TRACK_PREFIX, body, user=user)
+    resp = _post_json(TRACK_ADD_PATH, body, user=user)
     if not isinstance(resp, dict):
         return False
-    # CPT handle_track_add 返回 {"code": ..., "created": True|False} 之类；
-    # 只要 HTTP 200 且是 dict 就当成功。
+    # CPT handle_track_add 返回 {"ok": True, "item": {...}}；重复加入同一活跃票是
+    # 幂等 200。只要拿到 JSON 对象就当成功（HTTP 非 2xx 已被 _post_json 折成 None）。
     return True
 
 
 def track_remove(code: str, *, user: str | None = DEFAULT_USER) -> bool:
-    """POST `/api/dashboard/track` action=remove。"""
+    """POST `/api/dashboard/track/remove`（软删，幂等：找不到 → 204 仍算成功）。"""
     norm = _norm_code(code)
     if norm is None:
         return False
-    resp = _post_json(_TRACK_PREFIX, {"action": "remove", "code": norm}, user=user)
+    resp = _post_json(TRACK_REMOVE_PATH, {"code": norm}, user=user)
     return isinstance(resp, dict)
 
 
 def track_restore(code: str, *, user: str | None = DEFAULT_USER) -> bool:
-    """POST `/api/dashboard/track` action=restore。"""
+    """POST `/api/dashboard/track/restore`（回收站里没有 → CPT 回 404 ⇒ False）。"""
     norm = _norm_code(code)
     if norm is None:
         return False
-    resp = _post_json(_TRACK_PREFIX, {"action": "restore", "code": norm}, user=user)
+    resp = _post_json(TRACK_RESTORE_PATH, {"code": norm}, user=user)
     return isinstance(resp, dict)
 
 
@@ -460,10 +487,12 @@ def points_view(advice: dict[str, Any] | None) -> dict[str, Any] | None:
             pl = item.get("price_level")
             if isinstance(pl, bool) or not isinstance(pl, (int, float)):
                 continue
-            out.append({
-                "price_level": float(pl),
-                "confirmed": bool(item.get("confirmed")),
-            })
+            out.append(
+                {
+                    "price_level": float(pl),
+                    "confirmed": bool(item.get("confirmed")),
+                }
+            )
         return out or None
 
     buy = _side("buy")

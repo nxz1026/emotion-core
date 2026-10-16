@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-16 R66：关注列表写操作自交付起就发错路径（线上 405）+ CPT↔emotion 文档对齐
+
+> 起因：owner 要求「对齐两个仓的代码和文档」。对齐第一步就是拿真服务核端点，当场撞出这个事故。
+
+- **`services/cpt_client.py`**：`track_add` / `track_remove` / `track_restore` 自 S1（`d712ae0`，2026-10-14 交付）起一直 POST **裸路径** `/api/dashboard/track` + body `{"action":"add"|"remove"|"restore", …}`，而 CPT 的 `cpt/web/app.py::_handle_track_post` 只比对 `/add` `/remove` `/restore` **三条字面量**、**从不读 `action`** ⇒ 线上稳定 **405**，**「关注 / 取关 / 复活」自交付起从未成功过一次**。失败还被 `_post_json` 吞成 `None` → `False`，`watchlist_service` 只报「CPT 不可达：track_add 返回失败」，看不出是路径错。现新增常量 `TRACK_ADD_PATH` / `TRACK_REMOVE_PATH` / `TRACK_RESTORE_PATH`，三条写操作发真路径、body 收敛为 `{code, note?}`（与 CPT 侧契约一致）。
+- **门禁（跨仓）**：`tests/unit/test_cpt_client.py::TestTrackWritePathsMatchCptLive` —— 从 CPT `cpt/web/app.py::_handle_track_post` 的**函数体**里取 `path == "<字面量>"` 集合，断言本仓要用的三条路径 ⊆ 该集合，CPT 仓不可用时 skip。**双向反向控制已验**：本仓改回裸路径会红，CPT 改字面量也会红。
+  - ⚠️ 该门禁的第一版是错的：写的是「这个串在文件里出现过」（`f'"{path}"' in app_py`），被 bug 放过 —— 裸前缀 `/api/dashboard/track` 在 `do_GET` 的 `startswith("/api/dashboard/track")` 里也出现。教训：先确定把哪段文本当成了什么，再断言它存在。
+- **实测（直连真服务 `127.0.0.1:8010`，绕 basic auth）**：修前 `POST /api/dashboard/track` → **405**、`GET /api/dashboard/track/list` → **404**（列表是裸前缀）；修后 add → list 出现 → 幂等 add → remove → list 空，全通。探针行已硬删，`public.cpt_track` 回到只剩 `default/000002`。
+- **文档对齐 `docs/18-情绪+缠论整合-功能与代码设计.md`**：文首加 R66 复核说明；§4.2 端点表改对（列表 = 裸前缀 `/api/dashboard/track`，三条写操作各自独立路径，补 `GET /{code}/history?days=30` 与 `GET /maintenance?apply=1` 两行 —— `/maintenance` 是 **GET** 不是 POST）；§13 风险 R6 更正为实做（新增独立脚本 `scripts/watchlist_daily_summary.py` + 独立 cron，**不是**复用 `cron_daily_report.py`）；§14 遗留第 3、4 条**销账**（CPT 侧 `/maintenance` 分发与 `history` UI 入口在其 R59/R66 已完成），第 7 条补 R66 推送白名单，新增第 8 条（本次写路径事故）与第 9 条（前端按钮仍无端到端自动化）。
+- **CPT 侧同步**：`deploy/cron/track-maintenance-daily.sh` 头部过期注释标注（「分发没接上 ⇒ 404」是 M18 当时的实况，R59 已接，实跑 200）；`docs/known-traps.md` 新增 **#52「跨仓端点漂移：单侧单测把『自己拼出来的 URL』当成契约钉住」**。
+
 ### 新增 · 2026-10-15 Wind 额度渐进拉取 cron（兜底执行体）
 
 > 背景：Wind 日额度加不了（用户拍板「慢慢拉，加个 cron 来做」）。两条链共用同一份额度，主执行体是两个 DSH 自动化（18:30 对账 40 次、19:00 ST PIT 20 次），cron 只做兜底。

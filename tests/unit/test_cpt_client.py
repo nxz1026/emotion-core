@@ -2,10 +2,13 @@
 
 不发真实请求：`urlopen` 全部打桩。
 """
+
 from __future__ import annotations
 
 import io
 import json
+import pathlib
+import re
 import urllib.error
 
 import pytest
@@ -68,8 +71,13 @@ class TestSwitches:
 class TestNormCode:
     @pytest.mark.parametrize(
         ("raw", "want"),
-        [("601811", "601811"), ("1811", "001811"), ("1", "000001"),
-         (601811, "601811"), (" 601811 ", "601811")],
+        [
+            ("601811", "601811"),
+            ("1811", "001811"),
+            ("1", "000001"),
+            (601811, "601811"),
+            (" 601811 ", "601811"),
+        ],
     )
     def test_ok(self, raw, want):
         assert cc._norm_code(raw) == want
@@ -113,6 +121,7 @@ class TestGetJson:
 
     def test_never_raises_even_on_unexpected(self, monkeypatch):
         """契约是「绝不抛」：连兜底分支没列到的异常类型也要变成 None。"""
+
         def boom(req, timeout=None):
             raise RuntimeError("surprise")
 
@@ -136,9 +145,7 @@ class TestFetchEndpoints:
     def test_recommendation_url(self, monkeypatch):
         seen = _patch_urlopen(monkeypatch, b'{"ok": 1}')
         cc.fetch_recommendation("601811")
-        assert seen["url"].startswith(
-            "http://127.0.0.1:8010/api/dashboard/a-share/recommendation?"
-        )
+        assert seen["url"].startswith("http://127.0.0.1:8010/api/dashboard/a-share/recommendation?")
 
     def test_bad_code_makes_no_request(self, monkeypatch):
         def boom(*a, **kw):
@@ -164,12 +171,15 @@ class TestOverlayUsable:
         assert cc.overlay_usable(snap) is False
 
     def test_all_empty_is_not_usable(self):
-        snap = {"data_quality": {"degraded": False},
-                "overlays": {"fractals": [], "bis": [], "zhongshus": [], "trend_types": []}}
+        snap = {
+            "data_quality": {"degraded": False},
+            "overlays": {"fractals": [], "bis": [], "zhongshus": [], "trend_types": []},
+        }
         assert cc.overlay_usable(snap) is False
 
-    @pytest.mark.parametrize("bad", [None, [], "x", {}, {"overlays": None},
-                                     {"overlays": {"bis": "x"}}])
+    @pytest.mark.parametrize(
+        "bad", [None, [], "x", {}, {"overlays": None}, {"overlays": {"bis": "x"}}]
+    )
     def test_malformed_is_not_usable(self, bad):
         assert cc.overlay_usable(bad) is False
 
@@ -194,8 +204,15 @@ class TestPriceRatioOf:
 
 class TestDataQualityNote:
     def test_ok_returns_none(self):
-        snap = {"data_quality": {"severity": "ok", "gap": False, "gap_count": 0,
-                                 "stale": False, "closed_bar_count": 119}}
+        snap = {
+            "data_quality": {
+                "severity": "ok",
+                "gap": False,
+                "gap_count": 0,
+                "stale": False,
+                "closed_bar_count": 119,
+            }
+        }
         assert cc.data_quality_note(snap) is None
 
     @pytest.mark.parametrize("bad", [None, {}, {"data_quality": None}, {"data_quality": {}}])
@@ -209,9 +226,18 @@ class TestDataQualityNote:
 
     def test_gap_shape_from_real_payload(self):
         """实测 000016：没有 degraded 键，靠 severity/gap_count 才看得出缺数据。"""
-        note = cc.data_quality_note({"data_quality": {
-            "severity": "gap", "gap": True, "gap_count": 5, "stale": False,
-            "closed_bar_count": 92, "expected_trade_days": 97}})
+        note = cc.data_quality_note(
+            {
+                "data_quality": {
+                    "severity": "gap",
+                    "gap": True,
+                    "gap_count": 5,
+                    "stale": False,
+                    "closed_bar_count": 92,
+                    "expected_trade_days": 97,
+                }
+            }
+        )
         assert note is not None
         assert "severity=gap" in note and "gap_count=5" in note
 
@@ -220,21 +246,39 @@ class TestDataQualityNote:
         assert note is not None and "stale=True" in note
 
     def test_degraded_takes_precedence(self):
-        note = cc.data_quality_note({"data_quality": {
-            "degraded": True, "reason": "no_data", "severity": "gap", "gap_count": 3}})
+        note = cc.data_quality_note(
+            {
+                "data_quality": {
+                    "degraded": True,
+                    "reason": "no_data",
+                    "severity": "gap",
+                    "gap_count": 3,
+                }
+            }
+        )
         assert note is not None and "no_data" in note and "gap_count" not in note
 
 
 class TestRecommendationView:
     def test_projection(self):
-        rec = {"action": "watch", "action_label": "关注", "headline": "h", "reason": "r",
-               "price": 21.3, "status": "structure_ready", "signal_type": "first_buy",
-               "divergence_status": "not_checked", "available": True, "disclaimer": "d",
-               "price_ratio": 7.06, "raw_close": 21.3}
+        rec = {
+            "action": "watch",
+            "action_label": "关注",
+            "headline": "h",
+            "reason": "r",
+            "price": 21.3,
+            "status": "structure_ready",
+            "signal_type": "first_buy",
+            "divergence_status": "not_checked",
+            "available": True,
+            "disclaimer": "d",
+            "price_ratio": 7.06,
+            "raw_close": 21.3,
+        }
         view = cc.recommendation_view(rec)
         assert view is not None
         assert view["action"] == "watch" and view["status"] == "structure_ready"
-        assert "price_ratio" not in view          # 换算系数不进展示投影
+        assert "price_ratio" not in view  # 换算系数不进展示投影
 
     @pytest.mark.parametrize("bad", [None, {}, {"unknown": 1}])
     def test_empty_is_none(self, bad):
@@ -252,7 +296,8 @@ class TestNormUser:
         assert cc._norm_user(ok) == ok
 
     @pytest.mark.parametrize(
-        "bad", [None, "", "   ", 123, "a b", "x" * 33, "a@b", "a/b", "a:b", "a*b", "奎爷"],
+        "bad",
+        [None, "", "   ", 123, "a b", "x" * 33, "a@b", "a/b", "a:b", "a*b", "奎爷"],
     )
     def test_invalid_falls_back(self, bad):
         assert cc._norm_user(bad) == "default"
@@ -326,14 +371,14 @@ class TestTrackFunctions:
             seen["url"] = req.full_url
             seen["body"] = req.data
             seen["user"] = req.headers.get("X-cpt-user")
-            return _FakeResp(b'{"created": true}')
+            return _FakeResp(b'{"ok": true, "item": {"code": "601811"}}')
 
         monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
         assert cc.track_add("601811", user="test_user", note="watch") is True
         assert seen["method"] == "POST"
-        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track"
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track/add"
         assert seen["user"] == "test_user"
-        assert json.loads(seen["body"]) == {"action": "add", "code": "601811", "note": "watch"}
+        assert json.loads(seen["body"]) == {"code": "601811", "note": "watch"}
 
     def test_track_add_bad_code(self):
         assert cc.track_add("abc", user="u") is False
@@ -343,27 +388,31 @@ class TestTrackFunctions:
 
         def fake(req, timeout=None):
             seen["body"] = req.data
-            return _FakeResp(b'{"removed": true}')
+            seen["url"] = req.full_url
+            return _FakeResp(b'{"ok": true, "removed": true}')
 
         monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
         assert cc.track_remove("601811", user="u") is True
-        assert json.loads(seen["body"]) == {"action": "remove", "code": "601811"}
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track/remove"
+        assert json.loads(seen["body"]) == {"code": "601811"}
 
     def test_track_restore(self, monkeypatch):
         seen: dict = {}
 
         def fake(req, timeout=None):
             seen["body"] = req.data
-            return _FakeResp(b'{"restored": true}')
+            seen["url"] = req.full_url
+            return _FakeResp(b'{"ok": true, "code": "601811"}')
 
         monkeypatch.setattr(cc.urllib.request, "urlopen", fake)
         assert cc.track_restore("601811", user="u") is True
-        assert json.loads(seen["body"]) == {"action": "restore", "code": "601811"}
+        assert seen["url"] == "http://127.0.0.1:8010/api/dashboard/track/restore"
+        assert json.loads(seen["body"]) == {"code": "601811"}
 
     def test_track_advice(self, monkeypatch):
-        payload = json.dumps({
-            "suggested_points": {"buy": [{"price_level": 15.0, "confirmed": True}]}
-        }).encode()
+        payload = json.dumps(
+            {"suggested_points": {"buy": [{"price_level": 15.0, "confirmed": True}]}}
+        ).encode()
         seen = _patch_urlopen(monkeypatch, payload)
         resp = cc.track_advice("601811", user="test_user")
         assert isinstance(resp, dict)
@@ -433,10 +482,61 @@ class TestHumanText:
 
 class TestPointsEmptyReason:
     def test_ok(self):
-        assert cc.points_empty_reason(
-            {"suggested_points": {"reason": "no_structure"}}
-        ) == "no_structure"
+        assert (
+            cc.points_empty_reason({"suggested_points": {"reason": "no_structure"}})
+            == "no_structure"
+        )
 
     def test_missing(self):
         assert cc.points_empty_reason({}) is None
         assert cc.points_empty_reason({"suggested_points": {}}) is None
+
+
+# --------------------------------------------------------------------------- #
+# 跨仓门禁：写端点路径必须与 CPT 实际分发的字面量一致（R66）
+# --------------------------------------------------------------------------- #
+class TestTrackWritePathsMatchCptLive:
+    """把「CPT 到底认哪条路径」钉成断言，而不是钉住我们自己拼的 URL。
+
+    这一条是被真事故逼出来的：`track_add` / `track_remove` / `track_restore` 自 S1
+    交付起一直 POST 到**裸路径** `/api/dashboard/track`，而 CPT 的
+    `_handle_track_post` 只认 `/add` `/remove` `/restore` 三条字面量、从不读 body 里的
+    `action` —— 线上实测裸路径 **405 method_not_allowed**，也就是说 stock 页上的
+    「关注 / 取关 / 复活」从来就没成功过，只是把布尔 False 当成了「CPT 不可达」。
+
+    旧用例 `test_track_add` 断言的是**实现自己拼出来的 URL**，于是把 bug 钉成了契约、
+    全绿通过 —— 这正是 known-traps 里「断言的是实现而不是外部事实」那一类。
+    现在的判据来自 CPT 源码字面量：CPT 改了路径，这条就会红。
+    """
+
+    #: 与 `tests/unit/test_levels.py::TestConstantsMatchCptLive` 同一套定位方式。
+    CPT_APP = pathlib.Path("/home/ubuntu/DSH/Chan_Pattern_Trader/cpt/web/app.py")
+
+    def _dispatch_literals(self) -> set[str]:
+        """从 CPT `_handle_track_post` 的函数体里取出 ``path == "<字面量>"`` 的集合。
+
+        刻意**不**用「这个字符串在文件里出现过」当判据 —— 裸前缀
+        `"/api/dashboard/track"` 在 `do_GET` 的 `startswith(...)` 里也出现，
+        那种弱判据会把 bug 放过去（本用例的第一版就是这样，反向控制没抓住）。
+        """
+        text = self.CPT_APP.read_text(encoding="utf-8", errors="replace")
+        start = text.index("def _handle_track_post")
+        rest = text[start + 1 :]
+        nxt = rest.find("\n        def ")
+        body = rest[: nxt if nxt != -1 else len(rest)]
+        return set(re.findall(r'path == "([^"]+)"', body))
+
+    def test_write_paths_are_literals_cpt_dispatches(self):
+        if not self.CPT_APP.is_file():
+            pytest.skip("CPT 仓不可用（非同一机器）")
+        literals = self._dispatch_literals()
+        assert literals, "没抓到 CPT 的写路由字面量 —— 解析方式过期了，请更新本用例"
+        for path in (cc.TRACK_ADD_PATH, cc.TRACK_REMOVE_PATH, cc.TRACK_RESTORE_PATH):
+            assert path in literals, (
+                f"CPT 的写分发里没有 {path}（它有：{sorted(literals)}）；"
+                "改端点必须同步 cpt_client 与本用例"
+            )
+
+    def test_read_path_is_the_bare_prefix(self):
+        """GET 的 list / advice / history 都走裸前缀 —— 带 `/list` 会 404（实测）。"""
+        assert cc._TRACK_PREFIX == "/api/dashboard/track"  # noqa: SLF001
