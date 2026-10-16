@@ -7,6 +7,7 @@
 - 参数顺序与列清单一一对应（21 列 / 21 参数），插错位不会报错但会静默脏数据；
 - `holding_for` 无行返回 `None`（未持仓评估是正常场景，不是错误）。
 """
+
 from __future__ import annotations
 
 import json
@@ -22,19 +23,36 @@ from emotion_core.domain.holding import Decision, Ladder, Levels, Sizing
 D = date(2026, 10, 13)
 
 
-def _decision(*, ok: bool = True, cost: float | None = 8.0,
-              shares: int | None = 1000) -> Decision:
+def _decision(*, ok: bool = True, cost: float | None = 8.0, shares: int | None = 1000) -> Decision:
     return Decision(
-        code="601811", trade_date=D, action="HOLD", action_label="持有观察",
-        market_price=21.14, pnl_pct=1.6,
-        levels=Levels(buy_reference=15.029, stop_price=14.278,
-                      target_price=27.205, basis="cpt_structure", detail="结构位"),
-        sizing=Sizing(suggested_shares=13300, position_pct=0.1999,
-                      suggested_amount=199900.0, method="risk+liq+maxpos", detail="取小"),
+        code="601811",
+        trade_date=D,
+        action="HOLD",
+        action_label="持有观察",
+        market_price=21.14,
+        pnl_pct=1.6,
+        levels=Levels(
+            buy_reference=15.029,
+            stop_price=14.278,
+            target_price=27.205,
+            basis="cpt_structure",
+            detail="结构位",
+        ),
+        sizing=Sizing(
+            suggested_shares=13300,
+            position_pct=0.1999,
+            suggested_amount=199900.0,
+            method="risk+liq+maxpos",
+            detail="取小",
+        ),
         ladder=(Ladder(side="BUY", price=15.029, pct=0.4, shares=5300, why="买参考"),),
         reasons=({"kind": "verdict", "text": "无触发条件"},),
-        facts={"phase": "发酵"}, inputs={"cost": cost, "shares": shares, "capital": 1e6},
-        cpt_status="structure_ready", name="新华文轩", board="sh_main", ok=ok,
+        facts={"phase": "发酵"},
+        inputs={"cost": cost, "shares": shares, "capital": 1e6},
+        cpt_status="structure_ready",
+        name="新华文轩",
+        board="sh_main",
+        ok=ok,
     )
 
 
@@ -61,8 +79,7 @@ class _Rec:
 
 class TestUpsert:
     def test_ok_false_writes_nothing(self, monkeypatch):
-        monkeypatch.setattr(hs, "transaction",
-                            lambda: pytest.fail("丙档（ok=False）不该开事务"))
+        monkeypatch.setattr(hs, "transaction", lambda: pytest.fail("丙档（ok=False）不该开事务"))
         assert hs.upsert_decision(_decision(ok=False)) == 0
 
     def test_sql_is_idempotent_and_jsonb_cast(self, monkeypatch):
@@ -71,15 +88,16 @@ class TestUpsert:
         assert hs.upsert_decision(_decision()) == 1
         sql, params = rec.calls[0]
         assert "ON CONFLICT (trade_date, code) DO UPDATE" in sql
-        assert "created_at       = now()" in sql        # 每次刷新
-        assert sql.count("%s::jsonb") == 5              # ladder/reasons/facts/inputs/sizing_params
+        assert "created_at       = now()" in sql  # 每次刷新
+        assert sql.count("%s::jsonb") == 5  # ladder/reasons/facts/inputs/sizing_params
         assert len(params) == 22
         # 列顺序：trade_date, code, cost_price, shares, market_price, pnl_pct, ...
         assert params[:6] == (D, "601811", 8.0, 1000, 21.14, 1.6)
         assert params[6:11] == ("HOLD", "持有观察", "risk+liq+maxpos", 13300, 0.1999)
         assert params[11:16] == (199900.0, 15.029, 14.278, 27.205, "cpt_structure")
         assert json.loads(params[16]) == [
-            {"side": "BUY", "price": 15.029, "pct": 0.4, "shares": 5300, "why": "买参考"}]
+            {"side": "BUY", "price": 15.029, "pct": 0.4, "shares": 5300, "why": "买参考"}
+        ]
         assert json.loads(params[19]) == {"cost": 8.0, "shares": 1000, "capital": 1e6}
         # params[20] = sizing_params (jsonb); params[21] = cpt_status
         assert params[21] == "structure_ready"
@@ -98,17 +116,19 @@ class TestUpsert:
 
 class TestReads:
     def test_open_holdings_maps_rows(self, monkeypatch):
-        df = pd.DataFrame([{"code": "1811", "entry_date": D, "entry_price": 8.0,
-                            "shares": 1000, "note": None}])
+        df = pd.DataFrame(
+            [{"code": "1811", "entry_date": D, "entry_price": 8.0, "shares": 1000, "note": None}]
+        )
         monkeypatch.setattr(hs, "query_df", lambda sql, params=(): df)
         out = hs.open_holdings()
         assert len(out) == 1
-        assert out[0].code == "001811"          # zfill(6)
+        assert out[0].code == "001811"  # zfill(6)
         assert out[0].cost == 8.0 and out[0].shares == 1000 and out[0].note == ""
 
     def test_open_holdings_skips_non_numeric_code(self, monkeypatch):
-        df = pd.DataFrame([{"code": "BAD", "entry_date": D, "entry_price": 1.0,
-                            "shares": 1, "note": ""}])
+        df = pd.DataFrame(
+            [{"code": "BAD", "entry_date": D, "entry_price": 1.0, "shares": 1, "note": ""}]
+        )
         monkeypatch.setattr(hs, "query_df", lambda sql, params=(): df)
         assert hs.open_holdings() == []
 
@@ -121,8 +141,17 @@ class TestReads:
 
         def _q(sql: str, params: Any = ()) -> pd.DataFrame:
             seen["sql"], seen["params"] = sql, params
-            return pd.DataFrame([{"code": "601811", "entry_date": D,
-                                  "entry_price": 8.0, "shares": 1000, "note": ""}])
+            return pd.DataFrame(
+                [
+                    {
+                        "code": "601811",
+                        "entry_date": D,
+                        "entry_price": 8.0,
+                        "shares": 1000,
+                        "note": "",
+                    }
+                ]
+            )
 
         monkeypatch.setattr(hs, "query_df", _q)
         h = hs.holding_for("601811")

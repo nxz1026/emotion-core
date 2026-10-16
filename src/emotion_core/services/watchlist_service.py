@@ -6,6 +6,7 @@ CPT 不可达时：读返回 ``([], False)`` / ``None``；写返回 ``(False, "C
 既有 ``services/watchlist.py`` 维护的是本地 ``watchlist`` 表（供 review / strategy
 universe 使用），与本模块是两套独立的存储；本模块迁移期间两者并行运行。
 """
+
 from __future__ import annotations
 
 import logging

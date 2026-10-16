@@ -2,13 +2,15 @@
 
 所有 CPT 调用都打桩 `cpt_client` 函数；不发真实 HTTP。
 """
+
 from __future__ import annotations
 
 from emotion_core.services import watchlist_service as ws
 
 
-def _patch_track(monkeypatch, *, list_result=None, add_result=True, remove_result=True,
-                 restore_result=True):
+def _patch_track(
+    monkeypatch, *, list_result=None, add_result=True, remove_result=True, restore_result=True
+):
     """统一打桩 watchlist_service 内的 track_* 引用（直接绑在 ws 命名空间）。"""
     monkeypatch.setattr(ws, "track_list", lambda user: list_result)
     monkeypatch.setattr(ws, "track_add", lambda code, user, note="": add_result)

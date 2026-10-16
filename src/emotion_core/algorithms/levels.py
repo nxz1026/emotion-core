@@ -16,6 +16,7 @@
 
 守 F6：缺数不补 0、不猜。`close` 缺失时三个价位全 `None`。
 """
+
 from __future__ import annotations
 
 from typing import Any, Final
@@ -23,11 +24,11 @@ from typing import Any, Final
 from emotion_core.domain.holding import Levels
 
 # ── 结构位常数：与 CPT track_points.py 同值（移植口径，勿单方面改） ──────────
-STOP_LOSS_RATIO: Final[float] = 0.95       # track_points.py:49
-BUY_BUFFER: Final[float] = 1.02            # track_points.py:44
-SELL_BUFFER: Final[float] = 0.97           # track_points.py:47
-BI_LOOKBACK: Final[int] = 3                # track_points.py:_BI_LOOKBACK
-ZHONGSHU_LOOKBACK: Final[int] = 2          # track_points.py:_ZHONGSHU_LOOKBACK
+STOP_LOSS_RATIO: Final[float] = 0.95  # track_points.py:49
+BUY_BUFFER: Final[float] = 1.02  # track_points.py:44
+SELL_BUFFER: Final[float] = 0.97  # track_points.py:47
+BI_LOOKBACK: Final[int] = 3  # track_points.py:_BI_LOOKBACK
+ZHONGSHU_LOOKBACK: Final[int] = 2  # track_points.py:_ZHONGSHU_LOOKBACK
 
 # ── 百分比兜底（只在结构位不可用时启用，决策 D3） ────────────────────────────
 FALLBACK_BUY_PCT: Final[float] = 0.03
@@ -50,7 +51,7 @@ def _num(v: Any) -> float | None:
         f = float(v)
     except (TypeError, ValueError):
         return None
-    if f != f or f <= 0:                    # NaN 或非正
+    if f != f or f <= 0:  # NaN 或非正
         return None
     return f
 
@@ -122,7 +123,9 @@ def structure_levels(
 
     if raw_close is None:
         return Levels(
-            buy_reference=None, stop_price=None, target_price=None,
+            buy_reference=None,
+            stop_price=None,
+            target_price=None,
             basis="pct_fallback",
             detail=f"{note}；且无当日收盘价 → 不给价位（F6 不猜）",
         )

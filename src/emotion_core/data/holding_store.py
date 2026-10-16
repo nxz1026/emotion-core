@@ -9,6 +9,7 @@
 - 写 `holding_decision` 走 `ON CONFLICT (trade_date, code) DO UPDATE`：当日重算覆盖、
   跨日保留 = 决策历史（docs/17 §3.2）。`pub` 与 `created_at` 每次刷新。
 """
+
 from __future__ import annotations
 
 import json
@@ -24,8 +25,7 @@ log = logging.getLogger("emotion_core.data.holding_store")
 _POSITION_COLS = "SELECT code, entry_date, entry_price, shares, note FROM position"
 _OPEN_SQL = f"{_POSITION_COLS} WHERE status = 'OPEN' ORDER BY entry_date, code"
 _BY_CODE_SQL = (
-    f"{_POSITION_COLS} WHERE status = 'OPEN' AND code = %s"
-    " ORDER BY entry_date DESC LIMIT 1"
+    f"{_POSITION_COLS} WHERE status = 'OPEN' AND code = %s ORDER BY entry_date DESC LIMIT 1"
 )
 
 _INSERT_SQL = """
@@ -73,13 +73,15 @@ def _rows_to_holdings(df: Any) -> list[Holding]:
         if not code.isdigit():
             log.warning("position 里有非法 code=%r，跳过", r.code)
             continue
-        out.append(Holding(
-            code=code,
-            cost=float(r.entry_price),
-            shares=int(r.shares),
-            entry_date=r.entry_date,
-            note=r.note or "",
-        ))
+        out.append(
+            Holding(
+                code=code,
+                cost=float(r.entry_price),
+                shares=int(r.shares),
+                entry_date=r.entry_date,
+                note=r.note or "",
+            )
+        )
     return out
 
 
@@ -107,12 +109,21 @@ def upsert_decision(d: Decision) -> int:
     cost = d.inputs.get("cost")
     shares = d.inputs.get("shares")
     params = (
-        d.trade_date, d.code,
-        cost, shares,
-        d.market_price, d.pnl_pct,
-        d.action, d.action_label, d.sizing.method, d.sizing.suggested_shares,
-        d.sizing.position_pct, d.sizing.suggested_amount,
-        d.levels.buy_reference, d.levels.stop_price, d.levels.target_price,
+        d.trade_date,
+        d.code,
+        cost,
+        shares,
+        d.market_price,
+        d.pnl_pct,
+        d.action,
+        d.action_label,
+        d.sizing.method,
+        d.sizing.suggested_shares,
+        d.sizing.position_pct,
+        d.sizing.suggested_amount,
+        d.levels.buy_reference,
+        d.levels.stop_price,
+        d.levels.target_price,
         d.levels.basis,
         json.dumps([_ladder_dict(x) for x in d.ladder], ensure_ascii=False),
         json.dumps(list(d.reasons), ensure_ascii=False),
@@ -127,5 +138,4 @@ def upsert_decision(d: Decision) -> int:
 
 
 def _ladder_dict(x: Any) -> dict:
-    return {"side": x.side, "price": x.price, "pct": x.pct,
-            "shares": x.shares, "why": x.why}
+    return {"side": x.side, "price": x.price, "pct": x.pct, "shares": x.shares, "why": x.why}

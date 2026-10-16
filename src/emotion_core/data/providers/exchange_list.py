@@ -18,6 +18,7 @@
 已知抖坑：深交所接口偶发 ``ConnectionResetError(104)``，重试即通（2026-10-13 实测
 第 1 次失败、第 2 次成功），故统一过 `retry_fetch`。
 """
+
 from __future__ import annotations
 
 import logging
@@ -81,12 +82,27 @@ def to_date(v: Any) -> date | None:
 def _sources() -> tuple[tuple[str, Any, dict[str, str], str, str], ...]:
     """(市场名, akshare 函数, 调用参数, 代码列, 日期列)。"""
     return (
-        ("深交所A股列表", ak.stock_info_sz_name_code, {"symbol": _SZ_SYMBOL},
-         _SZ_CODE_COL, _SZ_DATE_COL),
-        ("上交所主板A股", ak.stock_info_sh_name_code, {"symbol": _SH_SYMBOLS[0]},
-         _SH_CODE_COL, _SH_DATE_COL),
-        ("上交所科创板", ak.stock_info_sh_name_code, {"symbol": _SH_SYMBOLS[1]},
-         _SH_CODE_COL, _SH_DATE_COL),
+        (
+            "深交所A股列表",
+            ak.stock_info_sz_name_code,
+            {"symbol": _SZ_SYMBOL},
+            _SZ_CODE_COL,
+            _SZ_DATE_COL,
+        ),
+        (
+            "上交所主板A股",
+            ak.stock_info_sh_name_code,
+            {"symbol": _SH_SYMBOLS[0]},
+            _SH_CODE_COL,
+            _SH_DATE_COL,
+        ),
+        (
+            "上交所科创板",
+            ak.stock_info_sh_name_code,
+            {"symbol": _SH_SYMBOLS[1]},
+            _SH_CODE_COL,
+            _SH_DATE_COL,
+        ),
     )
 
 
@@ -109,8 +125,7 @@ def _fetch_one(label: str, fn: Any, kw: dict[str, str]) -> pd.DataFrame:
 
     def _run() -> None:
         try:
-            box["df"] = retry_fetch(
-                fn, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP, **kw)
+            box["df"] = retry_fetch(fn, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP, **kw)
         except Exception as exc:  # noqa: BLE001 —— 网络源异常类型不定
             box["err"] = exc
 
@@ -118,8 +133,10 @@ def _fetch_one(label: str, fn: Any, kw: dict[str, str]) -> pd.DataFrame:
     t.start()
     t.join(_FETCH_TIMEOUT)
     if t.is_alive():
-        raise FetchError(f"{label}列表请求超时（>{_FETCH_TIMEOUT:g}s）",
-                         TimeoutError(f"timeout after {_FETCH_TIMEOUT:g}s"))
+        raise FetchError(
+            f"{label}列表请求超时（>{_FETCH_TIMEOUT:g}s）",
+            TimeoutError(f"timeout after {_FETCH_TIMEOUT:g}s"),
+        )
     if "err" in box:
         exc = box["err"]
         raise FetchError(f"{label}列表请求失败（{kw}）", exc) from exc

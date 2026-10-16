@@ -1,4 +1,5 @@
 """巨潮行业分类源：单只解析、缺列/空响应分层、批量跳过失败。全程不联网。"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -11,8 +12,9 @@ def _profile(industry: object) -> pd.DataFrame:
 
 
 def test_fetch_industry_returns_stripped_value(monkeypatch):
-    monkeypatch.setattr(ci.ak, "stock_profile_cninfo",
-                        lambda symbol: _profile("  酒、饮料和精制茶制造业 "))
+    monkeypatch.setattr(
+        ci.ak, "stock_profile_cninfo", lambda symbol: _profile("  酒、饮料和精制茶制造业 ")
+    )
     assert ci.fetch_industry("600519") == "酒、饮料和精制茶制造业"
 
 
@@ -25,8 +27,9 @@ def test_fetch_industry_blank_and_nan_return_none(monkeypatch):
 
 
 def test_fetch_industry_missing_column_is_data_error(monkeypatch):
-    monkeypatch.setattr(ci.ak, "stock_profile_cninfo",
-                        lambda symbol: pd.DataFrame({"A股代码": ["600519"]}))
+    monkeypatch.setattr(
+        ci.ak, "stock_profile_cninfo", lambda symbol: pd.DataFrame({"A股代码": ["600519"]})
+    )
     try:
         ci.fetch_industry("600519")
     except ci.DataError as exc:
@@ -36,7 +39,7 @@ def test_fetch_industry_missing_column_is_data_error(monkeypatch):
 
 
 def test_fetch_industry_empty_frame_is_fetch_error(monkeypatch):
-    monkeypatch.setattr(ci, "_FETCH_RETRY", 1)      # 免掉指数退避的 4 秒
+    monkeypatch.setattr(ci, "_FETCH_RETRY", 1)  # 免掉指数退避的 4 秒
     monkeypatch.setattr(ci.ak, "stock_profile_cninfo", lambda symbol: pd.DataFrame())
     try:
         ci.fetch_industry("600519")

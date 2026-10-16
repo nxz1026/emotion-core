@@ -10,6 +10,7 @@
 - CLI `--help` 零副作用、参数冲突 exit 2、默认不写库；
 - **常数不进 `CONFIG`**（`CONFIG` 是 frozen dataclass 且参与 `config_hash()`）。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -25,8 +26,13 @@ D = date(2026, 10, 13)
 
 
 def _levels(**kw: Any) -> Levels:
-    base: dict[str, Any] = {"buy_reference": 10.0, "stop_price": None,
-                            "target_price": None, "basis": "cpt_structure", "detail": "d"}
+    base: dict[str, Any] = {
+        "buy_reference": 10.0,
+        "stop_price": None,
+        "target_price": None,
+        "basis": "cpt_structure",
+        "detail": "d",
+    }
     base.update(kw)
     return Levels(**base)
 
@@ -38,8 +44,12 @@ def io(monkeypatch):
         "trade_date": D,
         "basic": {"name": "测试股", "is_st": False, "float_shares": 1e9, "in_market": True},
         "bar": {"close": 10.0, "amount": 2e8},
-        "drv": None, "stat": None, "pos": None,
-        "writes": [], "cpt_calls": 0, "levels": None,
+        "drv": None,
+        "stat": None,
+        "pos": None,
+        "writes": [],
+        "cpt_calls": 0,
+        "levels": None,
     }
     monkeypatch.setattr(hs, "_latest_trade_date", lambda: box["trade_date"])
     monkeypatch.setattr(hs, "_basic", lambda code: box["basic"])
@@ -47,8 +57,9 @@ def io(monkeypatch):
     monkeypatch.setattr(hs, "_derived", lambda code, d: box["drv"])
     monkeypatch.setattr(hs, "_market", lambda d: box["stat"])
     monkeypatch.setattr(hs.holding_store, "holding_for", lambda code: box["pos"])
-    monkeypatch.setattr(hs.holding_store, "upsert_decision",
-                        lambda d: (box["writes"].append(d), 1)[1])
+    monkeypatch.setattr(
+        hs.holding_store, "upsert_decision", lambda d: (box["writes"].append(d), 1)[1]
+    )
     monkeypatch.setattr(hs.cpt_client, "cpt_enabled", lambda: False)
 
     real_structure = hs.structure_levels
@@ -64,79 +75,129 @@ def io(monkeypatch):
 
 # ────────────────────────── §7.2 优先级表（纯函数） ──────────────────────────
 
+
 class TestDecideAction:
     def test_force_liquidate_beats_everything(self):
-        stat = {"phase": "退潮", "buy_window": "NONE", "force_liquidate": True,
-                "dragon_env": "UNFAVORABLE", "accel_reason": None}
-        drv = {"is_limit_up": False, "cont_days": 3, "is_one_word": False,
-               "touched_limit": True, "is_bomb": False}
-        action, r = hs._decide_action(stat=stat, drv=drv, cost=5.0, close=10.0,
-                                      levels=_levels(stop_price=99.0))
+        stat = {
+            "phase": "退潮",
+            "buy_window": "NONE",
+            "force_liquidate": True,
+            "dragon_env": "UNFAVORABLE",
+            "accel_reason": None,
+        }
+        drv = {
+            "is_limit_up": False,
+            "cont_days": 3,
+            "is_one_word": False,
+            "touched_limit": True,
+            "is_bomb": False,
+        }
+        action, r = hs._decide_action(
+            stat=stat, drv=drv, cost=5.0, close=10.0, levels=_levels(stop_price=99.0)
+        )
         assert action == "EXIT" and "退潮" in r["text"]
 
     def test_stop_loss_beats_break(self):
-        drv = {"is_limit_up": False, "cont_days": 3, "is_one_word": False,
-               "touched_limit": True, "is_bomb": False}
-        action, r = hs._decide_action(stat=None, drv=drv, cost=5.0, close=10.0,
-                                      levels=_levels(stop_price=10.0))
+        drv = {
+            "is_limit_up": False,
+            "cont_days": 3,
+            "is_one_word": False,
+            "touched_limit": True,
+            "is_bomb": False,
+        }
+        action, r = hs._decide_action(
+            stat=None, drv=drv, cost=5.0, close=10.0, levels=_levels(stop_price=10.0)
+        )
         assert action == "EXIT" and "止损" in r["text"]
 
     def test_break_trim(self):
-        drv = {"is_limit_up": False, "cont_days": 3, "is_one_word": False,
-               "touched_limit": True, "is_bomb": False}
-        action, r = hs._decide_action(stat=None, drv=drv, cost=5.0, close=10.0,
-                                      levels=_levels())
+        drv = {
+            "is_limit_up": False,
+            "cont_days": 3,
+            "is_one_word": False,
+            "touched_limit": True,
+            "is_bomb": False,
+        }
+        action, r = hs._decide_action(stat=None, drv=drv, cost=5.0, close=10.0, levels=_levels())
         assert action == "TRIM" and "断板" in r["text"]
 
     def test_target_trim(self):
-        action, r = hs._decide_action(stat=None, drv=None, cost=5.0, close=10.0,
-                                      levels=_levels(target_price=10.0))
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(target_price=10.0)
+        )
         assert action == "TRIM" and "目标" in r["text"]
 
     def test_missing_derived_row_is_hold_not_trim(self):
         """F6：缺判据行 = 缺数，绝不是「断板」。"""
-        action, r = hs._decide_action(stat=None, drv=None, cost=5.0, close=10.0,
-                                      levels=_levels())
+        action, r = hs._decide_action(stat=None, drv=None, cost=5.0, close=10.0, levels=_levels())
         assert action == "HOLD" and "缺数" in r["text"]
 
     def test_unfavorable_env_holds(self):
-        stat = {"phase": "退潮", "buy_window": "NONE", "force_liquidate": False,
-                "dragon_env": "UNFAVORABLE", "accel_reason": None}
-        drv = {"is_limit_up": True, "cont_days": 2, "is_one_word": False,
-               "touched_limit": True, "is_bomb": False}
-        action, r = hs._decide_action(stat=stat, drv=drv, cost=5.0, close=10.0,
-                                      levels=_levels())
+        stat = {
+            "phase": "退潮",
+            "buy_window": "NONE",
+            "force_liquidate": False,
+            "dragon_env": "UNFAVORABLE",
+            "accel_reason": None,
+        }
+        drv = {
+            "is_limit_up": True,
+            "cont_days": 2,
+            "is_one_word": False,
+            "touched_limit": True,
+            "is_bomb": False,
+        }
+        action, r = hs._decide_action(stat=stat, drv=drv, cost=5.0, close=10.0, levels=_levels())
         assert action == "HOLD" and "UNFAVORABLE" in r["text"]
 
     def test_add_only_when_unheld_and_at_or_below_buy(self):
         """ADD 要求当日**有**判据行（§7.2 第 5 条「无判据行 → HOLD」在它之前）。"""
-        drv = {"is_limit_up": True, "cont_days": 1, "is_one_word": False,
-               "touched_limit": True, "is_bomb": False}
-        action, r = hs._decide_action(stat=None, drv=drv, cost=None, close=10.0,
-                                      levels=_levels(buy_reference=10.5))
+        drv = {
+            "is_limit_up": True,
+            "cont_days": 1,
+            "is_one_word": False,
+            "touched_limit": True,
+            "is_bomb": False,
+        }
+        action, r = hs._decide_action(
+            stat=None, drv=drv, cost=None, close=10.0, levels=_levels(buy_reference=10.5)
+        )
         assert action == "ADD" and "加仓" in r["text"]
 
     def test_add_not_triggered_above_buy_reference(self):
-        drv = {"is_limit_up": True, "cont_days": 1, "is_one_word": False,
-               "touched_limit": True, "is_bomb": False}
-        action, _ = hs._decide_action(stat=None, drv=drv, cost=None, close=10.0,
-                                      levels=_levels(buy_reference=9.0))
+        drv = {
+            "is_limit_up": True,
+            "cont_days": 1,
+            "is_one_word": False,
+            "touched_limit": True,
+            "is_bomb": False,
+        }
+        action, _ = hs._decide_action(
+            stat=None, drv=drv, cost=None, close=10.0, levels=_levels(buy_reference=9.0)
+        )
         assert action == "HOLD"
 
     def test_default_hold(self):
-        action, _ = hs._decide_action(stat=None, drv=None, cost=None, close=10.0,
-                                      levels=_levels(buy_reference=9.0))
+        action, _ = hs._decide_action(
+            stat=None, drv=None, cost=None, close=10.0, levels=_levels(buy_reference=9.0)
+        )
         assert action == "HOLD"
 
 
 # ────────────────────────── §6.5 分档守恒 ──────────────────────────
 
+
 class TestLadder:
     @pytest.mark.parametrize("shares", [None, 0, 100, 1400, 13300])
     def test_ladder_sums_to_suggested_shares(self, shares):
         levels = _levels(buy_reference=15.0, target_price=27.0)
-        sizing = Sizing(suggested_shares=shares, position_pct=None,
-                        suggested_amount=None, method="risk", detail="")
+        sizing = Sizing(
+            suggested_shares=shares,
+            position_pct=None,
+            suggested_amount=None,
+            method="risk",
+            detail="",
+        )
         ladder = hs._build_ladder(levels, sizing, "main")
         buy = sum(x.shares or 0 for x in ladder if x.side == "BUY")
         sell = sum(x.shares or 0 for x in ladder if x.side == "SELL")
@@ -145,16 +206,26 @@ class TestLadder:
 
     def test_ladder_is_lot_multiple_and_prices_ordered(self):
         levels = _levels(buy_reference=15.0, target_price=27.0)
-        sizing = Sizing(suggested_shares=1400, position_pct=None,
-                        suggested_amount=None, method="risk", detail="")
+        sizing = Sizing(
+            suggested_shares=1400,
+            position_pct=None,
+            suggested_amount=None,
+            method="risk",
+            detail="",
+        )
         ladder = hs._build_ladder(levels, sizing, "main")
         assert [x.price for x in ladder if x.side == "BUY"] == [15.0, 14.55, 14.1]
         assert all((x.shares or 0) % 100 == 0 for x in ladder)
 
     def test_star_lot_is_200(self):
         levels = _levels(buy_reference=10.0)
-        sizing = Sizing(suggested_shares=1000, position_pct=None,
-                        suggested_amount=None, method="risk", detail="")
+        sizing = Sizing(
+            suggested_shares=1000,
+            position_pct=None,
+            suggested_amount=None,
+            method="risk",
+            detail="",
+        )
         ladder = hs._build_ladder(levels, sizing, "star")
         assert all((x.shares or 0) % 200 == 0 for x in ladder)
 
@@ -172,15 +243,19 @@ class TestLadder:
         assert buys == sorted(buys, reverse=True)
         assert buys[0] == pytest.approx(15.0)
         assert sells == sorted(sells)
-        assert d.ladder[0].side == "BUY"          # 买档整体在卖档之前
+        assert d.ladder[0].side == "BUY"  # 买档整体在卖档之前
 
     def test_no_levels_no_ladder(self):
-        ladder = hs._build_ladder(_levels(buy_reference=None, target_price=None),
-                                  Sizing(None, None, None, "none", ""), "main")
+        ladder = hs._build_ladder(
+            _levels(buy_reference=None, target_price=None),
+            Sizing(None, None, None, "none", ""),
+            "main",
+        )
         assert ladder == ()
 
 
 # ────────────────────────── decide 的降级与纪律 ──────────────────────────
+
 
 class TestDecide:
     def test_no_bar_returns_hold_ok_false_and_never_persists(self, io):
@@ -206,8 +281,9 @@ class TestDecide:
         assert any("未给总资金" in r["text"] for r in d.reasons)
 
     def test_use_cpt_false_never_calls_cpt(self, monkeypatch, io):
-        monkeypatch.setattr(hs.cpt_client, "cpt_enabled",
-                            lambda: pytest.fail("use_cpt=False 不该问 CPT"))
+        monkeypatch.setattr(
+            hs.cpt_client, "cpt_enabled", lambda: pytest.fail("use_cpt=False 不该问 CPT")
+        )
         io["levels"] = _levels()
         assert hs.decide("601811", use_cpt=False, persist=False).ok
 
@@ -225,8 +301,9 @@ class TestDecide:
         monkeypatch.setattr(hs.cpt_client, "data_quality_note", lambda s: None)
         monkeypatch.setattr(hs.cpt_client, "snapshot_overlays", lambda s: {"bis": []})
         monkeypatch.setattr(hs.cpt_client, "recommendation_enabled", lambda: True)
-        monkeypatch.setattr(hs.cpt_client, "fetch_recommendation",
-                            lambda code, **kw: {"price_ratio": None})
+        monkeypatch.setattr(
+            hs.cpt_client, "fetch_recommendation", lambda code, **kw: {"price_ratio": None}
+        )
         monkeypatch.setattr(hs.cpt_client, "price_ratio_of", lambda r: None)
         monkeypatch.setattr(hs.cpt_client, "recommendation_view", lambda r: {"action": "hold"})
         d = hs.decide("601811", persist=False)
@@ -234,6 +311,7 @@ class TestDecide:
 
     def test_cost_from_position_when_not_given(self, io):
         from emotion_core.domain.holding import Holding
+
         io["pos"] = Holding(code="601811", cost=8.0, shares=1000, entry_date=D)
         d = hs.decide("601811", persist=False)
         assert d.inputs["cost"] == 8.0 and d.inputs["shares"] == 1000
@@ -254,20 +332,40 @@ class TestDecide:
 
     def test_analyze_holdings_is_read_only(self, monkeypatch, io):
         from emotion_core.domain.holding import Holding
-        monkeypatch.setattr(hs.holding_store, "open_holdings",
-                            lambda: [Holding(code="601811", cost=8.0, shares=100)])
+
+        monkeypatch.setattr(
+            hs.holding_store,
+            "open_holdings",
+            lambda: [Holding(code="601811", cost=8.0, shares=100)],
+        )
         out = hs.analyze_holdings()
         assert len(out) == 1 and io["writes"] == []
 
 
 # ────────────────────────── payload / 渲染 ──────────────────────────
 
+
 class TestPayload:
     def test_payload_contract_keys(self, io):
         p = hs.to_payload(hs.decide("601811", persist=False))
-        assert set(p) >= {"ok", "trade_date", "code", "name", "board", "holding",
-                          "action", "action_label", "ladder", "stop", "target",
-                          "sizing", "reasons", "cpt", "facts", "disclaimer"}
+        assert set(p) >= {
+            "ok",
+            "trade_date",
+            "code",
+            "name",
+            "board",
+            "holding",
+            "action",
+            "action_label",
+            "ladder",
+            "stop",
+            "target",
+            "sizing",
+            "reasons",
+            "cpt",
+            "facts",
+            "disclaimer",
+        }
         assert p["trade_date"] == "2026-10-13"
         assert set(p["holding"]) == {"cost", "shares", "market_price", "pnl_pct"}
         assert set(p["sizing"]) >= {"suggested_shares", "position_pct", "method", "detail"}
@@ -287,12 +385,13 @@ class TestPayload:
 
 # ────────────────────────── CLI（默认只读） ──────────────────────────
 
+
 class TestCli:
     def test_help_is_side_effect_free(self, monkeypatch):
-        monkeypatch.setattr(hs.holding_store, "open_holdings",
-                            lambda: pytest.fail("--help 不该读库"))
-        monkeypatch.setattr(hs, "_latest_trade_date",
-                            lambda: pytest.fail("--help 不该读库"))
+        monkeypatch.setattr(
+            hs.holding_store, "open_holdings", lambda: pytest.fail("--help 不该读库")
+        )
+        monkeypatch.setattr(hs, "_latest_trade_date", lambda: pytest.fail("--help 不该读库"))
         with pytest.raises(SystemExit) as e:
             hs.main(["--help"])
         assert e.value.code == 0
@@ -327,8 +426,12 @@ class TestCli:
 
     def test_all_reads_open_holdings(self, monkeypatch, io, capsys):
         from emotion_core.domain.holding import Holding
-        monkeypatch.setattr(hs.holding_store, "open_holdings",
-                            lambda: [Holding(code="601811", cost=8.0, shares=100)])
+
+        monkeypatch.setattr(
+            hs.holding_store,
+            "open_holdings",
+            lambda: [Holding(code="601811", cost=8.0, shares=100)],
+        )
         assert hs.main(["--all", "--json"]) == 0
         assert io["writes"] == []
 
@@ -337,8 +440,15 @@ class TestNoConfigLeak:
     def test_constants_are_not_in_config(self):
         """`CONFIG` 参与 `config_hash()`：持仓决策的阈值一个都不得进 CONFIG。"""
         fields = set(CONFIG.__dataclass_fields__)
-        for name in ("RISK_PCT", "LIQ_PCT", "MAX_POSITION_PCT", "BUY_LADDER",
-                     "SELL_LADDER", "RISK_PCT", "FALLBACK_STOP_PCT"):
+        for name in (
+            "RISK_PCT",
+            "LIQ_PCT",
+            "MAX_POSITION_PCT",
+            "BUY_LADDER",
+            "SELL_LADDER",
+            "RISK_PCT",
+            "FALLBACK_STOP_PCT",
+        ):
             assert name not in fields
         assert hs.RISK_PCT == 0.01 and hs.LIQ_PCT == 0.01 and hs.MAX_POSITION_PCT == 0.30
         assert hs.BUY_LADDER == ((1.00, 0.40), (0.97, 0.35), (0.94, 0.25))
@@ -347,18 +457,19 @@ class TestNoConfigLeak:
 
 # ─────────────────────── R4 sizing 参数化（docs/18 §7.3/§7.4） ───────────────────────
 
+
 class TestResolveSizingParams:
     """`_resolve_sizing_params`：合法 → 原值；越界 → 回落默认 + 原因。"""
 
     def test_valid_params_pass_through(self):
         resolved, problems = hs._resolve_sizing_params(
-            {"risk_pct": 0.02, "liq_pct": 0.01, "max_position_pct": 0.5})
+            {"risk_pct": 0.02, "liq_pct": 0.01, "max_position_pct": 0.5}
+        )
         assert resolved == {"risk_pct": 0.02, "liq_pct": 0.01, "max_position_pct": 0.5}
         assert problems == []
 
     def test_out_of_bounds_falls_back(self):
-        resolved, problems = hs._resolve_sizing_params(
-            {"risk_pct": 0.99, "liq_pct": 0.01})
+        resolved, problems = hs._resolve_sizing_params({"risk_pct": 0.99, "liq_pct": 0.01})
         assert "risk_pct" not in resolved
         assert resolved["liq_pct"] == 0.01
         assert len(problems) == 1 and "risk_pct=0.99" in problems[0]
@@ -382,20 +493,42 @@ class TestDecideSizingParams:
     """`decide` 传 `sizing_params` 后落进 `inputs` 并参与取小。"""
 
     def test_custom_risk_pct_reaches_plan_shares(self, io):
-        io["levels"] = Levels(buy_reference=15.0, stop_price=14.0,
-                              target_price=27.0, basis="cpt_structure", detail="d")
-        d = hs.decide("601811", capital=1_000_000, cost=21.5, shares=1000,
-                      sizing_params={"risk_pct": 0.02}, persist=False)
+        io["levels"] = Levels(
+            buy_reference=15.0,
+            stop_price=14.0,
+            target_price=27.0,
+            basis="cpt_structure",
+            detail="d",
+        )
+        d = hs.decide(
+            "601811",
+            capital=1_000_000,
+            cost=21.5,
+            shares=1000,
+            sizing_params={"risk_pct": 0.02},
+            persist=False,
+        )
         # risk=1_000_000×2%/(15−14)=20_000 ; liq=2e8×1%/15≈1_333_333 ; maxpos=20_000
         # 取小 = 20_000
         assert d.sizing.suggested_shares == 20_000
         assert d.inputs.get("sizing_params") == {"risk_pct": 0.02}
 
     def test_out_of_bounds_recorded_in_reasons(self, io):
-        io["levels"] = Levels(buy_reference=15.0, stop_price=14.0,
-                              target_price=27.0, basis="cpt_structure", detail="d")
-        d = hs.decide("601811", capital=1_000_000, cost=21.5, shares=1000,
-                      sizing_params={"risk_pct": 0.99}, persist=False)
+        io["levels"] = Levels(
+            buy_reference=15.0,
+            stop_price=14.0,
+            target_price=27.0,
+            basis="cpt_structure",
+            detail="d",
+        )
+        d = hs.decide(
+            "601811",
+            capital=1_000_000,
+            cost=21.5,
+            shares=1000,
+            sizing_params={"risk_pct": 0.99},
+            persist=False,
+        )
         ignored = [r for r in d.reasons if r["kind"] == "sizing_param_ignored"]
         assert len(ignored) == 1 and "risk_pct=0.99" in ignored[0]["text"]
         # 回落默认 1% → risk=10_000 ; maxpos=20_000 ; liq 很大 → 10_000
@@ -403,11 +536,23 @@ class TestDecideSizingParams:
 
     def test_ensure_factors_flagged_in_facts(self, io):
         """`ensure_factors=True` → `facts.cpt_ensure_used=True`。"""
-        io["levels"] = Levels(buy_reference=15.0, stop_price=14.0,
-                              target_price=27.0, basis="cpt_structure", detail="d")
+        io["levels"] = Levels(
+            buy_reference=15.0,
+            stop_price=14.0,
+            target_price=27.0,
+            basis="cpt_structure",
+            detail="d",
+        )
         io["basic"]["is_st"] = False
-        d = hs.decide("601811", capital=1_000_000, cost=21.5, shares=1000,
-                      use_cpt=False, ensure_factors=True, persist=False)
+        d = hs.decide(
+            "601811",
+            capital=1_000_000,
+            cost=21.5,
+            shares=1000,
+            use_cpt=False,
+            ensure_factors=True,
+            persist=False,
+        )
         # use_cpt=False 时 CPT 调用被跳过，ensure_factors 不会触发 fetch
         # 但 cpt_ensure_used 只记录「是否意图确保」，实际调用受 use_cpt 控制
         assert d.facts.get("cpt_ensure_used") is False  # use_cpt=False → 不调
@@ -416,6 +561,7 @@ class TestDecideSizingParams:
 # ── R4 CLI 扩展（sizing 参数 / user / ensure_factors）──────────────────────
 
 # ── R4 CLI 扩展（sizing 参数 / user / ensure_factors）──────────────────────
+
 
 class TestCliR4:
     """CLI 新增参数：--risk-pct / --liq-pct / --max-position-pct / --user / --ensure-factors。"""
@@ -426,10 +572,18 @@ class TestCliR4:
             "trade_date": D,
             "basic": {"name": "测试股", "is_st": False, "float_shares": 1e9, "in_market": True},
             "bar": {"close": 10.0, "amount": 2e8},
-            "drv": None, "stat": None, "pos": None,
-            "writes": [], "cpt_calls": 0,
-            "levels": hs.Levels(buy_reference=15.0, stop_price=14.0,
-                                target_price=27.0, basis="cpt_structure", detail="d"),
+            "drv": None,
+            "stat": None,
+            "pos": None,
+            "writes": [],
+            "cpt_calls": 0,
+            "levels": hs.Levels(
+                buy_reference=15.0,
+                stop_price=14.0,
+                target_price=27.0,
+                basis="cpt_structure",
+                detail="d",
+            ),
         }
         monkeypatch.setattr(hs, "_latest_trade_date", lambda: box["trade_date"])
         monkeypatch.setattr(hs, "_basic", lambda code: box["basic"])
@@ -437,19 +591,20 @@ class TestCliR4:
         monkeypatch.setattr(hs, "_derived", lambda code, d: box["drv"])
         monkeypatch.setattr(hs, "_market", lambda d: box["stat"])
         monkeypatch.setattr(hs.holding_store, "holding_for", lambda code: box["pos"])
-        monkeypatch.setattr(hs.holding_store, "upsert_decision",
-                            lambda d: (box["writes"].append(d), 1)[1])
+        monkeypatch.setattr(
+            hs.holding_store, "upsert_decision", lambda d: (box["writes"].append(d), 1)[1]
+        )
         monkeypatch.setattr(hs.cpt_client, "cpt_enabled", lambda: False)
 
         def _structure(overlays, price_ratio, *, close):
             return box["levels"]
+
         monkeypatch.setattr(hs, "structure_levels", _structure)
         return box
 
     def test_risk_pct_passes_through(self, monkeypatch):
         self._stub_io(monkeypatch)
-        rc = hs.main(["--code", "601811", "--risk-pct", "0.02",
-                      "--capital", "1000000", "--json"])
+        rc = hs.main(["--code", "601811", "--risk-pct", "0.02", "--capital", "1000000", "--json"])
         assert rc == 0
 
     def test_risk_pct_out_of_bounds_errors(self, monkeypatch):

@@ -4,6 +4,7 @@
 1. **结构位算式与 CPT `track_points.py` 对齐**（回看窗口、方向过滤、三个 buffer）；
 2. **`price_ratio` 无效时绝不用 adj 域的数当 raw**（把 1258 当 8886 是最贵的错）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -47,36 +48,36 @@ class TestStructureLevels:
         """只有最后 2 个中枢参与；更早的 0.5 若被算进来，买点会变成 0.51。"""
         ov = _ov(zs=[(0.5, 0.5), (0.5, 0.5), (100.0, 300.0), (200.0, 400.0)])
         lvl = lv.structure_levels(ov, 1.0, close=23.0)
-        assert lvl.buy_reference == pytest.approx(102.0)     # min(100,200)×1.02
-        assert lvl.sell_reference == pytest.approx(388.0)    # max(300,400)×0.97
+        assert lvl.buy_reference == pytest.approx(102.0)  # min(100,200)×1.02
+        assert lvl.sell_reference == pytest.approx(388.0)  # max(300,400)×0.97
 
     def test_bi_lookback_is_three(self):
         ov = _ov(downs=[1.0, 2.0, 3.0, 4.0])
         lvl = lv.structure_levels(ov, 1.0, close=23.0)
-        assert lvl.buy_reference == pytest.approx(2.0 * 1.02)   # last 3 = [2,3,4]
+        assert lvl.buy_reference == pytest.approx(2.0 * 1.02)  # last 3 = [2,3,4]
 
     def test_bi_direction_filters_which_side(self):
         """`direction == +1` 的 high 只能进卖侧，不能污染买点。"""
         ov = _ov(downs=[10.0, 20.0], ups=[999.0])
         lvl = lv.structure_levels(ov, 1.0, close=23.0)
-        assert lvl.buy_reference == pytest.approx(10.2)         # min(10,20)×1.02
+        assert lvl.buy_reference == pytest.approx(10.2)  # min(10,20)×1.02
         assert lvl.sell_reference == pytest.approx(999.0 * 0.97)
 
     def test_buffers_are_exact(self):
         ov = _ov(zs=[(100.0, 100.0)])
         lvl = lv.structure_levels(ov, 1.0, close=23.0)
-        assert lvl.buy_reference == pytest.approx(102.0)        # ×1.02
-        assert lvl.sell_reference == pytest.approx(97.0)        # ×0.97
-        assert lvl.stop_price == pytest.approx(96.9)            # 102 ×0.95
+        assert lvl.buy_reference == pytest.approx(102.0)  # ×1.02
+        assert lvl.sell_reference == pytest.approx(97.0)  # ×0.97
+        assert lvl.stop_price == pytest.approx(96.9)  # 102 ×0.95
 
 
 class TestPercentFallback:
     def test_ratio_none_falls_back(self):
         lvl = lv.structure_levels(_ov(zs=[(100.0, 120.0)]), None, close=100.0)
         assert lvl.basis == "pct_fallback"
-        assert lvl.buy_reference == pytest.approx(97.0)         # −3%
-        assert lvl.stop_price == pytest.approx(92.0)            # −8%
-        assert lvl.target_price == pytest.approx(105.0)         # +5%
+        assert lvl.buy_reference == pytest.approx(97.0)  # −3%
+        assert lvl.stop_price == pytest.approx(92.0)  # −8%
+        assert lvl.target_price == pytest.approx(105.0)  # +5%
         assert "price_ratio" in lvl.detail
 
     @pytest.mark.parametrize("bad", [None, 0, -1.0, float("nan"), "abc"])
@@ -109,7 +110,7 @@ class TestAdjDomainGuard:
         lvl = lv.structure_levels(ov, None, close=100.0)
         assert lvl.basis == "pct_fallback"
         assert lvl.buy_reference == pytest.approx(97.0)
-        assert lvl.buy_reference < 200          # 绝不在 adj 量级
+        assert lvl.buy_reference < 200  # 绝不在 adj 量级
 
     def test_ratio_converts_adj_to_raw(self):
         """同一份 adj overlays，ratio 不同 → raw 结果随之缩放（证明确实除了）。"""
@@ -160,9 +161,11 @@ class TestConstantsMatchCpt:
 
 class TestConstantsMatchCptLive:
     """从 CPT 仓源码 import 真实常量，防两侧漂移（R4 S6）。"""
+
     @pytest.fixture(autouse=True)
     def _add_cpt_path(self):
         import os
+
         cpt_path = "/home/ubuntu/DSH/Chan_Pattern_Trader"
         if os.path.isdir(cpt_path) and cpt_path not in sys.path:
             sys.path.insert(0, cpt_path)

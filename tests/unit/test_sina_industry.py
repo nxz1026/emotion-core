@@ -1,4 +1,5 @@
 """新浪行业分类源：GBK + JS 变量解析、分页、跨节点去重。全程不联网。"""
+
 from __future__ import annotations
 
 from emotion_core.data.providers import sina_industry as si
@@ -18,9 +19,11 @@ def _hy_bytes(payload: str) -> bytes:
 
 
 def test_fetch_industry_nodes_parses_gbk_and_drops_non_industry(monkeypatch):
-    payload = ('{"new_blhy":"new_blhy,玻璃行业,19,15.57,-0.33,sz300093",'
-               '"new_cbzz":"new_cbzz,船舶制造,8,14.54",'
-               '"new_cx":"new_cx,次新股,161,2.0"}')
+    payload = (
+        '{"new_blhy":"new_blhy,玻璃行业,19,15.57,-0.33,sz300093",'
+        '"new_cbzz":"new_cbzz,船舶制造,8,14.54",'
+        '"new_cx":"new_cx,次新股,161,2.0"}'
+    )
     monkeypatch.setattr(si.requests, "get", lambda *a, **k: _Resp(_hy_bytes(payload)))
 
     assert si.fetch_industry_nodes() == [
@@ -56,20 +59,20 @@ def test_fetch_industry_members_pages_until_short_page(monkeypatch):
 
 def test_fetch_industry_members_skips_bad_codes(monkeypatch):
     monkeypatch.setattr(
-        si, "fetch_json_list",
+        si,
+        "fetch_json_list",
         lambda *a, **k: [{"code": "600519"}, {"code": "bad"}, {"code": ""}, {}],
     )
     assert si.fetch_industry_members("new_blhy") == ["600519"]
 
 
 def test_fetch_industry_map_keeps_first_node_on_overlap(monkeypatch):
-    monkeypatch.setattr(si, "fetch_industry_nodes",
-                        lambda: [("a", "行业A", 2), ("b", "行业B", 1)])
+    monkeypatch.setattr(si, "fetch_industry_nodes", lambda: [("a", "行业A", 2), ("b", "行业B", 1)])
     members = {"a": ["600000", "600001"], "b": ["600001", "000001"]}
     monkeypatch.setattr(si, "fetch_industry_members", lambda node, **k: members[node])
 
     assert si.fetch_industry_map() == {
         "600000": "行业A",
-        "600001": "行业A",      # 跨节点重复 → 先到先得，不被 行业B 覆盖
+        "600001": "行业A",  # 跨节点重复 → 先到先得，不被 行业B 覆盖
         "000001": "行业B",
     }

@@ -2,6 +2,7 @@
 
 纯函数穷举边界：不连库、不发请求。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -37,15 +38,14 @@ class TestThreeConstraintsTakeMin:
 
 class TestStarBoardLot:
     def test_lot_is_200(self):
-        s = sz.plan_shares(capital=1_000_000, entry=20.0, stop=18.5,
-                           amount=1e12, board="star")
+        s = sz.plan_shares(capital=1_000_000, entry=20.0, stop=18.5, amount=1e12, board="star")
         # risk =1_000_000×1%/1.5=6_666.67 → //200×200 = 6_600
         assert s.suggested_shares == 6_600
         assert "每手 200 股" in s.detail
 
     @pytest.mark.parametrize(
-        ("board", "lot"), [("main", 100), ("star", 200), ("kcb", 200), ("688", 200),
-                           ("", 100), ("sh_main", 100)]
+        ("board", "lot"),
+        [("main", 100), ("star", 200), ("kcb", 200), ("688", 200), ("", 100), ("sh_main", 100)],
     )
     def test_lot_size(self, board, lot):
         assert sz.lot_size(board) == lot
@@ -92,7 +92,7 @@ class TestDroppedConstraints:
     def test_bad_amount_drops_liquidity(self, bad):
         s = sz.plan_shares(capital=1_000_000, entry=20.0, stop=18.0, amount=bad)
         assert "liq" not in s.method
-        assert s.suggested_shares == 5_000          # risk 5_000 < maxpos 15_000
+        assert s.suggested_shares == 5_000  # risk 5_000 < maxpos 15_000
 
     def test_only_maxpos_available_gives_no_shares(self):
         """只剩单票上限 → 它是「上限」不是「建议」，不给股数（上限只写进 detail）。"""
@@ -144,8 +144,12 @@ class TestMethodVocabulary:
         ):
             seen.add(sz.plan_shares(capital=c, entry=20.0, stop=s, amount=a).method)
         assert seen == {
-            "liquidity_only", "risk_only_pct", "maxpos_only",
-            "liq+maxpos", "risk+maxpos", "risk+liq+maxpos",
+            "liquidity_only",
+            "risk_only_pct",
+            "maxpos_only",
+            "liq+maxpos",
+            "risk+maxpos",
+            "risk+liq+maxpos",
         }
 
 
@@ -160,8 +164,13 @@ class TestConstantsStayOutOfConfig:
         """
         from emotion_core.utils import config
 
-        for name in ("RISK_PCT", "LIQ_PCT", "MAX_POSITION_PCT",
-                     "FALLBACK_BUY_PCT", "FALLBACK_STOP_PCT"):
+        for name in (
+            "RISK_PCT",
+            "LIQ_PCT",
+            "MAX_POSITION_PCT",
+            "FALLBACK_BUY_PCT",
+            "FALLBACK_STOP_PCT",
+        ):
             assert not hasattr(config.CONFIG, name), f"{name} 不该进 CONFIG"
 
 
@@ -178,13 +187,21 @@ class TestSizingBounds:
     def test_plan_shares_accepts_custom_pct(self):
         # risk_pct=2% → risk=1_000_000×2%/(20−18)=10_000 ; maxpos=15_000 ; liq 很大
         s = sz.plan_shares(
-            capital=1_000_000, entry=20.0, stop=18.0, amount=3e8, risk_pct=0.02,
+            capital=1_000_000,
+            entry=20.0,
+            stop=18.0,
+            amount=3e8,
+            risk_pct=0.02,
         )
         assert s.suggested_shares == 10_000
 
     def test_plan_shares_board_arg_unchanged(self):
         # 已有调用方零改动：board 仍按位置参数工作
         s = sz.plan_shares(
-            capital=1_000_000, entry=20.0, stop=18.0, amount=1_000_000, board="star",
+            capital=1_000_000,
+            entry=20.0,
+            stop=18.0,
+            amount=1_000_000,
+            board="star",
         )
         assert s.suggested_shares == 400  # liq 获胜，lot=200 → floor(500, 200) = 400

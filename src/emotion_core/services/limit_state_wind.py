@@ -25,6 +25,7 @@ Wind 侧能力（2026-10-14 实测 `stock_data.search_stocks`）
 
 只读/只写口径：本模块不写 `derived_bar`（那是生产判定），只写参考名单 + 台账。
 """
+
 from __future__ import annotations
 
 import json
@@ -70,6 +71,7 @@ STATUS_ERROR = "error"
 @dataclass
 class LimitFetchResult:
     """单日单方向的拉取结果。"""
+
     day: date
     direction: str
     codes: list[str] = field(default_factory=list)
@@ -103,8 +105,9 @@ def to_local_code(wind_code: str) -> str:
     return text.split(".", 1)[0] if text else ""
 
 
-def build_question(day: date, direction: str, lo: float | None = None,
-                   hi: float | None = None) -> str:
+def build_question(
+    day: date, direction: str, lo: float | None = None, hi: float | None = None
+) -> str:
     """拼 Wind 自然语言问句（``lo``/``hi`` 为总市值上下界，单位亿元，None = 不设）。"""
     word = LIMIT_WORD[direction]
     base = f"筛选{day.isoformat()}{word}的A股股票"
@@ -114,8 +117,10 @@ def build_question(day: date, direction: str, lo: float | None = None,
         # 实测「总市值在 X 亿元到 Y 亿元之间」Wind 会当成没结果（回 '没找到数据'），
         # 「（大于等于 X 且）小于等于 Y」才认；闭合边界让相邻片在切点重复，
         # 由 fetch_day 的并集去重吸收，宁可重复不可漏。
-        return (f"筛选{day.isoformat()}{word}且总市值大于等于{lo:.2f}亿元"
-                f"且总市值小于等于{hi:.2f}亿元的A股股票")
+        return (
+            f"筛选{day.isoformat()}{word}且总市值大于等于{lo:.2f}亿元"
+            f"且总市值小于等于{hi:.2f}亿元的A股股票"
+        )
     if lo is not None:
         return f"筛选{day.isoformat()}{word}且总市值大于{lo:.2f}亿元的A股股票"
     return f"筛选{day.isoformat()}{word}且总市值小于等于{hi:.2f}亿元的A股股票"
@@ -130,9 +135,14 @@ def _find_table(payload: Any) -> dict | None:
             return None
     if isinstance(payload, dict):
         inner = payload.get("data")
-        if (isinstance(inner, dict) and isinstance(inner.get("data"), list)
-                and inner["data"] and isinstance(inner["data"][0], dict)
-                and "columns" in inner["data"][0] and "rows" in inner["data"][0]):
+        if (
+            isinstance(inner, dict)
+            and isinstance(inner.get("data"), list)
+            and inner["data"]
+            and isinstance(inner["data"][0], dict)
+            and "columns" in inner["data"][0]
+            and "rows" in inner["data"][0]
+        ):
             return inner["data"][0]
         for value in payload.values():
             got = _find_table(value)
@@ -198,8 +208,7 @@ def _window_contains(caps: list[float], lo: float | None, hi: float | None) -> b
     return any((lo is None or cap > lo) and (hi is None or cap < hi) for cap in caps)
 
 
-def split_point(lo: float | None, hi: float | None,
-                values: list[float]) -> float | None:
+def split_point(lo: float | None, hi: float | None, values: list[float]) -> float | None:
     """触顶切片点：按**观测到的**市值区间取对数中点（无区分度 → None）。
 
     取对数中点是因为 A 股总市值跨 3 个数量级，等比切分才能把「千亿大盘」
@@ -229,9 +238,13 @@ def split_point(lo: float | None, hi: float | None,
     return mid if a < mid < b else None
 
 
-def fetch_day(client: WindClient, day: date, direction: str = "up",
-              max_calls: int | None = None, sleep_sec: float = 0.0,
-              ) -> LimitFetchResult:
+def fetch_day(
+    client: WindClient,
+    day: date,
+    direction: str = "up",
+    max_calls: int | None = None,
+    sleep_sec: float = 0.0,
+) -> LimitFetchResult:
     """拉取某日某方向的涨跌停名单（触顶则按市值二分递归）。
 
     Args:
@@ -261,8 +274,9 @@ def fetch_day(client: WindClient, day: date, direction: str = "up",
             call = client.call(SERVER_TYPE, TOOL_NAME, {"question": question})
             result.calls += 1
             if getattr(call, "ok", True) is False:
-                result.error = (f"Wind 调用失败 code={getattr(call, 'code', '')} "
-                                f"{getattr(call, 'message', '')}")[:200]
+                result.error = (
+                    f"Wind 调用失败 code={getattr(call, 'code', '')} {getattr(call, 'message', '')}"
+                )[:200]
                 break
             if not has_table(call.data):
                 # Wind 对「真的没有匹配」与「问句没解析出来」回同一句 '没找到数据'，形状
@@ -312,9 +326,7 @@ def fetch_day(client: WindClient, day: date, direction: str = "up",
 def self_limit_codes(day: date, direction: str = "up") -> set[str]:
     """本库自算口径的当日名单（``derived_bar``，只读）。"""
     column = "is_limit_up" if direction == "up" else "is_limit_down"
-    df = query_df(
-        f"SELECT code FROM derived_bar WHERE date = %s AND {column} IS TRUE",
-        (day,))
+    df = query_df(f"SELECT code FROM derived_bar WHERE date = %s AND {column} IS TRUE", (day,))
     return {str(c) for c in df["code"]}
 
 
@@ -334,21 +346,23 @@ def persist_day(result: LimitFetchResult) -> dict:
     }
     with transaction() as conn:
         prev = conn.execute(
-            "SELECT retries FROM ref_limit_state_run"
-            " WHERE date = %s AND direction = %s",
-            (result.day, result.direction)).fetchone()
+            "SELECT retries FROM ref_limit_state_run WHERE date = %s AND direction = %s",
+            (result.day, result.direction),
+        ).fetchone()
         # retries = 该 (日期,方向) 的重抓次数：首次落库 0，之后每重写一次 +1。
         retries = (int(prev[0]) + 1) if prev else 0
         if not result.error:
             conn.execute(
                 "DELETE FROM ref_limit_state WHERE date = %s AND direction = %s",
-                (result.day, result.direction))
+                (result.day, result.direction),
+            )
             if result.codes:
                 with conn.cursor() as cur:
                     cur.executemany(
                         "INSERT INTO ref_limit_state (date, code, direction, source)"
                         " VALUES (%s, %s, %s, 'wind') ON CONFLICT DO NOTHING",
-                        [(result.day, code, result.direction) for code in result.codes])
+                        [(result.day, code, result.direction) for code in result.codes],
+                    )
         conn.execute(
             "INSERT INTO ref_limit_state_run (date, direction, status, n_wind,"
             " n_self, n_only_wind, n_only_self, calls, retries, note)"
@@ -358,8 +372,17 @@ def persist_day(result: LimitFetchResult) -> dict:
             " n_only_wind = EXCLUDED.n_only_wind, n_only_self = EXCLUDED.n_only_self,"
             " calls = EXCLUDED.calls, retries = EXCLUDED.retries,"
             " note = EXCLUDED.note, fetched_at = now()",
-            (result.day, result.direction, result.status, counts["n_wind"],
-             counts["n_self"], counts["n_only_wind"], counts["n_only_self"],
-             result.calls, retries, result.error or None))
-    return {**counts, "status": result.status, "calls": result.calls,
-            "retries": retries}
+            (
+                result.day,
+                result.direction,
+                result.status,
+                counts["n_wind"],
+                counts["n_self"],
+                counts["n_only_wind"],
+                counts["n_only_self"],
+                result.calls,
+                retries,
+                result.error or None,
+            ),
+        )
+    return {**counts, "status": result.status, "calls": result.calls, "retries": retries}

@@ -2,6 +2,7 @@
 
 脚本不在包里，故按路径加载；只替掉它的 `query_df`，不碰网络与库。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -14,8 +15,7 @@ import pytest
 
 from emotion_core.services import limit_state_wind as lsw
 
-_SCRIPT = (Path(__file__).resolve().parents[2] / "scripts"
-           / "backfill_limit_state_wind.py")
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "backfill_limit_state_wind.py"
 
 
 def _load():
@@ -59,8 +59,8 @@ class TestTargetDates:
         mod.target_dates(D1, D3, "up", max_retries=3)
         sql, params = fake_query.calls[-1]
         assert "retries >= %s" in sql
-        assert params[1] == lsw.STATUS_OK                     # ok 永不重抓
-        assert set(params[2]) == set(mod.RETRY_STATUSES)      # truncated + suspect
+        assert params[1] == lsw.STATUS_OK  # ok 永不重抓
+        assert set(params[2]) == set(mod.RETRY_STATUSES)  # truncated + suspect
         assert params[3] == 3
         assert params[0] == "up"
 

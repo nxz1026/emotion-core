@@ -14,6 +14,7 @@
     PYTHONPATH=src python -m emotion_core.data.fill_list_date --only-missing
     PYTHONPATH=src python -m emotion_core.data.fill_list_date --dry-run
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +33,7 @@ _CHUNK = 1000
 
 def _chunks[T](items: Sequence[T], size: int) -> Iterator[Sequence[T]]:
     for i in range(0, len(items), size):
-        yield items[i:i + size]
+        yield items[i : i + size]
 
 
 def upsert_list_date(rows: Sequence[tuple[str, date]]) -> int:
@@ -51,8 +52,7 @@ def upsert_list_date(rows: Sequence[tuple[str, date]]) -> int:
     total = 0
     for chunk in _chunks(rows, _CHUNK):
         values = sql.SQL(", ").join(
-            sql.SQL("({}, {})").format(sql.Literal(code), sql.Literal(d))
-            for code, d in chunk
+            sql.SQL("({}, {})").format(sql.Literal(code), sql.Literal(d)) for code, d in chunk
         )
         with transaction() as conn:
             with conn.cursor() as cur:
@@ -75,8 +75,12 @@ def all_codes() -> list[str]:
 
 def missing_codes() -> list[str]:
     """`list_date` 仍为 NULL 的股票代码（升序）。"""
-    return [str(c) for c in
-            query_df("SELECT code FROM stock_basic WHERE list_date IS NULL ORDER BY code")["code"]]
+    return [
+        str(c)
+        for c in query_df("SELECT code FROM stock_basic WHERE list_date IS NULL ORDER BY code")[
+            "code"
+        ]
+    ]
 
 
 def backfill(*, only_missing: bool = False, dry_run: bool = False) -> int:
@@ -85,8 +89,13 @@ def backfill(*, only_missing: bool = False, dry_run: bool = False) -> int:
     log.info("交易所列表：解析出 %d 个上市日期", len(got))
     targets = set(missing_codes() if only_missing else all_codes())
     rows = sorted((c, d) for c, d in got.items() if c in targets)
-    log.info("待写 %d 行（only_missing=%s，库内目标 %d 只，源覆盖 %d 只）",
-             len(rows), only_missing, len(targets), len(got))
+    log.info(
+        "待写 %d 行（only_missing=%s，库内目标 %d 只，源覆盖 %d 只）",
+        len(rows),
+        only_missing,
+        len(targets),
+        len(got),
+    )
     if dry_run:
         log.info("dry-run：样例 %s", rows[:3])
         return 0
@@ -95,8 +104,9 @@ def backfill(*, only_missing: bool = False, dry_run: bool = False) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="回填 stock_basic.list_date")
-    parser.add_argument("--only-missing", action="store_true",
-                        help="只补 list_date IS NULL 的（增量续跑用）")
+    parser.add_argument(
+        "--only-missing", action="store_true", help="只补 list_date IS NULL 的（增量续跑用）"
+    )
     parser.add_argument("--dry-run", action="store_true", help="只抓取不写库")
     args = parser.parse_args(argv)
 

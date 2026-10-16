@@ -17,6 +17,7 @@
 
 额度纪律：本模块只发巨潮公开 HTTP 请求，**不消耗任何 Wind 额度**。
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,6 +50,7 @@ def fetch_industry(code: str) -> str | None:
         DataError: 响应结构变化（缺 `所属行业` 列），不重试。
         FetchError: 网络/解析失败，重试 `_FETCH_RETRY` 次后仍失败则上抛。
     """
+
     def _get() -> str | None:
         try:
             df = ak.stock_profile_cninfo(symbol=code)
@@ -105,8 +107,9 @@ def fetch_industry_map(
             else:
                 failed.append(code)
             if progress_every and done % progress_every == 0:
-                log.info("巨潮行业进度 %d/%d（成功 %d，未取到 %d）",
-                         done, total, len(out), len(failed))
+                log.info(
+                    "巨潮行业进度 %d/%d（成功 %d，未取到 %d）", done, total, len(out), len(failed)
+                )
 
     if failed:
         log.warning("巨潮行业未取到 %d 只（前 5：%s）", len(failed), failed[:5])

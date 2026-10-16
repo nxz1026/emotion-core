@@ -14,6 +14,7 @@
 
 额度纪律：本模块只发新浪公开 HTTP 请求，**不消耗任何 Wind 额度**。
 """
+
 from __future__ import annotations
 
 import json
@@ -34,8 +35,10 @@ _TIME_SLEEP: float = getattr(CONFIG, "TIME_SLEEP", 0.5)
 #: 行业节点清单。是 JS 变量赋值（GBK 编码），不是 JSON 接口。
 _SINA_HY_LIST = "https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php"
 #: 行业节点成分股。与 `eastmoney.py:80` 的 `_SINA_CLIST` 同一个接口，只换 node。
-_SINA_HQ_NODE = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-                 "Market_Center.getHQNodeData")
+_SINA_HQ_NODE = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
 #: 与 `eastmoney.py:87` 的 `_SINA_HEADERS` 保持一致：缺 Referer 会被新浪拒。
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
 
@@ -62,6 +65,7 @@ def fetch_industry_nodes() -> list[tuple[str, str, int]]:
         FetchError: 网络/HTTP 失败（可重试）。
         DataError: 返回体不再是预期的对象字面量（协议变化，不重试）。
     """
+
     def _get() -> str:
         try:
             resp = requests.get(_SINA_HY_LIST, timeout=15, headers=_HEADERS)
@@ -98,8 +102,9 @@ def fetch_industry_nodes() -> list[tuple[str, str, int]]:
     return nodes
 
 
-def fetch_industry_members(node: str, page_size: int = _DEFAULT_PAGE_SIZE,
-                           max_pages: int = _DEFAULT_MAX_PAGES) -> list[str]:
+def fetch_industry_members(
+    node: str, page_size: int = _DEFAULT_PAGE_SIZE, max_pages: int = _DEFAULT_MAX_PAGES
+) -> list[str]:
     """单个行业节点的成分股代码（6 位）。
 
     `page_size` 是服务端单页上限（实测 100），不是要取的只数。
@@ -107,9 +112,12 @@ def fetch_industry_members(node: str, page_size: int = _DEFAULT_PAGE_SIZE,
     codes: list[str] = []
     for pn in range(1, max_pages + 1):
         rows = retry_fetch(
-            fetch_json_list, _SINA_HQ_NODE,
+            fetch_json_list,
+            _SINA_HQ_NODE,
             {"page": pn, "num": page_size, "sort": "symbol", "asc": 1, "node": node},
-            fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP, headers=_HEADERS,
+            fetch_retry=_FETCH_RETRY,
+            time_sleep=_TIME_SLEEP,
+            headers=_HEADERS,
         )
         if not rows:
             break

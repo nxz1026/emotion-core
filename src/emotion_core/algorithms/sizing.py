@@ -24,6 +24,7 @@ R4 参数化（docs/18 §7.3）：三参数（`risk_pct` / `liq_pct` / `max_posi
 经 ``sizing_params`` 传入；越界时 ``holding_service`` 回落默认值并在 ``reasons`` 记
 ``sizing_param_ignored``，绝不抛。
 """
+
 from __future__ import annotations
 
 from typing import Any, Final
@@ -31,8 +32,8 @@ from typing import Any, Final
 from emotion_core.domain.holding import Sizing
 
 # ── 三约束常数（模块级 Final；**绝不进 `utils/config.py`**，见 docs/17 §1.3） ──
-RISK_PCT: Final[float] = 0.01          # 单笔最大亏损占总资金
-LIQ_PCT: Final[float] = 0.01           # 不超过当日成交额的 1%
+RISK_PCT: Final[float] = 0.01  # 单笔最大亏损占总资金
+LIQ_PCT: Final[float] = 0.01  # 不超过当日成交额的 1%
 MAX_POSITION_PCT: Final[float] = 0.30  # 单票占总资金上限
 
 # ── R4 参数化合法区间（docs/18 §7.3；越界由 holding_service 回落默认） ──
@@ -44,7 +45,7 @@ SIZING_BOUNDS: Final[dict[str, tuple[float, float]]] = {
 
 # ── 每手股数（D9） ──────────────────────────────────────────────────────────
 LOT_MAIN: Final[int] = 100
-LOT_STAR: Final[int] = 200             # 科创板起购 200 股（近似，见 D9）
+LOT_STAR: Final[int] = 200  # 科创板起购 200 股（近似，见 D9）
 STAR_BOARDS: Final[tuple[str, ...]] = ("star", "kcb", "688")
 
 
@@ -96,8 +97,11 @@ def plan_shares(
     e = _num(entry)
     if e is None:
         return Sizing(
-            suggested_shares=None, position_pct=None, suggested_amount=None,
-            method="none", detail="无有效参考价 entry → 不给股数（F6 不猜）",
+            suggested_shares=None,
+            position_pct=None,
+            suggested_amount=None,
+            method="none",
+            detail="无有效参考价 entry → 不给股数（F6 不猜）",
         )
 
     c = _num(capital)
@@ -126,15 +130,19 @@ def plan_shares(
             pct = min(RISK_PCT / ((e - s) / e), MAX_POSITION_PCT)
         if pct is not None:
             return Sizing(
-                suggested_shares=None, position_pct=round(pct, 4),
-                suggested_amount=None, method="risk_only_pct",
+                suggested_shares=None,
+                position_pct=round(pct, 4),
+                suggested_amount=None,
+                method="risk_only_pct",
                 detail=(
                     f"未给总资金 → 只给比例（风险 {RISK_PCT:.0%} ÷ 止损距离 "
                     f"{(e - s) / e:.2%}，与单票上限 {MAX_POSITION_PCT:.0%} 取小）"
                 ),
             )
         return Sizing(
-            suggested_shares=None, position_pct=None, suggested_amount=None,
+            suggested_shares=None,
+            position_pct=None,
+            suggested_amount=None,
             method="liquidity_only",
             detail=(
                 "未给总资金且无有效止损（stop 缺或 ≥ entry）→ 无法按风险定仓；"
@@ -148,7 +156,9 @@ def plan_shares(
     # 否则等于凭总资金拍一个 30% 仓位，与 D1「风险 + 流动性取小」的口径不符。
     if "risk" not in cand and "liq" not in cand:
         return Sizing(
-            suggested_shares=None, position_pct=None, suggested_amount=None,
+            suggested_shares=None,
+            position_pct=None,
+            suggested_amount=None,
             method="maxpos_only",
             detail=(
                 "只有单票上限可用（无有效止损、无成交额）→ 不给建议股数；"

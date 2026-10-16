@@ -1,4 +1,5 @@
 """Wind 逐日涨跌停拉取（services.limit_state_wind）：解析、二分、预算、落库守卫。"""
+
 from __future__ import annotations
 
 import re
@@ -9,8 +10,7 @@ import pytest
 from emotion_core.services import limit_state_wind as lsw
 
 DAY = date(2025, 6, 3)
-BOUNDS_RE = re.compile(
-    r"总市值大于等于([\d.]+)亿元且总市值小于等于([\d.]+)亿元")
+BOUNDS_RE = re.compile(r"总市值大于等于([\d.]+)亿元且总市值小于等于([\d.]+)亿元")
 ABOVE_RE = re.compile(r"总市值大于([\d.]+)亿元")
 BELOW_RE = re.compile(r"总市值小于等于([\d.]+)亿元")
 
@@ -31,10 +31,16 @@ def parse_bounds(question: str) -> tuple[float | None, float | None]:
 
 def payload(pairs, cap_name="2025-06-03总市值"):
     """构造 Wind 实测回包形状：data.data[0] = {columns, rows}。"""
-    return {"data": {"data": [{
-        "columns": [{"name": "Wind代码"}, {"name": "证券简称"}, {"name": cap_name}],
-        "rows": [[f"{code}.SH", "某股", cap] for code, cap in pairs],
-    }]}}
+    return {
+        "data": {
+            "data": [
+                {
+                    "columns": [{"name": "Wind代码"}, {"name": "证券简称"}, {"name": cap_name}],
+                    "rows": [[f"{code}.SH", "某股", cap] for code, cap in pairs],
+                }
+            ]
+        }
+    }
 
 
 class FakeCall:
@@ -73,12 +79,22 @@ class TestPure:
 
     def test_parse_rows_market_cap_with_suffix_and_currency_column(self):
         """实测列名带序号后缀（`2026年8月17日总市值1`）且旁边有 `市值币种`。"""
-        raw = {"data": {"data": [{
-            "columns": [{"name": "Wind代码"}, {"name": "证券简称"},
-                        {"name": "2026年8月17日总市值1"}, {"name": "市值币种"},
-                        {"name": "2026年8月17日涨跌停状态"}],
-            "rows": [["000001.SZ", "平安银行", 2500.5, "CNY", 1]],
-        }]}}
+        raw = {
+            "data": {
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "Wind代码"},
+                            {"name": "证券简称"},
+                            {"name": "2026年8月17日总市值1"},
+                            {"name": "市值币种"},
+                            {"name": "2026年8月17日涨跌停状态"},
+                        ],
+                        "rows": [["000001.SZ", "平安银行", 2500.5, "CNY", 1]],
+                    }
+                ]
+            }
+        }
         assert lsw.parse_rows(raw) == [("000001", 2500.5)]
         assert lsw.has_table(raw) is True
 
@@ -86,8 +102,7 @@ class TestPure:
         assert lsw.has_table({"data": [{"error": "问句无法识别"}]}) is False
 
     def test_parse_rows_without_cap_column(self):
-        raw = {"data": {"data": [{"columns": [{"name": "Wind代码"}],
-                                  "rows": [["600519.SH"]]}]}}
+        raw = {"data": {"data": [{"columns": [{"name": "Wind代码"}], "rows": [["600519.SH"]]}]}}
         assert lsw.parse_rows(raw) == [("600519", None)]
 
     def test_parse_rows_garbage(self):
@@ -125,9 +140,10 @@ class TestFetchDay:
 
         def answer(question):
             lo, hi = parse_bounds(question)
-            hit = [(c, v) for c, v in universe
-                   if (lo is None or v >= lo) and (hi is None or v <= hi)]
-            return payload(hit[:lsw.ROW_CAP])
+            hit = [
+                (c, v) for c, v in universe if (lo is None or v >= lo) and (hi is None or v <= hi)
+            ]
+            return payload(hit[: lsw.ROW_CAP])
 
         client = FakeClient(answer)
         result = lsw.fetch_day(client, DAY)
@@ -183,11 +199,12 @@ class TestFetchDay:
 
         def answer(question):
             lo, hi = parse_bounds(question)
-            hit = [(c, v) for c, v in universe
-                   if (lo is None or v >= lo) and (hi is None or v <= hi)]
+            hit = [
+                (c, v) for c, v in universe if (lo is None or v >= lo) and (hi is None or v <= hi)
+            ]
             if hi is not None and hi < 50.0:
-                return "没找到数据"          # 假装问句没被解析（空区间才是合法空片）
-            return payload(hit[:lsw.ROW_CAP])
+                return "没找到数据"  # 假装问句没被解析（空区间才是合法空片）
+            return payload(hit[: lsw.ROW_CAP])
 
         result = lsw.fetch_day(FakeClient(answer), DAY)
         assert result.status == lsw.STATUS_SUSPECT
@@ -195,8 +212,7 @@ class TestFetchDay:
         assert lsw.STATUS_SUSPECT not in (lsw.STATUS_OK, lsw.STATUS_TRUNCATED)
 
     def test_suspect_outranks_truncated_in_status(self):
-        result = lsw.LimitFetchResult(day=DAY, direction="up",
-                                      suspect=True, truncated=True)
+        result = lsw.LimitFetchResult(day=DAY, direction="up", suspect=True, truncated=True)
         assert result.status == lsw.STATUS_SUSPECT
         assert result.complete is False
 
@@ -278,39 +294,40 @@ def fake_db(monkeypatch):
 
 class TestPersistDay:
     def test_writes_codes_and_ledger(self, fake_db):
-        result = lsw.LimitFetchResult(day=DAY, direction="up",
-                                      codes=["600001", "600002"], calls=2)
+        result = lsw.LimitFetchResult(day=DAY, direction="up", codes=["600001", "600002"], calls=2)
         stats = lsw.persist_day(result)
-        assert stats == {"n_wind": 2, "n_self": 1, "n_only_wind": 1,
-                         "n_only_self": 0, "status": lsw.STATUS_OK, "calls": 2,
-                         "retries": 0}
+        assert stats == {
+            "n_wind": 2,
+            "n_self": 1,
+            "n_only_wind": 1,
+            "n_only_self": 0,
+            "status": lsw.STATUS_OK,
+            "calls": 2,
+            "retries": 0,
+        }
         joined = " ".join(str(s) for s, _ in fake_db.sql)
         assert "DELETE FROM ref_limit_state" in joined
         assert "INSERT INTO ref_limit_state_run" in joined
 
     def test_first_write_has_retries_zero(self, fake_db):
         """首次落库（台账无此行）retries=0，且写进了 SQL 参数。"""
-        lsw.persist_day(lsw.LimitFetchResult(day=DAY, direction="up",
-                                             codes=["600001"], calls=1))
-        insert = [p for s, p in fake_db.sql
-                  if "INSERT INTO ref_limit_state_run" in s][0]
-        assert insert[-2] == 0                      # 倒数第二 = retries
+        lsw.persist_day(lsw.LimitFetchResult(day=DAY, direction="up", codes=["600001"], calls=1))
+        insert = [p for s, p in fake_db.sql if "INSERT INTO ref_limit_state_run" in s][0]
+        assert insert[-2] == 0  # 倒数第二 = retries
 
     def test_refetch_increments_retries(self, fake_db):
         """同一 (日期,方向) 重写一次 → retries 旧值 +1（截断/丢票的自动重试靠它计数）。"""
         fake_db.prev_retries = 2
-        stats = lsw.persist_day(lsw.LimitFetchResult(day=DAY, direction="up",
-                                                     codes=["600001"], calls=1,
-                                                     truncated=True))
+        stats = lsw.persist_day(
+            lsw.LimitFetchResult(day=DAY, direction="up", codes=["600001"], calls=1, truncated=True)
+        )
         assert stats["retries"] == 3
         assert stats["status"] == lsw.STATUS_TRUNCATED
-        insert = [p for s, p in fake_db.sql
-                  if "INSERT INTO ref_limit_state_run" in s][0]
+        insert = [p for s, p in fake_db.sql if "INSERT INTO ref_limit_state_run" in s][0]
         assert insert[-2] == 3
 
     def test_error_does_not_wipe_existing_rows(self, fake_db):
-        result = lsw.LimitFetchResult(day=DAY, direction="up", calls=1,
-                                      error="Wind 额度/限流")
+        result = lsw.LimitFetchResult(day=DAY, direction="up", calls=1, error="Wind 额度/限流")
         stats = lsw.persist_day(result)
         assert stats["status"] == lsw.STATUS_ERROR
         joined = " ".join(str(s) for s, _ in fake_db.sql)

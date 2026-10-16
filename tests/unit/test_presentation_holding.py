@@ -5,6 +5,7 @@
 **HTTP 路径恒只读**（`persist=False`，不写 `holding_decision`）与
 **参数非法 → 400 / 标的不可用 → 404**。
 """
+
 from __future__ import annotations
 
 import inspect
@@ -21,24 +22,48 @@ from emotion_core.services import holding_service as hs
 
 
 def _levels() -> Levels:
-    return Levels(buy_reference=15.029, stop_price=14.278, target_price=27.205,
-                  basis="cpt_structure", detail="结构位")
+    return Levels(
+        buy_reference=15.029,
+        stop_price=14.278,
+        target_price=27.205,
+        basis="cpt_structure",
+        detail="结构位",
+    )
 
 
 def _sizing() -> Sizing:
-    return Sizing(suggested_shares=13300, position_pct=0.1999,
-                  suggested_amount=199_900.0, method="risk+liq+maxpos", detail="取小")
+    return Sizing(
+        suggested_shares=13300,
+        position_pct=0.1999,
+        suggested_amount=199_900.0,
+        method="risk+liq+maxpos",
+        detail="取小",
+    )
 
 
 def _decision(ok: bool = True, **kw) -> Decision:
-    base = dict(code="601811", trade_date=date(2026, 10, 13), action="HOLD",
-                action_label="持有观察", market_price=21.14, pnl_pct=1.6,
-                levels=_levels(), sizing=_sizing(), ladder=(), reasons=("r1",),
-                facts={"bar_count": 119}, inputs={"cost": 21.5, "shares": 1000},
-                cpt_status="invalidated", cpt_action="hold",
-                cpt_divergence="none", cpt_price_ratio=1.061,
-                name="新华文轩", board="main", ok=ok,
-                error=None if ok else "no_bar")
+    base = dict(
+        code="601811",
+        trade_date=date(2026, 10, 13),
+        action="HOLD",
+        action_label="持有观察",
+        market_price=21.14,
+        pnl_pct=1.6,
+        levels=_levels(),
+        sizing=_sizing(),
+        ladder=(),
+        reasons=("r1",),
+        facts={"bar_count": 119},
+        inputs={"cost": 21.5, "shares": 1000},
+        cpt_status="invalidated",
+        cpt_action="hold",
+        cpt_divergence="none",
+        cpt_price_ratio=1.061,
+        name="新华文轩",
+        board="main",
+        ok=ok,
+        error=None if ok else "no_bar",
+    )
     base.update(kw)
     return Decision(**base)
 
@@ -88,8 +113,9 @@ class TestParamHelpers:
             server._opt_date(urlparse("/api/holding?as_of=2026/10/12"), "as_of")
 
     def test_opt_date_accepts_compact_iso(self):
-        assert server._opt_date(urlparse("/api/holding?as_of=20261012"),
-                                "as_of") == date(2026, 10, 12)
+        assert server._opt_date(urlparse("/api/holding?as_of=20261012"), "as_of") == date(
+            2026, 10, 12
+        )
 
 
 class TestHoldingPayload:
@@ -117,15 +143,13 @@ class TestHoldingPayload:
     def test_http_is_always_read_only(self, monkeypatch):
         """HTTP 路径必须恒 `persist=False`（落库只走 CLI --persist）。"""
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
         server.holding_payload(urlparse("/api/holding?code=601811&persist=1"))
         assert seen["persist"] is False
 
     def test_cpt_off_and_as_of_are_forwarded(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
         parsed = urlparse("/api/holding?code=601811&cpt=0&as_of=2026-10-12")
         server.holding_payload(parsed)
         assert seen["use_cpt"] is False
@@ -144,8 +168,9 @@ class TestHoldingPayload:
 
     def test_missing_code_is_forwarded_not_guessed(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update({"code": code}), _decision())[1])
+        monkeypatch.setattr(
+            hs, "decide", lambda code, **kw: (seen.update({"code": code}), _decision())[1]
+        )
         server.holding_payload(urlparse("/api/holding"))
         assert seen["code"] == ""
 
@@ -159,8 +184,9 @@ class TestHoldingsPayload:
         assert body["trade_date"] is None and body["disclaimer"]
 
     def test_items_and_trade_date(self, monkeypatch):
-        monkeypatch.setattr(hs, "analyze_holdings",
-                            lambda **kw: [_decision(), _decision(code="000001")])
+        monkeypatch.setattr(
+            hs, "analyze_holdings", lambda **kw: [_decision(), _decision(code="000001")]
+        )
         body, status = server.holdings_payload(urlparse("/api/holdings?capital=300000"))
         assert status == 200 and body["count"] == 2
         assert body["trade_date"] == "2026-10-13"
@@ -168,14 +194,12 @@ class TestHoldingsPayload:
 
     def test_capital_and_as_of_are_forwarded(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "analyze_holdings",
-                            lambda **kw: (seen.update(kw), [])[1])
+        monkeypatch.setattr(hs, "analyze_holdings", lambda **kw: (seen.update(kw), [])[1])
         server.holdings_payload(urlparse("/api/holdings?capital=300000&cpt=0"))
         assert seen["capital"] == 300_000.0 and seen["use_cpt"] is False
 
     def test_invalid_param_is_400(self, monkeypatch):
-        monkeypatch.setattr(hs, "analyze_holdings",
-                            lambda **kw: pytest.fail("不应调用服务层"))
+        monkeypatch.setattr(hs, "analyze_holdings", lambda **kw: pytest.fail("不应调用服务层"))
         body, status = server.holdings_payload(urlparse("/api/holdings?capital=x"))
         assert status == 400 and "capital" in body["error"]
 
@@ -205,8 +229,7 @@ class TestRouteWiring:
 
     def test_branches_precede_the_api_fallback(self):
         src = inspect.getsource(server.DashboardHandler.do_GET)
-        assert (src.index('"/api/holding"') <
-                src.index('parsed.path.startswith("/api/")'))
+        assert src.index('"/api/holding"') < src.index('parsed.path.startswith("/api/")')
 
     def test_unknown_api_path_is_404_not_status_fallback(self):
         """未识别的 `/api/*` 必须 404，不能再兜底成 status 载荷。
@@ -224,23 +247,20 @@ class TestRouteWiring:
 
 # ─────────────────────── R4 参数化 + 关注列表 + CPT 点位 ───────────────────────
 
+
 class TestOptPct:
     """`_opt_pct`：闭区间校验（docs/18 §7.5）。"""
 
     def test_valid_in_bounds(self):
-        assert server._opt_pct(urlparse("/x?risk_pct=0.02"), "risk_pct", 0.001,
-                               0.05) == 0.02
+        assert server._opt_pct(urlparse("/x?risk_pct=0.02"), "risk_pct", 0.001, 0.05) == 0.02
 
     def test_boundary_values(self):
-        assert server._opt_pct(urlparse("/x?risk_pct=0.001"), "risk_pct", 0.001,
-                               0.05) == 0.001
-        assert server._opt_pct(urlparse("/x?risk_pct=0.05"), "risk_pct", 0.001,
-                               0.05) == 0.05
+        assert server._opt_pct(urlparse("/x?risk_pct=0.001"), "risk_pct", 0.001, 0.05) == 0.001
+        assert server._opt_pct(urlparse("/x?risk_pct=0.05"), "risk_pct", 0.001, 0.05) == 0.05
 
     def test_none_when_missing(self):
         assert server._opt_pct(urlparse("/x"), "risk_pct", 0.001, 0.05) is None
-        assert server._opt_pct(urlparse("/x?risk_pct="), "risk_pct", 0.001,
-                               0.05) is None
+        assert server._opt_pct(urlparse("/x?risk_pct="), "risk_pct", 0.001, 0.05) is None
 
     def test_rejects_out_of_bounds(self):
         with pytest.raises(ValueError, match="risk_pct"):
@@ -267,45 +287,39 @@ class TestHoldingPayloadSizingParams:
 
     def test_sizing_params_forwarded(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
-        parsed = urlparse("/api/holding?code=601811&risk_pct=0.02&liq_pct=0.01"
-                          "&max_position_pct=0.5")
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
+        parsed = urlparse(
+            "/api/holding?code=601811&risk_pct=0.02&liq_pct=0.01&max_position_pct=0.5"
+        )
         server.holding_payload(parsed)
-        assert seen["sizing_params"] == {"risk_pct": 0.02, "liq_pct": 0.01,
-                                         "max_position_pct": 0.5}
+        assert seen["sizing_params"] == {"risk_pct": 0.02, "liq_pct": 0.01, "max_position_pct": 0.5}
 
     def test_partial_sizing_params(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
         server.holding_payload(urlparse("/api/holding?code=601811&risk_pct=0.03"))
         assert seen["sizing_params"] == {"risk_pct": 0.03}
 
     def test_no_sizing_params_when_absent(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
         server.holding_payload(urlparse("/api/holding?code=601811"))
         assert seen["sizing_params"] is None
 
     def test_out_of_bounds_raises_400(self, monkeypatch):
         monkeypatch.setattr(hs, "decide", lambda *a, **kw: pytest.fail("不应调用"))
-        body, status = server.holding_payload(
-            urlparse("/api/holding?code=601811&risk_pct=0.99"))
+        body, status = server.holding_payload(urlparse("/api/holding?code=601811&risk_pct=0.99"))
         assert status == 400 and "risk_pct" in body["error"]
 
     def test_ensure_factors_forwarded(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
         server.holding_payload(urlparse("/api/holding?code=601811&ensure_factors=1"))
         assert seen["ensure_factors"] is True
 
     def test_user_forwarded(self, monkeypatch):
         seen: dict = {}
-        monkeypatch.setattr(hs, "decide",
-                            lambda code, **kw: (seen.update(kw), _decision())[1])
+        monkeypatch.setattr(hs, "decide", lambda code, **kw: (seen.update(kw), _decision())[1])
         server.holding_payload(urlparse("/api/holding?code=601811&user=alice"))
         assert seen["cpt_user"] == "alice"
 
@@ -314,18 +328,33 @@ class TestCptPointsPayload:
     """`cpt_points_payload`：CPT 参考买卖点（恒只读）。"""
 
     def test_cpt_available(self, monkeypatch):
-        snap = {"overlays": {"bis": [{"direction": -1, "low": 16.0}],
-                               "zhongshus": [{"low": 15.5, "high": 27.0}],
-                               "fractals": [], "trend_types": []},
-                "data_quality": {"severity": "ok"}, "signal": {},
-                "runtime": {}, "config": {}}
-        rec = {"available": True, "action": "watch", "price_ratio": 1.061,
-               "signal_type": "first_buy", "divergence_status": None,
-               "headline": "结构位参考", "reason": "中枢下沿",
-               "status": "ok", "action_label": "观望", "disclaimer": "test"}
-        advice = {"suggested_points": {"buy_reference": 15.0},
-                  "human_text": "近低关注"}
+        snap = {
+            "overlays": {
+                "bis": [{"direction": -1, "low": 16.0}],
+                "zhongshus": [{"low": 15.5, "high": 27.0}],
+                "fractals": [],
+                "trend_types": [],
+            },
+            "data_quality": {"severity": "ok"},
+            "signal": {},
+            "runtime": {},
+            "config": {},
+        }
+        rec = {
+            "available": True,
+            "action": "watch",
+            "price_ratio": 1.061,
+            "signal_type": "first_buy",
+            "divergence_status": None,
+            "headline": "结构位参考",
+            "reason": "中枢下沿",
+            "status": "ok",
+            "action_label": "观望",
+            "disclaimer": "test",
+        }
+        advice = {"suggested_points": {"buy_reference": 15.0}, "human_text": "近低关注"}
         import emotion_core.services.cpt_client as cpt_mod
+
         monkeypatch.setattr(cpt_mod, "fetch_snapshot", lambda code, **kw: snap)
         monkeypatch.setattr(cpt_mod, "fetch_recommendation", lambda code, **kw: rec)
         monkeypatch.setattr(cpt_mod, "price_ratio_of", lambda r: 1.061)
@@ -343,6 +372,7 @@ class TestCptPointsPayload:
 
     def test_cpt_unavailable(self, monkeypatch):
         import emotion_core.services.cpt_client as cpt_mod
+
         monkeypatch.setattr(cpt_mod, "fetch_snapshot", lambda code, **kw: None)
         body, status = server.cpt_points_payload(urlparse("/api/cpt/points?code=601811"))
         assert status == 200 and body["ok"] is True
@@ -350,6 +380,7 @@ class TestCptPointsPayload:
 
     def test_invalid_param_400(self, monkeypatch):
         import emotion_core.services.cpt_client as cpt_mod
+
         monkeypatch.setattr(cpt_mod, "fetch_snapshot", lambda code, **kw: None)
         body, status = server.cpt_points_payload(urlparse("/api/cpt/points?"))
         assert status == 400 and body["ok"] is False
@@ -361,6 +392,7 @@ class TestWatchlistPayload:
     def test_success(self, monkeypatch):
         items = [{"code": "601811", "name": "新华文轩", "note": ""}]
         import emotion_core.services.watchlist_service as wl_mod
+
         monkeypatch.setattr(wl_mod, "list_codes", lambda user: (items, True))
         body, status = server.watchlist_payload(urlparse("/api/watchlist"))
         assert status == 200 and body["ok"] is True
@@ -368,6 +400,7 @@ class TestWatchlistPayload:
 
     def test_cpt_unavailable(self, monkeypatch):
         import emotion_core.services.watchlist_service as wl_mod
+
         monkeypatch.setattr(wl_mod, "list_codes", lambda user: ([], False))
         body, status = server.watchlist_payload(urlparse("/api/watchlist"))
         assert status == 200 and body["ok"] is True
@@ -380,9 +413,9 @@ class TestWatchlistPost:
     def _handler(self, path, body=b"", content_length=None):
         """构造一个伪 handler 供 `_handle_watchlist_post` 调用。"""
         from unittest.mock import MagicMock
+
         h = MagicMock()
-        h.headers = {"Content-Length": content_length if content_length is not None
-                     else len(body)}
+        h.headers = {"Content-Length": content_length if content_length is not None else len(body)}
         h.rfile = MagicMock()
         h.rfile.read.return_value = body
         h.path = path
@@ -390,41 +423,47 @@ class TestWatchlistPost:
 
     def test_add(self, monkeypatch):
         import emotion_core.services.watchlist_service as wl_mod
-        monkeypatch.setattr(wl_mod, "add",
-                            lambda code, user="default", note="": (True, "ok"))
+
+        monkeypatch.setattr(wl_mod, "add", lambda code, user="default", note="": (True, "ok"))
         payload, status = server._handle_watchlist_post(
-            self._handler("/api/watchlist", b'{"action":"add","code":"601811"}'))
+            self._handler("/api/watchlist", b'{"action":"add","code":"601811"}')
+        )
         assert status == 200 and payload["ok"] is True
 
     def test_remove(self, monkeypatch):
         import emotion_core.services.watchlist_service as wl_mod
-        monkeypatch.setattr(wl_mod, "remove",
-                            lambda code, user="default": (True, "ok"))
+
+        monkeypatch.setattr(wl_mod, "remove", lambda code, user="default": (True, "ok"))
         payload, status = server._handle_watchlist_post(
-            self._handler("/api/watchlist", b'{"action":"remove","code":"601811"}'))
+            self._handler("/api/watchlist", b'{"action":"remove","code":"601811"}')
+        )
         assert status == 200
 
     def test_restore(self, monkeypatch):
         import emotion_core.services.watchlist_service as wl_mod
-        monkeypatch.setattr(wl_mod, "restore",
-                            lambda code, user="default": (True, "ok"))
+
+        monkeypatch.setattr(wl_mod, "restore", lambda code, user="default": (True, "ok"))
         payload, status = server._handle_watchlist_post(
-            self._handler("/api/watchlist", b'{"action":"restore","code":"601811"}'))
+            self._handler("/api/watchlist", b'{"action":"restore","code":"601811"}')
+        )
         assert status == 200
 
     def test_invalid_action_400(self):
         payload, status = server._handle_watchlist_post(
-            self._handler("/api/watchlist", b'{"action":"frobnicate","code":"601811"}'))
+            self._handler("/api/watchlist", b'{"action":"frobnicate","code":"601811"}')
+        )
         assert status == 400 and payload["ok"] is False
 
     def test_bad_json_400(self):
         payload, status = server._handle_watchlist_post(
-            self._handler("/api/watchlist", b'not json'))
+            self._handler("/api/watchlist", b"not json")
+        )
         assert status == 400
 
     def test_body_too_large_413(self):
         payload, status = server._handle_watchlist_post(
-            self._handler("/api/watchlist", b"x" * 5000, content_length=5000))
+            self._handler("/api/watchlist", b"x" * 5000, content_length=5000)
+        )
         assert status == 413
 
 
@@ -450,8 +489,7 @@ class TestStaticAssetWiring:
     def test_assets_referenced_by_templates_exist(self):
         root = Path(server.__file__).parent
         assert _referenced_assets() == {"dashboard.css", "stock.js"}
-        missing = sorted(n for n in _referenced_assets()
-                         if not (root / "static" / n).is_file())
+        missing = sorted(n for n in _referenced_assets() if not (root / "static" / n).is_file())
         assert missing == []
 
     def test_no_orphan_static_file(self):
@@ -462,9 +500,14 @@ class TestStaticAssetWiring:
     def test_card_and_calendar_rules_live_in_the_loaded_stylesheet(self):
         path = Path(server.__file__).parent / "static" / "dashboard.css"
         css = path.read_text(encoding="utf-8")
-        for sel in (".holding-form", ".holding-action", ".holding-add",
-                    ".holding-ladder-row.buy .side", ".holding-card details",
-                    ".cal-day.no-data"):
+        for sel in (
+            ".holding-form",
+            ".holding-action",
+            ".holding-add",
+            ".holding-ladder-row.buy .side",
+            ".holding-card details",
+            ".cal-day.no-data",
+        ):
             assert sel in css, f"{sel} 必须在被模板加载的 dashboard.css 里"
 
 
@@ -481,7 +524,7 @@ class TestHoldingEmptyStateHint:
         assert 'const HOLD_EMPTY_HINT = "填成本价与数量后点「计算」' in js
         assert 'const HOLD_READY_HINT = "点「计算」查看决策";' in js
         # 空态与「已回填」各挂一次；仓位预填成功后再挂一次 ready
-        assert js.count('= saved.cost ? HOLD_READY_HINT : HOLD_EMPTY_HINT;') == 1
+        assert js.count("= saved.cost ? HOLD_READY_HINT : HOLD_EMPTY_HINT;") == 1
         assert js.count('$("holding-hint").textContent = HOLD_READY_HINT;') == 1
         # 成功渲染必须把引导清空，否则引导会与结果同屏
         assert js.count('$("holding-hint").textContent = "";') == 1

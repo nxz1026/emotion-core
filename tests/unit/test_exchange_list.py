@@ -5,6 +5,7 @@
 - ``pd.NaT`` 也是 ``datetime`` 的实例，不能被误当成有效日期（先判 isna 再判类型）；
 - 单个市场抖挂（深交所偶发 ConnectionResetError 104）只跳过它，不拖垮沪市。
 """
+
 from __future__ import annotations
 
 import time
@@ -18,14 +19,17 @@ from emotion_core.utils.errors import FetchError
 
 
 class TestToDate:
-    @pytest.mark.parametrize(("raw", "want"), [
-        ("1991-04-03", date(1991, 4, 3)),            # 深交所口径
-        (date(1999, 11, 10), date(1999, 11, 10)),    # 上交所口径
-        (datetime(2019, 7, 22, 0, 0), date(2019, 7, 22)),
-        ("1991/04/03", date(1991, 4, 3)),
-        ("19910403", date(1991, 4, 3)),
-        ("  2019-07-22  ", date(2019, 7, 22)),
-    ])
+    @pytest.mark.parametrize(
+        ("raw", "want"),
+        [
+            ("1991-04-03", date(1991, 4, 3)),  # 深交所口径
+            (date(1999, 11, 10), date(1999, 11, 10)),  # 上交所口径
+            (datetime(2019, 7, 22, 0, 0), date(2019, 7, 22)),
+            ("1991/04/03", date(1991, 4, 3)),
+            ("19910403", date(1991, 4, 3)),
+            ("  2019-07-22  ", date(2019, 7, 22)),
+        ],
+    )
     def test_parses(self, raw, want):
         assert el.to_date(raw) == want
 
@@ -40,8 +44,9 @@ class TestToDate:
 
 
 def _sz_frame() -> pd.DataFrame:
-    return pd.DataFrame({"A股代码": ["000001", "300750"],
-                         "A股上市日期": ["1991-04-03", "2018-06-11"]})
+    return pd.DataFrame(
+        {"A股代码": ["000001", "300750"], "A股上市日期": ["1991-04-03", "2018-06-11"]}
+    )
 
 
 def _sh_frame() -> pd.DataFrame:
@@ -54,11 +59,16 @@ def _kc_frame() -> pd.DataFrame:
 
 def test_fetch_list_date_map_merges_three_markets(monkeypatch):
     monkeypatch.setattr(el.ak, "stock_info_sz_name_code", lambda **kw: _sz_frame())
-    monkeypatch.setattr(el.ak, "stock_info_sh_name_code",
-                        lambda **kw: _kc_frame() if kw["symbol"] == "科创板" else _sh_frame())
+    monkeypatch.setattr(
+        el.ak,
+        "stock_info_sh_name_code",
+        lambda **kw: _kc_frame() if kw["symbol"] == "科创板" else _sh_frame(),
+    )
     assert el.fetch_list_date_map() == {
-        "000001": date(1991, 4, 3), "300750": date(2018, 6, 11),
-        "600000": date(1999, 11, 10), "688001": date(2019, 7, 22),
+        "000001": date(1991, 4, 3),
+        "300750": date(2018, 6, 11),
+        "600000": date(1999, 11, 10),
+        "688001": date(2019, 7, 22),
     }
 
 
@@ -71,10 +81,12 @@ def test_fetch_list_date_map_skips_failed_market(monkeypatch):
         raise ConnectionResetError(104, "Connection reset by peer")
 
     monkeypatch.setattr(el.ak, "stock_info_sz_name_code", boom)
-    monkeypatch.setattr(el.ak, "stock_info_sh_name_code",
-                        lambda **kw: _kc_frame() if kw["symbol"] == "科创板" else _sh_frame())
-    assert el.fetch_list_date_map() == {"600000": date(1999, 11, 10),
-                                       "688001": date(2019, 7, 22)}
+    monkeypatch.setattr(
+        el.ak,
+        "stock_info_sh_name_code",
+        lambda **kw: _kc_frame() if kw["symbol"] == "科创板" else _sh_frame(),
+    )
+    assert el.fetch_list_date_map() == {"600000": date(1999, 11, 10), "688001": date(2019, 7, 22)}
 
 
 def test_fetch_one_raises_on_empty_frame(monkeypatch):
@@ -115,7 +127,7 @@ def test_fetch_one_times_out(monkeypatch):
     t0 = time.monotonic()
     with pytest.raises(FetchError, match="超时"):
         el._fetch_one("上交所主板A股", hang, {"symbol": "主板A股"})
-    assert time.monotonic() - t0 < 0.35      # 远小于 hang 的 0.4s
+    assert time.monotonic() - t0 < 0.35  # 远小于 hang 的 0.4s
 
 
 def test_all_markets_failing_yields_empty_map(monkeypatch):
@@ -136,6 +148,7 @@ def test_one_market_column_drift_does_not_lose_other_markets(monkeypatch):
     实测（monkeypatch 出一个列名漂移市场 + 一个正常市场）：修正前直接
     `KeyError: '上市日期'` 穿透，正常市场的 000001 也没进 map；修正后只丢漂移市场。
     """
+
     def fake_sources():
         return (
             ("漂移市场", lambda **_kw: None, {}, "证券代码", "上市日期"),
@@ -154,14 +167,15 @@ def test_one_market_column_drift_does_not_lose_other_markets(monkeypatch):
 
 def test_non_six_digit_codes_are_ignored(monkeypatch):
     """akshare 的空串/短码不该进 map（源侧偶发空 code 列）。"""
+
     def fake_sources():
         return (("正常市场", lambda **_kw: None, {}, "A股代码", "A股上市日期"),)
 
     def fake_fetch_one(label, fn, kw):
-        return pd.DataFrame({"A股代码": ["000001", "", "  600000  ", "60000"],
-                             "A股上市日期": ["1991-04-03"] * 4})
+        return pd.DataFrame(
+            {"A股代码": ["000001", "", "  600000  ", "60000"], "A股上市日期": ["1991-04-03"] * 4}
+        )
 
     monkeypatch.setattr(el, "_sources", fake_sources)
     monkeypatch.setattr(el, "_fetch_one", fake_fetch_one)
-    assert el.fetch_list_date_map() == {"000001": date(1991, 4, 3),
-                                        "600000": date(1991, 4, 3)}
+    assert el.fetch_list_date_map() == {"000001": date(1991, 4, 3), "600000": date(1991, 4, 3)}

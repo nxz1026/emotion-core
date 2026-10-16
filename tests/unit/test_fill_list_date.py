@@ -7,6 +7,7 @@
   列表里是 text，和 date 列比较直接报 operator does not exist；
 - dry-run 绝不能开事务。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -44,8 +45,7 @@ def test_upsert_empty_rows_is_noop(monkeypatch):
 def test_upsert_sql_has_distinct_guard_and_date_literal(monkeypatch):
     rec = _Rec(rowcount=2)
     monkeypatch.setattr(fld, "transaction", lambda: rec)
-    assert fld.upsert_list_date([("000001", date(1991, 4, 3)),
-                                 ("688001", date(2019, 7, 22))]) == 2
+    assert fld.upsert_list_date([("000001", date(1991, 4, 3)), ("688001", date(2019, 7, 22))]) == 2
 
     sql = rec.statements[0].as_string(None)
     assert "UPDATE stock_basic SET list_date = v.d, updated_at = now()" in sql
@@ -61,7 +61,7 @@ def test_upsert_returns_summed_rowcount(monkeypatch):
     rec = _Rec(rowcount=1)
     monkeypatch.setattr(fld, "transaction", lambda: rec)
     rows = [(f"{i:06d}", date(2020, 1, 1 + i)) for i in range(5)]
-    assert fld.upsert_list_date(rows) == 3          # 3 块 × rowcount 1
+    assert fld.upsert_list_date(rows) == 3  # 3 块 × rowcount 1
     assert len(rec.statements) == 3
 
 
@@ -71,8 +71,9 @@ def test_chunks_splits_evenly_and_tail():
 
 
 def test_backfill_dry_run_never_touches_db(monkeypatch):
-    monkeypatch.setattr(fld.exchange_list, "fetch_list_date_map",
-                        lambda: {"000001": date(1991, 4, 3)})
+    monkeypatch.setattr(
+        fld.exchange_list, "fetch_list_date_map", lambda: {"000001": date(1991, 4, 3)}
+    )
     monkeypatch.setattr(fld, "all_codes", lambda: ["000001"])
     monkeypatch.setattr(fld, "upsert_list_date", lambda rows: pytest.fail("dry-run 不该写库"))
     assert fld.backfill(dry_run=True) == 0
@@ -81,8 +82,11 @@ def test_backfill_dry_run_never_touches_db(monkeypatch):
 def test_backfill_filters_out_codes_not_in_db(monkeypatch):
     """源里多出来的代码（如已退市/未入库）不能进 SQL，否则 UPDATE 白写。"""
     seen: dict[str, object] = {}
-    monkeypatch.setattr(fld.exchange_list, "fetch_list_date_map",
-                        lambda: {"000001": date(1991, 4, 3), "999999": date(2020, 1, 1)})
+    monkeypatch.setattr(
+        fld.exchange_list,
+        "fetch_list_date_map",
+        lambda: {"000001": date(1991, 4, 3), "999999": date(2020, 1, 1)},
+    )
     monkeypatch.setattr(fld, "all_codes", lambda: ["000001"])
 
     def _fake_upsert(rows):
@@ -95,13 +99,16 @@ def test_backfill_filters_out_codes_not_in_db(monkeypatch):
 
 
 def test_backfill_only_missing_uses_missing_codes(monkeypatch):
-    monkeypatch.setattr(fld.exchange_list, "fetch_list_date_map",
-                        lambda: {"000001": date(1991, 4, 3),
-                                 "600000": date(1999, 11, 10)})
+    monkeypatch.setattr(
+        fld.exchange_list,
+        "fetch_list_date_map",
+        lambda: {"000001": date(1991, 4, 3), "600000": date(1999, 11, 10)},
+    )
     monkeypatch.setattr(fld, "all_codes", lambda: pytest.fail("only_missing 不该查全量"))
     monkeypatch.setattr(fld, "missing_codes", lambda: ["600000"])
     seen: dict[str, object] = {}
-    monkeypatch.setattr(fld, "upsert_list_date",
-                        lambda rows: (seen.update(rows=rows), len(rows))[1])
+    monkeypatch.setattr(
+        fld, "upsert_list_date", lambda rows: (seen.update(rows=rows), len(rows))[1]
+    )
     assert fld.backfill(only_missing=True) == 1
     assert seen["rows"] == [("600000", date(1999, 11, 10))]

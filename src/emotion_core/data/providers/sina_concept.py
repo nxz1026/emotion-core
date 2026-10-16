@@ -22,6 +22,7 @@
 「从接入日起逐日累积的快照」，不回填历史日期——回填会把今天的概念成分当成昨天的，
 制造出不存在的历史（这也是 `theme_service` 拒绝写空/拒绝盖历史的原因）。
 """
+
 from __future__ import annotations
 
 import json
@@ -41,11 +42,12 @@ _FETCH_RETRY: int = getattr(CONFIG, "FETCH_RETRY", 3)
 _TIME_SLEEP: float = getattr(CONFIG, "TIME_SLEEP", 0.5)
 
 #: 概念节点清单。`param=class` 才是概念；`param=gn` 返回的是行业节点（同新浪文件里的旧命名）。
-_SINA_CONCEPT_LIST = ("https://vip.stock.finance.sina.com.cn/q/view/"
-                      "newFLJK.php?param=class")
+_SINA_CONCEPT_LIST = "https://vip.stock.finance.sina.com.cn/q/view/newFLJK.php?param=class"
 #: 概念成分股。与 `sina_industry.py` / `eastmoney.py` 同一个接口，只换 node。
-_SINA_HQ_NODE = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-                 "Market_Center.getHQNodeData")
+_SINA_HQ_NODE = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
 #: 与 `sina_industry.py` 的 `_HEADERS` 一致：缺 Referer 会被新浪拒。
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
 
@@ -99,6 +101,7 @@ def fetch_concept_nodes() -> list[ConceptNode]:
         FetchError: 网络/HTTP 失败（可重试）。
         DataError: 返回体不再是预期的对象字面量（协议变化，不重试）。
     """
+
     def _get() -> str:
         try:
             resp = requests.get(_SINA_CONCEPT_LIST, timeout=15, headers=_HEADERS)
@@ -131,27 +134,35 @@ def fetch_concept_nodes() -> list[ConceptNode]:
             count = int(parts[2])
         except ValueError:
             count = 0
-        nodes.append(ConceptNode(
-            node=node, name=name, member_count=count,
-            pct_chg=_to_float(parts[5]),
-            amount=_to_float(parts[7]),
-            leading_code=_node_code(parts[8]) if len(parts) > 8 else None,
-            leading_name=parts[12].strip() if len(parts) > 12 else None,
-        ))
+        nodes.append(
+            ConceptNode(
+                node=node,
+                name=name,
+                member_count=count,
+                pct_chg=_to_float(parts[5]),
+                amount=_to_float(parts[7]),
+                leading_code=_node_code(parts[8]) if len(parts) > 8 else None,
+                leading_name=parts[12].strip() if len(parts) > 12 else None,
+            )
+        )
     if not nodes:
         raise DataError("新浪概念清单解析出 0 个概念（格式变化）")
     return nodes
 
 
-def fetch_concept_members(node: str, page_size: int = _DEFAULT_PAGE_SIZE,
-                          max_pages: int = _DEFAULT_MAX_PAGES) -> list[str]:
+def fetch_concept_members(
+    node: str, page_size: int = _DEFAULT_PAGE_SIZE, max_pages: int = _DEFAULT_MAX_PAGES
+) -> list[str]:
     """单个概念节点的成分股代码（6 位）。`page_size` 是服务端单页上限（实测 100）。"""
     codes: list[str] = []
     for pn in range(1, max_pages + 1):
         rows = retry_fetch(
-            fetch_json_list, _SINA_HQ_NODE,
+            fetch_json_list,
+            _SINA_HQ_NODE,
             {"page": pn, "num": page_size, "sort": "symbol", "asc": 1, "node": node},
-            fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP, headers=_HEADERS,
+            fetch_retry=_FETCH_RETRY,
+            time_sleep=_TIME_SLEEP,
+            headers=_HEADERS,
         )
         if not rows:
             break
@@ -167,8 +178,9 @@ def fetch_concept_members(node: str, page_size: int = _DEFAULT_PAGE_SIZE,
     return codes
 
 
-def fetch_concept_map(nodes: list[ConceptNode] | None = None
-                      ) -> tuple[list[ConceptNode], dict[str, list[ConceptNode]]]:
+def fetch_concept_map(
+    nodes: list[ConceptNode] | None = None,
+) -> tuple[list[ConceptNode], dict[str, list[ConceptNode]]]:
     """``(节点清单, {6 位代码: [所属节点…]})``。
 
     一只股可属多个概念（与 `algorithms/theme.py` 的「一股可属多题材」口径一致），
@@ -179,8 +191,9 @@ def fetch_concept_map(nodes: list[ConceptNode] | None = None
     for n in nodes:
         members = fetch_concept_members(n.node)
         if n.member_count and len(members) != n.member_count:
-            log.info("概念 %s(%s)：清单 %d 只，实取 %d 只",
-                     n.name, n.node, n.member_count, len(members))
+            log.info(
+                "概念 %s(%s)：清单 %d 只，实取 %d 只", n.name, n.node, n.member_count, len(members)
+            )
         for code in members:
             bucket = out.setdefault(code, [])
             if n not in bucket:
