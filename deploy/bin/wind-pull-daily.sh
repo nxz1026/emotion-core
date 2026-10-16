@@ -23,6 +23,19 @@
 # 退出码恒为 0：撞额度是**预期**结果（当天额度用尽），不该让 cron 报错刷日志。
 set -uo pipefail
 
+# Wind 适配器靠 `node` 调 Wind 终端（wind_client.py 的 argv 首项硬编码就是 "node"，
+# 没有可配置的路径），而 node 是本机 nvm 装的。**cron 的 PATH 里没有它**：
+# 2026-10-16 那次 /etc/cron.d 跑出来的 40 次对账 + 17 个 ST 窗口**全是**
+# `无法执行 node: No such file or directory` —— 一整天额度白烧，且脚本按设计恒退 0，
+# 外面看不出任何异常（known-traps #51 同款静默）。这里自己把它补回 PATH。
+if ! command -v node >/dev/null 2>&1; then
+  _nvm_bin="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1)"
+  if [ -n "${_nvm_bin:-}" ]; then
+    PATH="$_nvm_bin:$PATH"
+    export PATH
+  fi
+fi
+
 REPO="${EMOTION_REPO:-/home/ubuntu/DSH/emotion-core}"
 PY="$REPO/.venv/bin/python"
 LOG="${WIND_PULL_LOG:-$HOME/logs/wind-pull-daily.log}"
