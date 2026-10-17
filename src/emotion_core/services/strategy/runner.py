@@ -15,16 +15,20 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from emotion_core.services import notify
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
 
 from .context import build_stock_context
 from .loader import Skill, load_strategies
-from .universe import build_universe, filter_codes
+from .universe import build_universe, filter_codes, tradable_codes
 
 log = logging.getLogger(__name__)
 
 STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
+
+# R67-3 第二层硬闸门缓存：当日可交易代码集（含「当日无 bar」的语义，即空集也缓存）。
+_TRADABLE_CACHE: dict[date, frozenset[str]] = {}
 
 # ── 调用侧定速 / 退避 / 熔断旋钮 ───────────────────────────────
 # 刻意放模块级常量而非 utils/config.py 的 Config：config_hash() 哈希
@@ -65,6 +69,22 @@ def _existing(trade_date: date, code: str, strategy: str, prompt_hash: str) -> b
         (trade_date, code, strategy, prompt_hash),
     )
     return not frame.empty
+
+
+def _has_tradable_bar(trade_date: date, code: str) -> bool:
+    """R67-3 第二层硬闸门：该票当日是否有真实行情（``daily_bar.volume > 0``）。
+
+    按日缓存全市场可交易代码集（``universe.tradable_codes`` 一次查库）：主循环
+    约 170 code × 15 策略，若逐组合查库会退化成数千次往返。
+
+    事故背景：2026-10-13 ``strategy_signal`` 里有一条 600825
+    ``expectation_repricing`` **BUY** score 92 confidence 0.85，而该票
+    10-13/10-14/10-15 连续停牌（SinaProvider 实测只回 3 行）。即使 LLM 仍返回
+    BUY，也不许落库——写 PASS 会污染「该票当日无判断」语义，故直接进 skipped。
+    """
+    if trade_date not in _TRADABLE_CACHE:
+        _TRADABLE_CACHE[trade_date] = frozenset(tradable_codes(trade_date))
+    return code in _TRADABLE_CACHE[trade_date]
 
 
 def _retryable(exc: Exception) -> bool:
@@ -333,6 +353,13 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
             skipped.append({"strategy": skill.name, "code": code, "reason": "返回不符合输出契约"})
             retry_pairs.append((skill, code))
             continue
+        # R67-3 第二层硬闸门：当日停牌/无行情的票，即使 LLM 给 BUY/WATCH 也不落库。
+        if not _has_tradable_bar(trade_date, code):
+            log.warning("策略信号丢弃（当日无行情）：%s/%s action=%s",
+                        skill.name, code, parsed.get("action"))
+            skipped.append({"strategy": skill.name, "code": code,
+                            "reason": "no_bar_today"})
+            continue
         items.append(_item(skill, code, parsed, reply, prompt_hash))
 
     # ── 失败补跑（2026-10-09 日志巡检 D）─────────────────────────────
@@ -378,12 +405,26 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
             if parsed is None:
                 log.warning("策略补跑解析仍失败：%s/%s", skill.name, code)
                 continue  # 首轮 skipped 保留
+            # R67-3 第二层硬闸门（补跑路径同主循环：显式 --codes 名单不过第一层）。
+            if not _has_tradable_bar(trade_date, code):
+                log.warning("策略信号丢弃（当日无行情）：%s/%s action=%s",
+                            skill.name, code, parsed.get("action"))
+                _drop_skipped(skipped, skill.name, code)  # 先移除首轮失败记录
+                skipped.append({"strategy": skill.name, "code": code,
+                                "reason": "no_bar_today"})
+                continue
             items.append(_item(skill, code, parsed, reply, prompt_hash))
             _drop_skipped(skipped, skill.name, code)
 
     # Upsert to strategy_signal
     if items:
         _save_batch(trade_date, items)
+
+    # R67-4：WATCH 信号即时推飞书（按 code 聚合、best-effort 不抛）。放在
+    # `_save_batch` **调用处**之后而非函数内部，保持「落库」与「推送」分离。
+    watch_items = [it for it in items if it.get("action") == "WATCH"]
+    if watch_items:
+        notify.push_watch_signals(watch_items, trade_date)
 
     # 「失败」= 最终仍未覆盖的 LLM/契约失败组合（补跑成功者已移出 skipped）。
     failed = sum(

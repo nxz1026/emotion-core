@@ -137,13 +137,19 @@ _HUMANIZE_TTL = 86400  # 24h
 _HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。把下面这段龙空龙复盘系统的当日日报摘要，**用 2-3 句自然中文**讲清楚两件事：
 
 1. 今天的 A 股盘面现在在什么阶段、买入窗口是否打开；
-2. 今天产生了哪些信号（BUY 推荐几只、SECONDARY/RECOMMEND 观察几只）；没有信号也要说清楚为什么。
+2. 今天产生了哪些信号（BUY 推荐几只、SECONDARY/RECOMMEND 观察几只）；没有信号时只说"今日无 BUY"即可。
+
+⚠️ 铁律：**只做格式美化，不做语义扩展。**
+- 禁止添加原文中不存在的信息、因果关系或解释。
+- 禁止把客观状态（如"对账差异 2 行"）改写为因果叙述（如"系统暂缓信号生成"）。
+- 只允许改写句式、调整语序、把 markdown 译成口语化中文。
 
 风格要求：
 - 用「今天」「当前」开头的句子，第二人称省略；
 - 数字（涨停家数、最高档数、信号数）保留原文；
+- **数字后面的股票代码与名称必须原样保留，不得概括为「某股」**——速览里的最高板括注（如「4（新华传媒 600825 一字）」）是原文，改写只能调语序，不能丢掉代码与票名；
 - 如果有 BUY 推荐，第一句必须出现「BUY」字样；
-- 如果没 BUY，**不要**说「无信号」（那听起来像故障），改说「没有 BUY 是因为 ...」；
+- 如果没 BUY，只说"今日无 BUY 推荐"——除非原文明确给出了原因，否则不要添加任何因果解释；
 - 不要写 markdown 标题或列表，只输出 2-3 句纯文本；
 - 不要复述任何 RAG/算法/字段名。
 
@@ -292,3 +298,151 @@ def push_buy_signal(code: str, name: str, cont_days: int,
 def reset_buy_dedup() -> None:
     """测试用：清空 BUY 节流字典。生产代码不应调用。"""
     _BUY_DEDUP.clear()
+
+
+# ---- R67-4 WATCH 信号即时推送 ----
+# 与 BUY 节流**分开**的字典：BUY 与 WATCH 是两条独立通道，同一 (date, code)
+# 各推各的；复用 _BUY_DEDUP 会让先到者吃掉另一条的配额。
+_WATCH_DEDUP: dict[tuple[str, str], float] = {}
+_WATCH_DEDUP_TTL = 86400  # 24h
+_WATCH_DEDUP_PRUNE_EVERY = 64
+_WATCH_REASON_LIMIT = 60  # 每条策略理由摘要的截断长度
+_WATCH_PICKS_PER_CODE = 3  # 每只票正文最多列几个策略
+
+
+def _watch_env_int(name: str, default: int) -> int:
+    """读整型 env（读法与 ``_cfg`` 一致，两种写法都认），非法值回退 default。"""
+    raw = _cfg(name, str(default))
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        log.warning("WATCH 推送配置 %s=%r 不是整数，回退 %d", name, raw, default)
+        return default
+
+
+def _watch_row_name(row: dict) -> str:
+    """票名：优先 ``stock_name``（runner 的 ``_item`` 会填），再退 ``name``。
+
+    注意 runner 的 ``_item`` 里 ``name`` 是**策略显示名**，故 ``stock_name``
+    存在时必须用它，否则会把「一阳三阴」印成票名。
+    """
+    if "stock_name" in row:
+        return str(row.get("stock_name") or "")
+    return str(row.get("name") or "")
+
+
+def _format_watch_signal(d_iso: str, code: str, name: str,
+                         picks: list[tuple[int, str, str]],
+                         total: int, remain: int) -> str:
+    """一只票一条消息（R67-4）：标题 + 最高分 + top3 策略理由 + 汇总行。"""
+    label = f"{name}({code})" if name else code
+    best = picks[0][0] if picks else 0
+    lines = [f"[策略观察·WATCH] {d_iso}", f"{label} 最高 {best} 分"]
+    for score, strategy, reason in picks:
+        text = reason
+        if len(text) > _WATCH_REASON_LIMIT:
+            text = text[:_WATCH_REASON_LIMIT] + "…"
+        lines.append(f"· {strategy} {score}：{text}")
+    if remain > 0:
+        lines.append(f"共 {total} 只，余下 {remain} 只见报告⑥段")
+    else:
+        lines.append(f"共 {total} 只")
+    return "\n".join(lines)
+
+
+def push_watch_signals(rows: list[dict] | None,
+                       trade_date: _date | None = None) -> int:
+    """WATCH 信号即时推送（R67-4）：按 code 聚合，一只票一条，best-effort 不抛。
+
+    背景：``strategy_signal`` 的 WATCH 此前完全不推送。2026-10-08 600825 拿了 3 条
+    WATCH（bottom_volume 75 / emotion_cycle 45 / bull_trend 30），owner 一条都没
+    收到。BUY 走 ``push_buy_signal``，本函数是 WATCH 的对应通道。
+
+    Args:
+        rows: 当日 ``action='WATCH'`` 的策略行（``code`` / ``strategy`` /
+              ``score`` / ``reason``；票名取 ``stock_name``）。
+        trade_date: 交易日，用于文案日期与节流 key；缺省取当天。
+
+    Returns:
+        int 成功推送的票数（关闭 / 未配置 / 全部低于阈值 / 全部被节流时为 0）。
+    """
+    if _watch_env_int("PUSH_WATCH", 1) == 0:
+        log.info("EMOTION_PUSH_WATCH=0，WATCH 推送关闭")
+        return 0
+    items = [row for row in (rows or []) if isinstance(row, dict)]
+    if not items:
+        return 0
+    url = _cfg("LKL_WEBHOOK_URL", "")
+    if not url:
+        log.debug("LKL_WEBHOOK_URL 未配置，WATCH 即时推送跳过")
+        return 0
+    min_score = _watch_env_int("WATCH_PUSH_MIN_SCORE", 60)
+    max_codes = _watch_env_int("WATCH_PUSH_MAX_CODES", 10)
+    d_iso = (trade_date or _date.today()).isoformat()
+
+    # 先按行过阈值，再按 code 聚合（同票多策略只出一条）。
+    grouped: dict[str, list[tuple[int, str, str]]] = {}
+    names: dict[str, str] = {}
+    for row in items:
+        try:
+            score = int(row.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        if score < min_score:
+            continue
+        code = str(row.get("code") or "")
+        if not code:
+            continue
+        names.setdefault(code, _watch_row_name(row))
+        grouped.setdefault(code, []).append(
+            (score, str(row.get("strategy") or ""), str(row.get("reason") or ""))
+        )
+    if not grouped:
+        log.info("WATCH 推送：%s 无 ≥%d 分的信号，不发", d_iso, min_score)
+        return 0
+
+    ranked = sorted(grouped, key=lambda c: (-max(s for s, _, _ in grouped[c]), c))
+    total = len(ranked)
+    selected = ranked[:max_codes] if max_codes > 0 else []
+    remain = total - len(selected)
+    channel = _guess_channel(url)
+    now = time.time()
+    sent = 0
+    for code in selected:
+        picks = sorted(grouped[code], key=lambda e: -e[0])[:_WATCH_PICKS_PER_CODE]
+        key = (d_iso, code)
+        last = _WATCH_DEDUP.get(key, 0.0)
+        if now - last < _WATCH_DEDUP_TTL:
+            log.info("WATCH 信号 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
+                     d_iso, code, last, now - last)
+            continue
+        text = _format_watch_signal(d_iso, code, names.get(code, ""), picks, total, remain)
+        try:
+            import requests
+
+            resp = requests.post(url, json=_payload(channel, text), timeout=10)
+            ok = _resp_ok(channel, resp)
+            if not ok and channel == "feishu" and resp.status_code == 200:
+                log.warning(
+                    "飞书 WATCH 推送返回 HTTP 200 但 body 非成功码：%s",
+                    resp.text[:120],
+                )
+            log.info("WATCH 即时推送 %s/%s（%s）：HTTP %s 成功=%s",
+                     d_iso, code, channel, resp.status_code, ok)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("WATCH 即时推送失败（不影响 WATCH 落盘）：%s", exc)
+            continue
+        # 仅在 HTTP 请求**发出**后记节流——未配置/网络异常时不污染 dedup
+        _WATCH_DEDUP[key] = now
+        if ok:
+            sent += 1
+    if len(_WATCH_DEDUP) >= _WATCH_DEDUP_PRUNE_EVERY * 4:
+        cutoff = now - _WATCH_DEDUP_TTL
+        for k in [k for k, t in _WATCH_DEDUP.items() if t < cutoff]:
+            _WATCH_DEDUP.pop(k, None)
+    return sent
+
+
+def reset_watch_dedup() -> None:
+    """测试用：清空 WATCH 节流字典。生产代码不应调用。"""
+    _WATCH_DEDUP.clear()

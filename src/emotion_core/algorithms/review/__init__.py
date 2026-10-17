@@ -139,16 +139,20 @@ class LadderRow:
     name: str
     turnover_rate: float | None
     bomb_times: int | None
+    is_one_word: bool | None = None
+    is_suspended: bool = False
 
 
 _VIEW_SQL = """
 SELECT s.code, s.name,
        COALESCE(p.turnover_rate, b.turnover_rate) AS turnover_rate,
-       p.bomb_times
+       p.bomb_times,
+       db.is_one_word
 FROM stock_basic s
 LEFT JOIN daily_bar b ON b.code = s.code AND b.date = %(d)s
 LEFT JOIN limit_pool_em p ON p.code = s.code AND p.date = %(d)s
      AND p.pool_type = 'ZT'
+LEFT JOIN derived_bar db ON db.code = s.code AND db.date = %(d)s
 WHERE s.code = ANY(%(codes)s)
 """
 
@@ -164,10 +168,10 @@ def ladder_view(trade_date: date, rows: list) -> list[LadderRow]:
     with connect_ro() as conn:
         got = conn.execute(_VIEW_SQL, {"d": trade_date,
                                       "codes": [r.code for r in rows]}).fetchall()
-    q = {r[0]: (r[1] or "", r[2], r[3]) for r in got}
+    q = {r[0]: (r[1] or "", r[2], r[3], r[4]) for r in got}
     out = []
     for r in rows:
-        nm, turn, bomb = q.get(r.code, ("", None, None))
+        nm, turn, bomb, oneword = q.get(r.code, ("", None, None, None))
         out.append(LadderRow(
             date=r.date, code=r.code, cont_days=r.cont_days,
             is_exchange=r.is_exchange, is_top=r.is_top,
@@ -176,7 +180,9 @@ def ladder_view(trade_date: date, rows: list) -> list[LadderRow]:
             y_top_survivor_count=r.y_top_survivor_count,
             name=nm,
             turnover_rate=None if turn is None else float(turn),
-            bomb_times=None if bomb is None else int(bomb)))
+            bomb_times=None if bomb is None else int(bomb),
+            is_one_word=None if oneword is None else bool(oneword),
+            is_suspended=bool(getattr(r, "is_suspended", False))))
     return out
 
 
@@ -331,6 +337,70 @@ def _health_of(trade_date: date) -> str:
             + ("" if gap == 0 else f"（距今 {gap} 个交易日，⚠ 疑似断档）"))
 
 
+_MAX_NOTE_NAMES = 3
+
+
+def _top_boards_note(d: dict, key: str) -> str:
+    """「名义最高板 / 可交易最高板」数字后面缀的票名，如 `（新华传媒 600825 一字）`。
+
+    R67-1：速览只给数字时 owner 手机上不知道是哪只票（10-12 收到「名义最高板：9
+    → 10」）。这里按 `stat[key]` 反查当日同高度的梯队行补票名。
+
+    - `max_limit_days`：`ladder_rows` 里 `cont_days == stat[key]` 的行；
+    - `tradable_max_days`：同高且额外要求 `is_exchange is True`（换手板）；
+    - 停牌行不算身位（owner 拍板：停牌身位不计入最高板数字），一律排除；
+    - 找不到同高行 → 兜底直查 `derived_bar`（数字来自
+      `algorithms/emotion.py:_top_amplitude()`，口径是 derived_bar 全主板，
+      可能含被 ladder_day 剔掉的 ST/次新，故不能只信 ladder_rows）；
+    - 一只都没有 / 任何异常 → 返回 ""，绝不抛异常拖垮报告渲染。
+    """
+    try:
+        stat = d.get("stat") or {}
+        height = stat.get(key)
+        if height in (None, ""):
+            return ""
+        try:
+            height = int(height)
+        except (TypeError, ValueError):
+            return ""
+        if height <= 0:
+            return ""
+
+        rows = [r for r in (d.get("ladder_rows") or [])
+                if r.cont_days == height and not getattr(r, "is_suspended", False)]
+        if key == "tradable_max_days":
+            rows = [r for r in rows if r.is_exchange]
+        items = [(r.name or "", r.code, bool(r.is_one_word)) for r in rows]
+        if not items:
+            # 兜底：数字来源是 derived_bar（不做 ST/次新剔除），可能无同高梯队行
+            exch = " AND d.is_exchange" if key == "tradable_max_days" else ""
+            df = query_df(
+                "SELECT d.code, s.name, d.is_one_word FROM derived_bar d"
+                " JOIN stock_basic s USING (code)"
+                f" WHERE d.date = %s AND d.cont_days = %s{exch}"
+                " ORDER BY d.code LIMIT %s",
+                (d.get("date"), height, _MAX_NOTE_NAMES))
+            if df is None or df.empty:
+                return ""
+            items = [(str(r["name"] or ""), str(r["code"]),
+                      bool(r["is_one_word"])) for _, r in df.iterrows()]
+        if not items:
+            return ""
+
+        def _fmt(nm: str, code: str, one: bool) -> str:
+            tag = f"{nm} {code}".strip()
+            return f"{tag} 一字" if one else tag
+
+        shown = items[:_MAX_NOTE_NAMES]
+        text = "、".join(_fmt(nm, code, one) for nm, code, one in shown)
+        if len(items) > _MAX_NOTE_NAMES:
+            text += f" 等 {len(items)} 只"
+        return f"（{text}）"
+    except Exception as exc:  # noqa: BLE001 —— 速览不能因补票名而失败
+        log.warning("速览最高板票名补全失败（%s，忽略）：%s", key, exc)
+        return ""
+
+
 def _sec_overview(d: dict) -> str:
     """⓪ 速览（V9）：链路健康 + 较昨日变化。放最前，30 秒读完当日结论。
 
@@ -365,7 +435,8 @@ def _sec_overview(d: dict) -> str:
         for label, key in (("涨停家数", "limit_up_count"),
                            ("名义最高板", "max_limit_days"),
                            ("可交易最高板", "tradable_max_days")):
-            lines.append(_delta_of(s.get(key), p.get(key), label))
+            suffix = "" if key == "limit_up_count" else _top_boards_note(d, key)
+            lines.append(_delta_of(s.get(key), p.get(key), label, suffix))
         if s.get("phase") != (p or {}).get("phase"):
             lines.append(f"- 阶段：{(p or {}).get('phase', '—')} → "
                          f"{s.get('phase')}")
@@ -443,7 +514,11 @@ def _sec_emotion(d: dict) -> str:
 
 def _sec_ladder(d: dict) -> str:
     rows = d["ladder_rows"]
-    if not rows:
+    # R67-2：停牌行（旁路展示）与正常梯队行分开——停牌不计身位、不并进板数分组，
+    # 只在梯队末尾单独一行「N板（停牌）」，避免污染最高板口径。
+    susp = [r for r in rows if getattr(r, "is_suspended", False)]
+    rows = [r for r in rows if not getattr(r, "is_suspended", False)]
+    if not rows and not susp:
         return "## ② 梯队全景\n\n无连板梯队（当日无 ≥2 板）\n"
     by_h: dict[int, list] = {}
     for r in rows:
@@ -452,6 +527,9 @@ def _sec_ladder(d: dict) -> str:
     for h in sorted(by_h, reverse=True):
         tags = [_ladder_tag(r) for r in by_h[h]]
         lines.append(f"- **{h}板** [{len(tags)}只] " + "、".join(tags))
+    for h in sorted({r.cont_days for r in susp}, reverse=True):
+        tags = [f"{r.name}({r.code})" for r in susp if r.cont_days == h]
+        lines.append(f"- **{h}板（停牌）** [{len(tags)}只] " + "、".join(tags))
     lines.append("")
     lines.append("> 开板计数为东财 zbc 字段（逐笔微观口径，一分钟分时看到的"
                  "明显开板阶段通常少于该值）。判据 c5「炸板回封」用"

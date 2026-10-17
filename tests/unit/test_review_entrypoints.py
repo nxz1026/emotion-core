@@ -105,22 +105,30 @@ def _base_row(code="600001", cont=4, ex=True):
 class TestLadderView:
     def test_attaches_quality_columns(self, monkeypatch):
         seen = []
-        _stub_ro(monkeypatch, [("600001", "测试龙", 12.5, 3)], seen)
+        # 5 列：R67-1 的 _VIEW_SQL 末尾加了 db.is_one_word（最高板票名后缀要读它）
+        _stub_ro(monkeypatch, [("600001", "测试龙", 12.5, 3, True)], seen)
         out = review_mod.ladder_view(D, [_base_row()])
         assert len(out) == 1
         r = out[0]
         assert (r.code, r.name) == ("600001", "测试龙")
         assert r.turnover_rate == 12.5
         assert r.bomb_times == 3
+        assert r.is_one_word is True
         # 梯队判定字段原样透传，报告的 ②段 靠它们分组
         assert r.cont_days == 4 and r.is_exchange is True and r.is_top is True
         assert seen[0]["d"] == D and seen[0]["codes"] == ["600001"]
+
+    def test_is_one_word_none_when_derived_bar_missing(self, monkeypatch):
+        """derived_bar 无当日行 → is_one_word 为 None（不是 False）。"""
+        _stub_ro(monkeypatch, [("600001", "测试龙", 12.5, 3, None)])
+        assert review_mod.ladder_view(D, [_base_row()])[0].is_one_word is None
 
     def test_missing_row_becomes_none_not_zero(self, monkeypatch):
         """F6 不补零：炸板次数缺失即 None——补 0 会被 _ladder_tag 当成「无炸板」。"""
         _stub_ro(monkeypatch, [])
         r = review_mod.ladder_view(D, [_base_row()])[0]
         assert r.bomb_times is None and r.turnover_rate is None
+        assert r.is_one_word is None
         assert r.name == ""            # stock_basic 无此票时不编造名称
 
     def test_empty_rows_skips_query(self, monkeypatch):
@@ -131,7 +139,7 @@ class TestLadderView:
 
     def test_json_export_keeps_ladder_fields(self, monkeypatch):
         """JSON 出口走 dataclasses.asdict：若改成包装+透传会只剩包装层字段。"""
-        _stub_ro(monkeypatch, [("600001", "测试龙", 12.5, 3)])
+        _stub_ro(monkeypatch, [("600001", "测试龙", 12.5, 3, True)])
         import json
         d = {"date": D, "ladder_rows": review_mod.ladder_view(D, [_base_row()]),
              "stat": None, "sole": None, "elimination": [], "quality": {}}
@@ -139,6 +147,222 @@ class TestLadderView:
         row = js["ladder_rows"][0]
         assert row["code"] == "600001" and row["cont_days"] == 4
         assert row["name"] == "测试龙" and row["bomb_times"] == 3
+
+
+# ────────────── R67-1：速览最高板数字后缀票名 ──────────────
+
+def _note_row(code, name, cont, *, ex=True, one=False, susp=False):
+    """梯队行桩：`_top_boards_note` 只读这几个属性。"""
+    return review_mod.LadderRow(
+        date=D, code=code, cont_days=cont, is_exchange=ex, is_top=True,
+        is_sole_top=False, y_top_group_count=1, y_top_survivor_count=1,
+        name=name, turnover_rate=None, bomb_times=None,
+        is_one_word=one, is_suspended=susp)
+
+
+def _stub_review_query(monkeypatch, *, health=P, note=None, sink=None):
+    """query_df 路由桩：`_health_of` 走 review_report/daily_bar，兜底票名走 derived_bar。"""
+    def q(sql, params=()):
+        if sink is not None:
+            sink.append((sql, params))
+        if "review_report" in sql:
+            import pandas as pd
+            return pd.DataFrame({"d": [health]})
+        if "derived_bar" in sql:
+            return note
+        if "SELECT DISTINCT date FROM daily_bar" in sql:
+            import pandas as pd
+            return pd.DataFrame({"date": [P]})
+        raise AssertionError(f"意外的查询：{sql}")
+    monkeypatch.setattr(review_mod, "query_df", q)
+
+
+class TestTopBoardsNote:
+    """R67-1：10-12 owner 只收到「名义最高板：9 → 10」不知是哪只票。"""
+
+    def test_uses_ladder_rows_without_touching_db(self, monkeypatch):
+        def boom(sql, params=()):
+            raise AssertionError("梯队行已够，不该兜底打库")
+        monkeypatch.setattr(review_mod, "query_df", boom)
+        d = {"stat": {"max_limit_days": 10},
+             "ladder_rows": [_note_row("600825", "新华传媒", 10, one=True)]}
+        assert review_mod._top_boards_note(d, "max_limit_days") == "（新华传媒 600825 一字）"
+
+    def test_single_name_has_no_count_suffix(self, monkeypatch):
+        """1 只票不加「等 N 只」——速览要短。"""
+        monkeypatch.setattr(review_mod, "query_df", lambda *a, **k: None)
+        d = {"stat": {"max_limit_days": 5},
+             "ladder_rows": [_note_row("000530", "冰山冷热", 5)]}
+        assert review_mod._top_boards_note(d, "max_limit_days") == "（冰山冷热 000530）"
+
+    def test_tradable_key_requires_exchange(self, monkeypatch):
+        """可交易最高板只认换手板：非换手同高行进不了后缀。"""
+        seen = []
+        _stub_review_query(monkeypatch, note=None, sink=seen)
+        d = {"date": D, "stat": {"tradable_max_days": 5},
+             "ladder_rows": [_note_row("600001", "一字龙", 5, one=True, ex=False)]}
+        # 无换手同高行 → 走兜底（兜底 SQL 必须带 is_exchange 过滤）
+        assert review_mod._top_boards_note(d, "tradable_max_days") == ""
+        sql = seen[-1][0]
+        assert "derived_bar" in sql and "AND d.is_exchange" in sql
+
+    def test_nominal_key_fallback_sql_has_no_exchange_filter(self, monkeypatch):
+        seen = []
+        _stub_review_query(monkeypatch, note=None, sink=seen)
+        d = {"date": D, "stat": {"max_limit_days": 9}, "ladder_rows": []}
+        assert review_mod._top_boards_note(d, "max_limit_days") == ""
+        assert "AND d.is_exchange" not in seen[-1][0]
+
+    def test_suspended_row_excluded(self, monkeypatch):
+        """停牌身位不计入最高板（owner 拍板）——停牌行不得出现在后缀里。"""
+        seen = []
+        _stub_review_query(monkeypatch, note=None, sink=seen)
+        d = {"date": D, "stat": {"max_limit_days": 10},
+             "ladder_rows": [_note_row("600825", "新华传媒", 10, susp=True)]}
+        assert review_mod._top_boards_note(d, "max_limit_days") == ""
+        assert "derived_bar" in seen[-1][0]     # 被排除后只能兜底
+
+    def test_fallback_reads_derived_bar(self, monkeypatch):
+        import pandas as pd
+        _stub_review_query(monkeypatch, note=pd.DataFrame(
+            {"code": ["600825"], "name": ["新华传媒"], "is_one_word": [True]}))
+        d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
+        assert review_mod._top_boards_note(d, "max_limit_days") == "（新华传媒 600825 一字）"
+
+    def test_fallback_limit_is_three(self, monkeypatch):
+        seen = []
+        import pandas as pd
+        _stub_review_query(monkeypatch, note=pd.DataFrame(
+            {"code": ["a"], "name": ["A"], "is_one_word": [False]}), sink=seen)
+        d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
+        review_mod._top_boards_note(d, "max_limit_days")
+        assert seen[-1][1][-1] == review_mod._MAX_NOTE_NAMES == 3
+
+    def test_more_than_three_gets_count_suffix(self, monkeypatch):
+        monkeypatch.setattr(review_mod, "query_df", lambda *a, **k: None)
+        rows = [_note_row(f"60000{i}", f"票{i}", 4) for i in range(5)]
+        d = {"stat": {"max_limit_days": 4}, "ladder_rows": rows}
+        out = review_mod._top_boards_note(d, "max_limit_days")
+        assert out == "（票0 600000、票1 600001、票2 600002 等 5 只）"
+
+    @pytest.mark.parametrize("height", [None, "", 0, "abc"])
+    def test_no_height_returns_empty(self, monkeypatch, height):
+        monkeypatch.setattr(review_mod, "query_df", lambda *a, **k: None)
+        d = {"stat": {"max_limit_days": height}, "ladder_rows": []}
+        assert review_mod._top_boards_note(d, "max_limit_days") == ""
+
+    def test_empty_df_returns_empty(self, monkeypatch):
+        import pandas as pd
+        _stub_review_query(monkeypatch, note=pd.DataFrame(columns=["code", "name", "is_one_word"]))
+        d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
+        assert review_mod._top_boards_note(d, "max_limit_days") == ""
+
+    def test_exception_is_swallowed(self, monkeypatch):
+        """速览不能因补票名失败而整篇渲染不出来。"""
+        def boom(sql, params=()):
+            raise RuntimeError("库炸了")
+        monkeypatch.setattr(review_mod, "query_df", boom)
+        d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
+        assert review_mod._top_boards_note(d, "max_limit_days") == ""
+
+    def test_overview_line_carries_note(self, monkeypatch):
+        """集成：`- 名义最高板：5 → 10（新华传媒 600825 一字）`。"""
+        _stub_review_query(monkeypatch)
+        d = {
+            "date": D,
+            "stat": {"limit_up_count": 61, "max_limit_days": 10,
+                     "tradable_max_days": 4, "phase": "主升"},
+            "prev_stat": {"limit_up_count": 36, "max_limit_days": 5,
+                          "tradable_max_days": 4, "phase": "主升"},
+            "ladder_rows": [_note_row("600825", "新华传媒", 10, one=True),
+                            _note_row("000530", "冰山冷热", 4)],
+            "quality": {"diff": None, "warns": []},
+        }
+        out = review_mod._sec_overview(d)
+        # suffix 在四分支里都拼（含「持平」）——两端都带票名，与 lkl 口径一致
+        assert ("- 名义最高板：5（新华传媒 600825 一字） → "
+                "10（新华传媒 600825 一字）") in out
+        assert "- 可交易最高板：4（冰山冷热 000530）（持平）" in out
+        assert "- 涨停家数：36 → 61" in out
+        assert "涨停家数：36（" not in out
+
+
+# ────────────── R67-2：②段停牌身位单独展示 ──────────────
+
+class TestSecLadderSuspended:
+    """`_sec_ladder`：停牌行不并进板数分组，只在末尾单独一行「N板（停牌）」。"""
+
+    @staticmethod
+    def _row(code, name, cont, *, ex=True, susp=False, bomb=None):
+        return review_mod.LadderRow(
+            date=D, code=code, cont_days=cont, is_exchange=ex, is_top=False,
+            is_sole_top=False, y_top_group_count=1, y_top_survivor_count=1,
+            name=name, turnover_rate=None, bomb_times=bomb,
+            is_one_word=not ex, is_suspended=susp)
+
+    def test_suspended_line_is_rendered_last(self):
+        d = {"ladder_rows": [self._row("002952", "捷荣技术", 4),
+                             self._row("600825", "新华传媒", 10, susp=True)]}
+        out = review_mod._sec_ladder(d)
+        lines = [ln for ln in out.splitlines() if ln.startswith("- **")]
+        assert lines == ["- **4板** [1只] 捷荣技术(002952)",
+                         "- **10板（停牌）** [1只] 新华传媒(600825)"]
+
+    def test_suspended_not_merged_into_same_height_group(self):
+        """同板数时停牌行不得混进正常分组（否则数字被污染）。"""
+        d = {"ladder_rows": [self._row("002952", "捷荣技术", 4),
+                             self._row("600825", "新华传媒", 4, susp=True)]}
+        out = review_mod._sec_ladder(d)
+        assert "- **4板** [1只] 捷荣技术(002952)" in out
+        assert "- **4板（停牌）** [1只] 新华传媒(600825)" in out
+
+    def test_suspended_tag_has_no_one_word_or_bomb_suffix(self):
+        """停牌行只写名(码)：一字/开板附注对停牌日无意义。
+
+        注意尾部固有一行「开板计数为东财 zbc 字段…」说明，故只断言停牌行本身。
+        """
+        d = {"ladder_rows": [self._row("600825", "新华传媒", 10, ex=False,
+                                       susp=True, bomb=7)]}
+        out = review_mod._sec_ladder(d)
+        line = next(ln for ln in out.splitlines() if ln.startswith("- **"))
+        assert line == "- **10板（停牌）** [1只] 新华传媒(600825)"
+        assert next(ln for ln in out.splitlines()
+                    if ln.startswith("> ")).startswith("> 开板计数")
+
+    def test_only_suspended_rows_has_no_heading_hole(self):
+        d = {"ladder_rows": [self._row("600825", "新华传媒", 10, susp=True)]}
+        out = review_mod._sec_ladder(d)
+        assert out.startswith("## ② 梯队全景\n")
+        assert "- **10板（停牌）** [1只] 新华传媒(600825)" in out
+
+    def test_all_empty_keeps_original_placeholder(self):
+        assert review_mod._sec_ladder({"ladder_rows": []}) == (
+            "## ② 梯队全景\n\n无连板梯队（当日无 ≥2 板）\n")
+
+    def test_suspended_rows_excluded_from_seal_notes(self):
+        """停牌行已被摘出，`_seal_notes` 不该为它出开板回封附注。"""
+        d = {"ladder_rows": [self._row("600825", "新华传媒", 10, susp=True, bomb=7)],
+             "seal_map": {"600825": ("09:31", "14:20")}}
+        out = review_mod._sec_ladder(d)
+        assert "首封" not in out
+
+    def test_normal_rows_keep_seal_notes(self):
+        d = {"ladder_rows": [self._row("002952", "捷荣技术", 4, bomb=2)],
+             "seal_map": {"002952": ("09:31", "14:20")}}
+        out = review_mod._sec_ladder(d)
+        assert "> 捷荣技术：首封09:31 末次回封14:20（东财 zbc=2）" in out
+
+    def test_heights_sorted_descending_with_suspended_tail(self):
+        d = {"ladder_rows": [self._row("600001", "甲", 3),
+                             self._row("600002", "乙", 6),
+                             self._row("600825", "新华传媒", 10, susp=True),
+                             self._row("600003", "丙", 2, susp=True)]}
+        out = review_mod._sec_ladder(d)
+        lines = [ln for ln in out.splitlines() if ln.startswith("- **")]
+        assert lines == ["- **6板** [1只] 乙(600002)",
+                         "- **3板** [1只] 甲(600001)",
+                         "- **10板（停牌）** [1只] 新华传媒(600825)",
+                         "- **2板（停牌）** [1只] 丙(600003)"]
 
 
 # ────────────── 断点 3：entry.split_checklist API 漂移后的行拆分 ──────────────

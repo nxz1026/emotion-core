@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from datetime import date
 
 import pandas as pd
@@ -35,9 +36,15 @@ class TestCodes:
         assert None not in result
 
 
-def _mock(monkeypatch, *, watch=(), hot=()):
-    """装 watchlist / hot_rank 两个查询的假连接，并记录 SQL。"""
-    seen: dict[str, str] = {}
+def _mock(monkeypatch, *, watch=(), hot=(), tradable=None):
+    """装 watchlist / hot_rank / daily_bar 三个查询的假连接，并记录 SQL。
+
+    `tradable`（R67-3）：当日有行情的 code 集合。默认 = watch + hot 的全部
+    code（即「全部可交易」），这样既有的候选池顺序/截断断言不受硬闸门影响；
+    传 `[]` 可模拟整池停牌，传子集可模拟部分缺行情。
+    """
+    seen: dict[str, object] = {}
+    have_bar = set(watch) | set(hot) if tradable is None else set(tradable)
 
     def mock_query(sql, params=()):
         if "watchlist" in sql:
@@ -46,6 +53,10 @@ def _mock(monkeypatch, *, watch=(), hot=()):
         if "hot_rank" in sql:
             seen["hot"] = sql
             return pd.DataFrame({"code": list(hot)})
+        if "daily_bar" in sql:
+            seen["tradable"] = sql
+            seen["tradable_params"] = params
+            return pd.DataFrame({"code": sorted(have_bar)})
         raise AssertionError(f"意外的查询：{sql}")
 
     monkeypatch.setattr(universe, "query_df", mock_query)
@@ -150,3 +161,83 @@ class TestFilterCodes:
     def test_limit_truncates(self):
         codes = [f"6005{i:02d}" for i in range(150)]
         assert len(universe.filter_codes(codes, limit=80)) == 80
+
+
+class TestTradableCodes:
+    """R67-3 第一层：``tradable_codes`` / ``drop_untradable``。
+
+    事故背景：2026-10-13 ``strategy_signal`` 有一条 600825 的
+    ``expectation_repricing`` **BUY** score 92，而 600825 自 10-13 起连续停牌。
+    停牌日的顺延占位行 ``volume = 0``（判据同 ``data.bar_guard.is_padding_row``），
+    ``volume > 0`` 一次查全市场即可把停牌/无 bar 的票排除。
+    """
+
+    def test_returns_codes_as_set(self, monkeypatch):
+        _mock(monkeypatch, tradable=["600519", "000001"])
+        assert universe.tradable_codes(date(2024, 6, 15)) == {"600519", "000001"}
+
+    def test_empty_when_no_bar(self, monkeypatch):
+        _mock(monkeypatch, tradable=[])
+        assert universe.tradable_codes(date(2024, 6, 15)) == set()
+
+    def test_sql_filters_padding_rows_and_boards(self, monkeypatch):
+        """判据必须是 ``volume > 0``（停牌占位行的特征），且限定主板前缀。"""
+        seen = _mock(monkeypatch, tradable=["600519"])
+        universe.tradable_codes(date(2024, 6, 15))
+        sql = str(seen["tradable"]).lower()
+        assert "from daily_bar" in sql
+        assert "volume > 0" in sql, "停牌占位行 volume=0，缺此判据会把停牌票当有行情"
+        assert "left(code, 3) in" in sql, "必须限定 BOARD_PREFIXES，别把创业板算进来"
+        assert seen["tradable_params"][0] == date(2024, 6, 15)
+
+    def test_drop_untradable_preserves_order_and_keeps_known(self, monkeypatch):
+        _mock(monkeypatch, tradable=["600519", "000001"])
+        assert universe.drop_untradable(["600519", "600825", "000001"], date(2024, 6, 15)) == [
+            "600519",
+            "000001",
+        ]
+
+    def test_drop_untradable_all_suspended(self, monkeypatch):
+        _mock(monkeypatch, tradable=[])
+        assert universe.drop_untradable(["600825", "002343"], date(2024, 6, 15)) == []
+
+
+class TestBuildUniverseTradableGate:
+    """R67-3 第一层闸门接在 ``build_universe`` 里，过滤**在截断之后**。"""
+
+    def test_drops_suspended_code(self, monkeypatch):
+        _mock(monkeypatch, watch=["600825"], hot=["000001"], tradable=["000001"])
+        assert universe.build_universe(date(2024, 6, 15)) == ["000001"]
+
+    def test_truncation_happens_before_filter(self, monkeypatch):
+        """锁定现状口径：先按 STRATEGY_MAX_UNIVERSE 截断，再剔除停牌票。
+
+        因此停牌票会占用一个截断名额，末尾的可交易票**补不进来**——此处
+        600521 进了池、000001 被截掉，600825 剔除后池里只剩 2 只（非 3 只）。
+        这是已知取舍（STRATEGY_HOT_N=20 + 自选表通常远小于上限 80，截断一般
+        不生效）；若哪天改成「先剔除再截断」，本断言必须同步改。
+        """
+        conf = dataclasses.replace(REAL_CONFIG, STRATEGY_MAX_UNIVERSE=3)
+        monkeypatch.setattr(universe, "CONFIG", conf)
+        _mock(
+            monkeypatch,
+            watch=["600825", "600520"],
+            hot=["600521", "000001"],
+            tradable=["600520", "600521", "000001"],
+        )
+        result = universe.build_universe(date(2024, 6, 15))
+        assert result == ["600520", "600521"]
+        assert "600825" not in result
+
+    def test_no_log_when_everything_tradable(self, monkeypatch, caplog):
+        _mock(monkeypatch, watch=["600519"], hot=["000001"])
+        with caplog.at_level(logging.INFO):
+            universe.build_universe(date(2024, 6, 15))
+        assert "剔除当日无行情" not in caplog.text
+
+    def test_logs_dropped_codes(self, monkeypatch, caplog):
+        _mock(monkeypatch, watch=["600825", "600519"], tradable=["600519"])
+        with caplog.at_level(logging.INFO):
+            universe.build_universe(date(2024, 6, 15))
+        assert "剔除当日无行情标的 1 只" in caplog.text
+        assert "600825" in caplog.text

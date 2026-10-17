@@ -529,3 +529,270 @@ class TestHumanizeAlert:
         b = notify._humanize_alert("beta 文本", kind="daily")
         assert a == "#1" and b == "#2"
         assert call_count[0] == 2
+
+
+class TestPushWatchSignals:
+    """R67-4：WATCH 信号即时推送——按 code 聚合、阈值 60、单日 top10、24h 节流。
+
+    背景：`strategy_signal` 的 WATCH 此前完全不推送（2026-10-08 600825 有 3 条
+    WATCH 而 owner 一条没收到）。BUY 走 `push_buy_signal`，这里是 WATCH 通道。
+    """
+
+    D = date(2026, 10, 8)
+
+    @pytest.fixture(autouse=True)
+    def _reset(self, monkeypatch):
+        notify.reset_watch_dedup()
+        for k in ("EMOTION_PUSH_WATCH", "PUSH_WATCH",
+                  "EMOTION_WATCH_PUSH_MIN_SCORE", "WATCH_PUSH_MIN_SCORE",
+                  "EMOTION_WATCH_PUSH_MAX_CODES", "WATCH_PUSH_MAX_CODES"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+
+    @staticmethod
+    def _spy(posted):
+        import requests as real_requests
+
+        def mock_post(url, **kw):
+            posted.append({"url": url, "body": kw.get("json")})
+            return _resp(200, {"code": 0})
+
+        return mock_post, real_requests
+
+    @staticmethod
+    def _texts(posted):
+        """飞书 payload 正文（`_payload` 出 `{"msg_type","content":{"text":…}}`）。"""
+        out = []
+        for p in posted:
+            body = p["body"]
+            content = body.get("content", body)
+            if isinstance(content, dict):
+                out.append(str(content.get("text", "")))
+            else:
+                out.append(str(content))
+        return out
+
+    def _row(self, code, strategy, score, reason="理由", name=None, **extra):
+        row = {"code": code, "strategy": strategy, "score": score,
+               "reason": reason, "action": "WATCH"}
+        if name is not None:
+            row["stock_name"] = name
+        row.update(extra)
+        return row
+
+    def test_aggregates_by_code_and_drops_below_threshold(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [self._row("600825", "bottom_volume", 75, "缩量回踩", name="新华传媒"),
+                self._row("600825", "emotion_cycle", 45, "情绪低点"),
+                self._row("600825", "bull_trend", 62, "趋势向上"),
+                self._row("002343", "bull_trend", 59, "差一分")]
+        sent = notify.push_watch_signals(rows, self.D)
+
+        assert sent == 1, "只有 600825 有 ≥60 分信号"
+        assert len(posted) == 1
+        text = self._texts(posted)[0]
+        assert "[策略观察·WATCH] 2026-10-08" in text
+        assert "新华传媒(600825) 最高 75 分" in text
+        assert "bottom_volume 75：缩量回踩" in text
+        assert "bull_trend 62：趋势向上" in text
+        assert "emotion_cycle 45" not in text, "45 分低于阈值不进正文"
+        assert "002343" not in text
+
+    def test_strategy_display_name_never_becomes_stock_name(self, monkeypatch):
+        """runner 的 `name` 是策略显示名；有 stock_name 时必须用它。"""
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [self._row("600825", "一阳三阴", 80, name="新华传媒")]
+        notify.push_watch_signals(rows, self.D)
+
+        text = self._texts(posted)[0]
+        assert "新华传媒(600825)" in text
+        assert "一阳三阴(600825)" not in text
+
+    def test_falls_back_to_name_key_when_no_stock_name(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [self._row("600825", "bottom_volume", 80, name=None)]
+        rows[0]["name"] = "新华传媒"
+        notify.push_watch_signals(rows, self.D)
+
+        assert "新华传媒(600825)" in self._texts(posted)[0]
+
+    def test_same_code_same_day_throttled(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+        rows = [self._row("600825", "bottom_volume", 75, name="新华传媒")]
+
+        assert notify.push_watch_signals(rows, self.D) == 1
+        assert notify.push_watch_signals(rows, self.D) == 0, "24h 内同 (date,code) 节流"
+        assert len(posted) == 1
+
+    def test_different_date_pushes_again(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+        rows = [self._row("600825", "bottom_volume", 75, name="新华传媒")]
+
+        notify.push_watch_signals(rows, self.D)
+        assert notify.push_watch_signals(rows, date(2026, 10, 9)) == 1
+        assert len(posted) == 2
+
+    def test_watch_dedup_is_separate_from_buy_dedup(self, monkeypatch):
+        """同一 (date, code)：BUY 推过不能吃掉 WATCH 的配额。"""
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+        notify.reset_buy_dedup()
+
+        cl = SimpleNamespace(c1_uniqueness=True, c2_exchange=True,
+                             c3_elimination=True, c4_min_days=True,
+                             c5_strength_diverge=True, w1_crowding=True)
+        notify.push_buy_signal("600825", "新华传媒", 5, "STANDARD", cl, self.D)
+        sent = notify.push_watch_signals(
+            [self._row("600825", "bottom_volume", 75, name="新华传媒")], self.D)
+
+        assert sent == 1
+        assert len(posted) == 2
+
+    def test_disabled_by_env_posts_nothing(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+        monkeypatch.setenv("EMOTION_PUSH_WATCH", "0")
+
+        sent = notify.push_watch_signals(
+            [self._row("600825", "bottom_volume", 99, name="新华传媒")], self.D)
+
+        assert sent == 0
+        assert posted == []
+
+    def test_missing_webhook_url_skips_silently(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+        monkeypatch.delenv("EMOTION_LKL_WEBHOOK_URL", raising=False)
+
+        assert notify.push_watch_signals(
+            [self._row("600825", "bottom_volume", 99, name="新华传媒")], self.D) == 0
+        assert posted == []
+
+    def test_all_below_threshold_sends_nothing(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [self._row("600825", "a", 59), self._row("002343", "b", 10)]
+        assert notify.push_watch_signals(rows, self.D) == 0
+        assert posted == []
+
+    def test_top10_cap_and_remainder_note(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [self._row(f"60000{i}", "s", 90 - i) for i in range(3)]
+        monkeypatch.setenv("EMOTION_WATCH_PUSH_MAX_CODES", "1")
+        sent = notify.push_watch_signals(rows, self.D)
+
+        assert sent == 1
+        text = self._texts(posted)[0]
+        assert "共 3 只，余下 2 只见报告⑥段" in text
+
+    def test_reason_truncated_to_60_chars(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        long_reason = "缩" * 200
+        notify.push_watch_signals(
+            [self._row("600825", "bottom_volume", 75, long_reason, name="新华传媒")],
+            self.D)
+
+        text = self._texts(posted)[0]
+        line = next(ln for ln in text.splitlines() if ln.startswith("· "))
+        assert line == "· bottom_volume 75：" + "缩" * 60 + "…"
+
+    def test_at_most_three_strategies_per_code(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [self._row("600825", f"s{i}", 90 - i, f"理由{i}", name="新华传媒")
+                for i in range(5)]
+        notify.push_watch_signals(rows, self.D)
+
+        text = self._texts(posted)[0]
+        bullets = [ln for ln in text.splitlines() if ln.startswith("· ")]
+        assert len(bullets) == 3
+        assert bullets[0].startswith("· s0 90") and bullets[-1].startswith("· s2 88")
+
+    def test_http_exception_is_swallowed(self, monkeypatch):
+        import requests as real_requests
+
+        def boom(url, **kw):
+            raise real_requests.ConnectionError("dns")
+
+        monkeypatch.setattr(real_requests, "post", boom)
+
+        assert notify.push_watch_signals(
+            [self._row("600825", "bottom_volume", 75, name="新华传媒")], self.D) == 0
+
+    def test_non_dict_and_empty_rows_are_noop(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        assert notify.push_watch_signals(None, self.D) == 0
+        assert notify.push_watch_signals([], self.D) == 0
+        assert notify.push_watch_signals(["600825", None], self.D) == 0
+        assert posted == []
+
+    def test_rows_without_code_skipped(self, monkeypatch):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+
+        rows = [{"code": "", "strategy": "s", "score": 99, "reason": "r"}]
+        assert notify.push_watch_signals(rows, self.D) == 0
+        assert posted == []
+
+    def test_bad_int_env_falls_back_to_default(self, monkeypatch, caplog):
+        posted = []
+        mock_post, requests = self._spy(posted)
+        monkeypatch.setattr(requests, "post", mock_post)
+        monkeypatch.setenv("EMOTION_WATCH_PUSH_MIN_SCORE", "not-a-number")
+
+        with caplog.at_level(logging.WARNING):
+            # 回退 60 → 59 分仍被剔除
+            sent = notify.push_watch_signals(
+                [self._row("600825", "s", 59, name="新华传媒")], self.D)
+
+        assert sent == 0
+        assert any("不是整数" in r.getMessage() for r in caplog.records)
+
+    def test_failed_http_does_not_poison_dedup(self, monkeypatch):
+        """HTTP 异常不记节流 → 恢复后同一天仍可再推。"""
+        import requests as real_requests
+        posted = []
+
+        def flaky(url, **kw):
+            if not posted:
+                posted.append("fail")
+                raise real_requests.ConnectionError("dns")
+            posted.append({"url": url, "body": kw.get("json")})
+            return _resp(200, {"code": 0})
+
+        monkeypatch.setattr(real_requests, "post", flaky)
+        rows = [self._row("600825", "bottom_volume", 75, name="新华传媒")]
+
+        assert notify.push_watch_signals(rows, self.D) == 0
+        assert notify.push_watch_signals(rows, self.D) == 1, "失败的尝试不该占坑"
+        assert len(posted) == 2

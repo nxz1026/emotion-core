@@ -20,13 +20,16 @@ P = date(2023, 12, 29)
 @pytest.fixture
 def stub(monkeypatch):
     """替换 IO：候选行按日期给定，昨日固定为 P，换手代码集与 derived_bar 行数可控。"""
-    def _apply(rows=(), prev_rows=(), exchange=(), derived_count=1):
+    def _apply(rows=(), prev_rows=(), exchange=(), derived_count=1, suspended=()):
         by_date = {D: [(c, n, x) for c, n, x in rows],
                    P: [(c, n, x) for c, n, x in prev_rows]}
         monkeypatch.setattr(ladder, "load_ladder_candidates", lambda d: by_date.get(d, []))
         monkeypatch.setattr(ladder, "load_exchange_codes", lambda d: set(exchange))
         monkeypatch.setattr(ladder, "prev_trading_day", lambda d: P)
         monkeypatch.setattr(ladder, "count_derived_rows", lambda d: derived_count)
+        # R67-2：停牌候选只在当日注入，避免串到 y_survivors 的 build(P)
+        susp = {D: [(c, n) for c, n in suspended]}
+        monkeypatch.setattr(ladder, "load_suspended_candidates", lambda d: susp.get(d, []))
     return _apply
 
 
@@ -134,6 +137,63 @@ class TestYSurvivors:
         stub(rows=[("600519", 3, True)])
         monkeypatch.setattr(ladder, "prev_trading_day", lambda d: None)
         assert ladder.y_survivors(D) == set()
+
+
+class TestSuspended:
+    """R67-2：停牌日保留「前 N 板」身位，但不占最高层、不改任何数字口径。"""
+
+    def test_fold_injects_suspended_rows(self):
+        rows = ladder.fold(D, [("002952", 9, True)], [], {"002952"},
+                           suspended=[("600825", 10)])
+        got = _by_code(rows)
+
+        susp = got["600825"]
+        assert susp.cont_days == 10 and susp.is_suspended is True
+        assert susp.is_exchange is False
+        # 停牌身位不计入名义最高板，也不进最高组（owner 拍板 A）
+        assert susp.is_top is False and susp.is_sole_top is False
+        assert got["002952"].is_top is True and got["002952"].is_sole_top is True
+        # 排序仍按板数降序 → 停牌 10 板排首位
+        assert [r.code for r in rows] == ["600825", "002952"]
+
+    def test_suspended_does_not_seize_top_group(self):
+        """停牌行板数最高也不得成为最高组——top_group 只看换手板。"""
+        rows = ladder.fold(D, [("002952", 4, True)], [], {"002952"},
+                           suspended=[("600825", 10)])
+        assert {r.code for r in ladder.top_group(rows)} == {"002952"}
+        assert ladder.sole_top(rows).code == "002952"
+
+    def test_top_group_pure_excludes_suspended(self):
+        rows = [LadderDay(date=D, code="600825", cont_days=10, is_exchange=True,
+                          is_top=True, is_sole_top=True, y_top_group_count=0,
+                          y_top_survivor_count=0, is_suspended=True),
+                LadderDay(date=D, code="002952", cont_days=4, is_exchange=True,
+                          is_top=False, is_sole_top=False, y_top_group_count=0,
+                          y_top_survivor_count=0)]
+        assert {r.code for r in ladder.top_group(rows)} == {"002952"}
+
+    def test_suspended_only_day_is_empty_top_group(self):
+        assert ladder.top_group(ladder.fold(D, [], [], set(), suspended=[("600825", 10)])) == []
+
+    def test_no_suspended_keeps_default_false(self):
+        rows = ladder.fold(D, [("002952", 9, True)], [], {"002952"})
+        assert rows[0].is_suspended is False
+
+    def test_build_forwards_suspended_from_loader(self, stub):
+        stub(rows=[("002952", 9, True)], exchange={"002952"},
+             suspended=[("600825", 10)])
+        assert _by_code(ladder.build(D))["600825"].is_suspended is True
+
+    def test_persist_writes_suspended_rows(self, stub, monkeypatch):
+        stub(rows=[("002952", 9, True)], exchange={"002952"},
+             suspended=[("600825", 10)])
+        calls = []
+        monkeypatch.setattr(ladder, "replace_ladder_day",
+                            lambda d, rows: calls.append((d, rows)) or len(rows))
+
+        assert ladder.persist(D) == 2
+        assert sorted(r.code for r in calls[0][1]) == ["002952", "600825"]
+        assert _by_code(calls[0][1])["600825"].is_suspended is True
 
 
 class TestPersist:

@@ -13,6 +13,7 @@ from emotion_core.data.loader import (
     count_derived_rows as _count_derived_rows,
     load_exchange_codes as _load_exchange_codes,
     load_ladder_candidates as _load_ladder_candidates,
+    load_suspended_candidates as _load_suspended_candidates,
     replace_ladder_day as _replace_ladder_day,
 )
 
@@ -20,6 +21,11 @@ from emotion_core.data.loader import (
 def load_ladder_candidates(d: date) -> list[tuple[str, int, bool]]:
     """梯队候选行 (code, cont_days, is_exchange)：主板 + 剔 ST + cont_days>=2。"""
     return _load_ladder_candidates(d)
+
+
+def load_suspended_candidates(d: date) -> list[tuple[str, int]]:
+    """当日停牌但仍有连板身位的行 (code, prev_cont_days)（R67-2 旁路展示）。"""
+    return _load_suspended_candidates(d)
 
 
 def load_exchange_codes(d: date) -> set[str]:

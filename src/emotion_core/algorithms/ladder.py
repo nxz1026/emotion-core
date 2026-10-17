@@ -34,6 +34,7 @@ from emotion_core.services.ladder_service import (
     count_derived_rows,
     load_exchange_codes,
     load_ladder_candidates,
+    load_suspended_candidates,
     replace_ladder_day,
 )
 from emotion_core.domain.ladder import LadderDay
@@ -46,8 +47,11 @@ Candidate = tuple[str, int, bool]  # (code, cont_days, is_exchange)
 
 
 def top_group(rows: list[LadderDay]) -> list[LadderDay]:
-    """同身位组：换手板口径的最高连板集合。"""
-    ex = [r for r in rows if r.is_exchange]
+    """同身位组：换手板口径的最高连板集合。
+
+    停牌行（R67-2）不进最高层竞争：既不计身位也不进组。
+    """
+    ex = [r for r in rows if r.is_exchange and not getattr(r, "is_suspended", False)]
     if not ex:
         return []
     h = max(r.cont_days for r in ex)
@@ -62,13 +66,17 @@ def sole_top(rows: list[LadderDay], min_days: int | None = None) -> LadderDay | 
 
 
 def fold(trade_date: date, rows: list[Candidate],
-         prev_rows: list[Candidate], today_exchange: set[str]) -> list[LadderDay]:
+         prev_rows: list[Candidate], today_exchange: set[str],
+         suspended: list[tuple[str, int]] | None = None) -> list[LadderDay]:
     """纯函数：候选行 → 梯队行（is_top/is_sole_top/R2 计数），按板数降序。
 
     Args:
         rows: 当日候选（主板 + 剔 ST + cont_days>=2），顺序无关。
         prev_rows: 昨日候选，口径同 rows（R2 淘汰赛分母）。
         today_exchange: 今日主板换手板代码集（幸存分子）。
+        suspended: R67-2 当日停牌但仍有连板身位的 (code, prev_cont_days)；
+            停牌行 is_exchange=False、is_top=is_sole_top=False、不进最高组，
+            只在 ②段单独展示，**不影响任何身位数字口径**。
     """
     def _mk(day: date, candidate: Candidate) -> LadderDay:
         code, days, exchange = candidate
@@ -77,6 +85,11 @@ def fold(trade_date: date, rows: list[Candidate],
                          y_top_group_count=0, y_top_survivor_count=0)
 
     base = [_mk(trade_date, r) for r in rows]
+    base.extend(LadderDay(date=trade_date, code=code, cont_days=days,
+                          is_exchange=False, is_top=False, is_sole_top=False,
+                          y_top_group_count=0, y_top_survivor_count=0,
+                          is_suspended=True)
+                for code, days in (suspended or []))
     base.sort(key=lambda r: (-r.cont_days, r.code))
     top_codes = {r.code for r in top_group(base)}
     sole = sole_top(base)
@@ -96,7 +109,8 @@ def build(trade_date: date) -> list[LadderDay]:
     prev = prev_trading_day(trade_date)
     prev_rows = load_ladder_candidates(prev) if prev is not None else []
     today_exchange = load_exchange_codes(trade_date) if prev_rows else set()
-    return fold(trade_date, rows, prev_rows, today_exchange)
+    suspended = load_suspended_candidates(trade_date)
+    return fold(trade_date, rows, prev_rows, today_exchange, suspended)
 
 
 def y_survivors(trade_date: date) -> set[str]:

@@ -40,14 +40,18 @@ class FakeConn:
         self.execute_calls.append((sql, tuple(params) if params else ()))
 
         class _Result:
-            def __init__(self, rc, fetchone_val):
+            def __init__(self, rc, fetchone_val, fetchall_rows):
                 self.rowcount = rc
                 self._fetchone = fetchone_val
+                self._fetchall = fetchall_rows
 
             def fetchone(self):
                 return self._fetchone
 
-        return _Result(self._rowcount, self._fetchone)
+            def fetchall(self):
+                return self._fetchall
+
+        return _Result(self._rowcount, self._fetchone, self._fetchall)
 
     def fetchall(self):
         return self._fetchall
@@ -158,6 +162,102 @@ class TestReplaceLadderDay:
         finally:
             for p in patches:
                 p.stop()
+
+
+    def test_writes_is_suspended_flag(self):
+        """R67-2：第 9 列 is_suspended 落库；未标注的行默认 False。"""
+        conn = FakeConn()
+        patches = _patch_db(conn)
+        for p in patches:
+            p.start()
+        try:
+            rows = [
+                LadderDay(date=date(2026, 10, 14), code="600825", cont_days=10,
+                          is_exchange=False, is_top=False, is_sole_top=False,
+                          y_top_group_count=0, y_top_survivor_count=0,
+                          is_suspended=True),
+                LadderDay(date=date(2026, 10, 14), code="002952", cont_days=4,
+                          is_exchange=True, is_top=True, is_sole_top=True,
+                          y_top_group_count=1, y_top_survivor_count=1),
+            ]
+            loader.replace_ladder_day(date(2026, 10, 14), rows)
+
+            sql, data = conn.executemany_calls[0]
+            assert "is_suspended" in sql
+            assert [row[-1] for row in data] == [True, False]
+        finally:
+            for p in patches:
+                p.stop()
+
+
+# ── 1b. load_suspended_candidates ─────────────────────────────────────
+
+class TestLoadSuspendedCandidates:
+    """R67-2 旁路：停牌但仍有连板身位的 (code, prev_cont_days)。"""
+
+    def _run(self, rows):
+        conn = FakeConn(fetchall_rows=rows)
+        patches = _patch_db(conn)
+        for p in patches:
+            p.start()
+        try:
+            got = loader.load_suspended_candidates(date(2026, 10, 14))
+        finally:
+            for p in patches:
+                p.stop()
+        return got, conn
+
+    def test_returns_code_and_height_tuples(self):
+        got, _ = self._run([("600825", 10)])
+        assert got == [("600825", 10)]
+
+    def test_coerces_height_to_int(self):
+        """psycopg 可能回 Decimal/bigint —— 上层按 int 比较板数。"""
+        got, _ = self._run([("600825", 10)])
+        assert isinstance(got[0][1], int)
+        assert not isinstance(got[0][1], bool)
+
+    def test_empty_result(self):
+        got, _ = self._run([])
+        assert got == []
+
+    def test_sql_excludes_close_zero_assertion(self):
+        """判据必须与 bar_guard.is_padding_row() 同源：OHL 全 0 + 零成交。
+
+        断言 close=0（初版写法）会漏掉 `close=pre_close>0` 的顺延形状——
+        600825 于 2026-10-14/15 正是这一类。
+        """
+        _, conn = self._run([])
+        sql = conn.execute_calls[0][0]
+        assert "b.volume = 0" in sql
+        assert "b.open = 0" in sql and "b.high = 0" in sql and "b.low = 0" in sql
+        assert "b.close = 0" not in sql
+
+    def test_sql_looks_back_for_last_nonzero_height(self):
+        """身位取 D 之前最近一条 cont_days>0（停牌日 cont_days=0 但不断链）。"""
+        _, conn = self._run([])
+        sql = conn.execute_calls[0][0]
+        assert "d.date < s.date" in sql
+        assert "d.cont_days > 0" in sql
+
+    def test_sql_filters_main_board_and_new_issuer(self):
+        """口径与 load_ladder_candidates 一致：主板前缀 + 非 ST + 非次新。"""
+        _, conn = self._run([])
+        sql = conn.execute_calls[0][0]
+        assert "left(r.code, 3) IN" in sql
+        assert "NOT s.is_st" in sql
+        assert "s.first_bar_date" in sql
+
+    def test_sql_requires_height_at_least_two(self):
+        _, conn = self._run([])
+        assert "r.cont_days >= 2" in conn.execute_calls[0][0]
+
+    def test_params_carry_date_and_board_prefixes(self):
+        from emotion_core.utils.config import CONFIG
+        _, conn = self._run([])
+        params = conn.execute_calls[0][1]
+        assert params[0] == date(2026, 10, 14)
+        assert params[1:1 + len(CONFIG.BOARD_PREFIXES)] == tuple(CONFIG.BOARD_PREFIXES)
 
 
 # ── 2. upsert_promotion_day ───────────────────────────────────────────

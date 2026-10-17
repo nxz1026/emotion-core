@@ -127,6 +127,51 @@ def load_ladder_candidates(d: date) -> list[tuple[str, int, bool]]:
     return [(r[0], int(r[1]), bool(r[2])) for r in rows]
 
 
+def load_suspended_candidates(d: date) -> list[tuple[str, int]]:
+    """当日「停牌但仍有连板身位」的行 (code, prev_cont_days)（R67-2 旁路）。
+
+    判据与 `data.bar_guard.is_padding_row()` 同源：OHL 三价全 0 且零成交
+    （`open=high=low=0 AND volume=0`）——**不断言 close=0**：上游有**两种**顺延形状，
+    ① `close=0`（无价占位行）与 ② `close=pre_close>0`（带上一真实收盘的顺延行，
+    停牌日常见，例如 600825 于 2026-10-14/10-15）。只盯 close=0 会把 ② 整类漏掉。
+    身位取该 code 在 D 之前最近一条 `cont_days > 0` 的 `derived_bar.cont_days`
+    （`compute_derived` 遇停牌把 cont_days 记 0 但不断链，故要往前找最近非 0 值）。
+
+    只保留 `prev_cont >= 2` 且主板前缀、非 ST、非次新的行——口径与
+    `load_ladder_candidates()` 完全一致；这里不并进正常候选，避免影响身位口径
+    （owner 拍板：停牌身位不计入名义最高板数字，只在 ②段单独展示）。
+    """
+    ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
+    with connect() as conn:
+        rows = conn.execute(
+            f"""WITH susp AS (
+                    SELECT b.code, b.date FROM daily_bar b
+                     WHERE b.date = %s AND b.volume = 0
+                       AND b.open = 0 AND b.high = 0 AND b.low = 0
+                ),
+                ranked AS (
+                    SELECT s.code, s.date, d.cont_days,
+                           row_number() OVER (PARTITION BY s.code
+                                              ORDER BY d.date DESC) AS rn
+                      FROM susp s
+                      JOIN derived_bar d
+                        ON d.code = s.code AND d.date < s.date
+                       AND d.cont_days > 0
+                )
+                SELECT r.code, r.cont_days
+                  FROM ranked r JOIN stock_basic s USING (code)
+                 WHERE r.rn = 1 AND r.cont_days >= 2 AND NOT s.is_st
+                   AND left(r.code, 3) IN ({ph})
+                   AND (s.first_bar_date IS NOT NULL
+                        AND s.first_bar_date <= GREATEST(%s::date - %s * interval '1 day',
+                                                         %s::date))
+                 ORDER BY r.cont_days DESC, r.code""",
+            (d, *CONFIG.BOARD_PREFIXES, d, CONFIG.NEW_ISSUER_MIN_DAYS,
+             CONFIG.NEW_ISSUER_FLOOR),
+        ).fetchall()
+    return [(r[0], int(r[1])) for r in rows]
+
+
 def load_exchange_codes(d: date) -> set[str]:
     """当日主板换手板代码集（幸存口径：不受 ST / 连板数过滤，同 lkl y_survivors）。"""
     ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
@@ -158,18 +203,20 @@ def replace_ladder_day(d: date, rows: list[LadderDay]) -> int:
         if not rows:
             return 0
         data = [(r.date, r.code, r.cont_days, r.is_exchange, r.is_top, r.is_sole_top,
-                 r.y_top_group_count, r.y_top_survivor_count) for r in rows]
+                 r.y_top_group_count, r.y_top_survivor_count,
+                 bool(getattr(r, "is_suspended", False))) for r in rows]
         with conn.cursor() as cur:
             cur.executemany(
                 """INSERT INTO ladder_day
                    (date, code, cont_days, is_exchange, is_top, is_sole_top,
-                    y_top_group_count, y_top_survivor_count)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    y_top_group_count, y_top_survivor_count, is_suspended)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (date, code) DO UPDATE SET
                      cont_days=EXCLUDED.cont_days, is_exchange=EXCLUDED.is_exchange,
                      is_top=EXCLUDED.is_top, is_sole_top=EXCLUDED.is_sole_top,
                      y_top_group_count=EXCLUDED.y_top_group_count,
-                     y_top_survivor_count=EXCLUDED.y_top_survivor_count""",
+                     y_top_survivor_count=EXCLUDED.y_top_survivor_count,
+                     is_suspended=EXCLUDED.is_suspended""",
                 data,
             )
         return len(data)

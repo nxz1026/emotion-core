@@ -135,6 +135,7 @@ DDL: dict[str, str] = {
             is_sole_top        boolean NOT NULL DEFAULT false,
             y_top_group_count  integer,
             y_top_survivor_count integer,
+            is_suspended       boolean NOT NULL DEFAULT false,
             PRIMARY KEY (date, code)
         )""",
     "signal": """

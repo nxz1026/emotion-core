@@ -5,6 +5,7 @@ Native emotion-core implementation.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from datetime import date
 
@@ -12,6 +13,8 @@ import pandas as pd
 
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
+
+log = logging.getLogger("emotion_core.strategy.universe")
 
 
 def _codes(frame: pd.DataFrame) -> list[str]:
@@ -40,6 +43,32 @@ def filter_codes(codes: Iterable[object], *, limit: int | None = None) -> list[s
     return result
 
 
+def tradable_codes(trade_date: date) -> set[str]:
+    """当日有真实行情的主板代码集（R67-3 第一层：``daily_bar.volume > 0``）。
+
+    一次查全市场，别逐票查库。停牌日的顺延占位行 ``volume = 0``
+    （判据同 ``data.bar_guard.is_padding_row``），会被排除；当日无 bar 的票
+    自然不在集合里。
+
+    事故背景：2026-10-13 ``strategy_signal`` 里有一条 600825
+    ``expectation_repricing`` **BUY** score 92，而 600825 在 10-13/10-14/10-15
+    连续停牌——LLM 拿不到当日行情却仍给了买入结论。
+    """
+    ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
+    df = query_df(
+        f"SELECT code FROM daily_bar WHERE date = %s AND volume > 0"
+        f" AND left(code, 3) IN ({ph})",
+        (trade_date, *CONFIG.BOARD_PREFIXES),
+    )
+    return set(_codes(df))
+
+
+def drop_untradable(codes: Iterable[str], trade_date: date) -> list[str]:
+    """剔除当日无行情（停牌/无 bar）的代码，保序（R67-3 第一层闸门）。"""
+    ok = tradable_codes(trade_date)
+    return [code for code in codes if code in ok]
+
+
 def build_universe(trade_date: date) -> list[str]:
     """返回「手动自选 + 热门池」的主板去重候选，**自选优先**。
 
@@ -65,4 +94,17 @@ def build_universe(trade_date: date) -> list[str]:
         "SELECT code FROM hot_rank WHERE date=%s ORDER BY rank, code LIMIT %s",
         (trade_date, CONFIG.STRATEGY_HOT_N),
     )
-    return filter_codes(_codes(watch) + _codes(hot), limit=CONFIG.STRATEGY_MAX_UNIVERSE)
+    codes = filter_codes(_codes(watch) + _codes(hot), limit=CONFIG.STRATEGY_MAX_UNIVERSE)
+    # R67-3 第一层：当日停牌/无行情标的不进候选池。
+    # ⚠️ 现状是「先按 STRATEGY_MAX_UNIVERSE 截断、再剔除」：停牌票会占用一个
+    # 截断名额，末尾的可交易票补不进来（实际候选可能少于上限）。因为
+    # STRATEGY_HOT_N(20) + 自选表通常远小于 STRATEGY_MAX_UNIVERSE(80)，
+    # 截断一般不生效，故暂不改口径——若要改成「先剔除、再截断」，须同步
+    # 本函数与 tests/unit/test_strategy_universe.py::TestBuildUniverseTradableGate。
+    tradable = drop_untradable(codes, trade_date)
+    if len(tradable) != len(codes):
+        kept = set(tradable)
+        log.info("候选池剔除当日无行情标的 %d 只（%s）：%s",
+                 len(codes) - len(tradable), trade_date,
+                 ",".join(c for c in codes if c not in kept))
+    return tradable

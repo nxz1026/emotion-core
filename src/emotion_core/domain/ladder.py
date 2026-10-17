@@ -24,6 +24,7 @@ class LadderDay:
     is_sole_top: bool           # 唯一最高板（换手组仅 1 只且 >= MIN_LEADER_DAYS）
     y_top_group_count: int      # 昨日最高换手组只数（R2 淘汰赛分母）
     y_top_survivor_count: int   # 昨日最高换手组中今日仍换手的只数（R2 分子）
+    is_suspended: bool = False  # 当日停牌（R67-2：旁路展示，不计身位/不进最高组）
 
 
 @dataclass(frozen=True)

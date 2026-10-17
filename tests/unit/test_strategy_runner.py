@@ -24,6 +24,7 @@ from pathlib import Path
 
 import httpx
 
+from emotion_core.services import notify
 from emotion_core.services.strategy import runner
 from emotion_core.services.strategy.loader import load_strategies
 from emotion_core.utils.config import CONFIG as REAL_CONFIG
@@ -244,9 +245,16 @@ def _wire(
     # 2026-10-09 日志巡检 D：补跑轮退避基数默认置 0，避免单测真的 sleep。
     retry_round_delay=0.0,
     max_consecutive_failures=3,
+    tradable=None,
     **cfg,
 ):
-    """装配一个不碰 DB / 网络 / 磁盘的 run_for_date 环境。"""
+    """装配一个不碰 DB / 网络 / 磁盘的 run_for_date 环境。
+
+    `tradable`（R67-3）：当日有行情 code 集。默认 = 全部 `codes`（即全部可交易），
+    保证既有用例的配额/轮转语义不受硬闸门影响；传子集模拟当日缺行情。
+
+    返回被拦截的 `push_watch_signals` 调用列表（R67-4 触发点断言用）。
+    """
     import emotion_core.services.llm_backend as backend
 
     conf = dataclasses.replace(REAL_CONFIG, **_overrides(max_llm, cfg))
@@ -256,6 +264,17 @@ def _wire(
     monkeypatch.setattr(runner, "RETRY_BASE_DELAY", retry_base_delay)
     monkeypatch.setattr(runner, "RETRY_ROUND_DELAY", retry_round_delay)
     monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
+    # R67-3 硬闸门会查库（tradable_codes）——本文件必须 DB-free，按日缓存也要清。
+    monkeypatch.setattr(runner, "tradable_codes",
+                        lambda _d: set(codes if tradable is None else tradable))
+    monkeypatch.setattr(runner, "_TRADABLE_CACHE", {})
+    # R67-4：WATCH 推送必须打桩——替身默认回 WATCH，不打桩会真发 HTTP。
+    pushed: list[tuple] = []
+    monkeypatch.setattr(
+        notify,
+        "push_watch_signals",
+        lambda rows, trade_date=None: pushed.append((trade_date, list(rows))) or 0,
+    )
     monkeypatch.setattr(runner, "load_strategies", lambda _dir: skills)
     monkeypatch.setattr(runner, "build_universe", lambda _d: codes)
     monkeypatch.setattr(runner, "build_stock_context", lambda _d, _c: "上下文")
@@ -264,6 +283,7 @@ def _wire(
     monkeypatch.setattr(runner, "_existing", store.existing)
     monkeypatch.setattr(runner, "_save_batch", store.save)
     monkeypatch.setattr(backend, "LLMClient", lambda *a, **k: client)
+    return pushed
 
 
 class TestStrategyRotation:
@@ -303,6 +323,236 @@ class TestStrategyRotation:
         assert client.attempts == 5
         capped = [s for s in snap.skipped if s["reason"] == "达到LLM调用上限"]
         assert capped, "超预算的组合应记为 skipped"
+
+
+class TestNoBarTodayGate:
+    """R67-3 第二层硬闸门：当日停牌/无行情的票，LLM 给 BUY/WATCH 也不落库。
+
+    事故背景：2026-10-13 `strategy_signal` 有一条 600825
+    `expectation_repricing` **BUY** score 92，而该票 10-13/10-14/10-15 连续停牌。
+    """
+
+    def test_signal_dropped_and_recorded(self, monkeypatch, caplog):
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            tradable=set(),  # 整池当日无行情
+        )
+        with caplog.at_level(logging.WARNING):
+            saved = runner.run_for_date(TRADE_DATE)
+        assert saved == 0, "停牌票不许落库"
+        assert store.items == [], f"无行情票进了库：{store.items}"
+        assert client.attempts == 2, "LLM 照常调用（闸门在解析之后、入库之前）"
+        reasons = [s["reason"] for s in snap.skipped]
+        assert reasons.count("no_bar_today") == 2, snap.skipped
+        assert "策略信号丢弃（当日无行情）" in caplog.text
+
+    def test_tradable_code_passes_through(self, monkeypatch):
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            tradable={"c1"},
+        )
+        assert runner.run_for_date(TRADE_DATE) == 1
+        assert [it["code"] for it in store.items] == ["c1"]
+        assert not [s for s in snap.skipped if s["reason"] == "no_bar_today"]
+
+    def test_only_suspended_code_is_filtered_from_mixed_pool(self, monkeypatch):
+        """混合池：只有缺行情的票被丢，其余照常入库。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2", "c3"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            tradable={"c1", "c3"},
+        )
+        assert runner.run_for_date(TRADE_DATE) == 2
+        assert [it["code"] for it in store.items] == ["c1", "c3"]
+        dropped = [s for s in snap.skipped if s["reason"] == "no_bar_today"]
+        assert [s["code"] for s in dropped] == ["c2"]
+
+    def test_gate_applies_to_explicit_codes(self, monkeypatch):
+        """显式 `--codes` 补跑名单不过第一层 `build_universe`，须由第二层兜住。
+
+        用真主板代码而非 `c1`：显式名单会过 `filter_codes`（`BOARD_PREFIXES`），
+        假代码会被前缀过滤掉，让本用例空跑成假绿。
+        """
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["600825"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            tradable=set(),
+        )
+        assert runner.run_for_date(TRADE_DATE, codes=["600825"]) == 0
+        assert store.items == []
+        assert [s["code"] for s in snap.skipped if s["reason"] == "no_bar_today"] == ["600825"]
+
+    def test_has_tradable_bar_caches_per_day(self, monkeypatch):
+        """按日缓存：170 code × 15 策略不得退化成数千次查库。"""
+        calls: list[date] = []
+
+        def fake_tradable(d):
+            calls.append(d)
+            return {"c1"}
+
+        monkeypatch.setattr(runner, "tradable_codes", fake_tradable)
+        monkeypatch.setattr(runner, "_TRADABLE_CACHE", {})
+        assert runner._has_tradable_bar(TRADE_DATE, "c1") is True
+        assert runner._has_tradable_bar(TRADE_DATE, "c2") is False
+        assert runner._has_tradable_bar(TRADE_DATE, "c1") is True
+        assert calls == [TRADE_DATE], f"缓存未生效，查库 {len(calls)} 次"
+        assert runner._TRADABLE_CACHE[TRADE_DATE] == frozenset({"c1"})
+
+    def test_empty_set_is_cached_too(self, monkeypatch):
+        """空集也要缓存（否则整池停牌日每次都全市场查库）。"""
+        calls: list[date] = []
+
+        def fake_tradable(d):
+            calls.append(d)
+            return set()
+
+        monkeypatch.setattr(runner, "tradable_codes", fake_tradable)
+        monkeypatch.setattr(runner, "_TRADABLE_CACHE", {})
+        assert runner._has_tradable_bar(TRADE_DATE, "c1") is False
+        assert runner._has_tradable_bar(TRADE_DATE, "c2") is False
+        assert calls == [TRADE_DATE]
+
+
+class TestWatchPushTrigger:
+    """R67-4 触发点：`_save_batch` 之后、`_snapshot` 之前推 WATCH，且只推 WATCH。
+
+    分组推送的消息格式/阈值/节流在 `test_notify.py::TestPushWatchSignals`；
+    这里只管「runner 什么时候调、把什么传过去」。
+    """
+
+    @staticmethod
+    def _reply(action: str, score: int) -> _Reply:
+        r = _Reply()
+        r.text = json.dumps(
+            {"action": action, "score": score, "confidence": 0.7,
+             "reason": f"{action} 测试", "evidence": {}},
+            ensure_ascii=False,
+        )
+        return r
+
+    def test_watch_items_are_pushed(self, monkeypatch):
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        pushed = _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
+        assert runner.run_for_date(TRADE_DATE) == 1
+        assert len(pushed) == 1, "WATCH 条目必须触发一次推送"
+        trade_date, rows = pushed[0]
+        assert trade_date == TRADE_DATE
+        assert [r["code"] for r in rows] == ["c1"]
+        assert [r["action"] for r in rows] == ["WATCH"]
+
+    def test_buy_only_does_not_push(self, monkeypatch):
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        client.script = [self._reply("BUY", 92)]
+        pushed = _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
+        assert runner.run_for_date(TRADE_DATE) == 1
+        assert pushed == [], "BUY 不进 WATCH 推送（走另一条飞书通道）"
+
+    def test_pass_only_does_not_push(self, monkeypatch):
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        client.script = [self._reply("PASS", 20)]
+        pushed = _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
+        assert runner.run_for_date(TRADE_DATE) == 1
+        assert pushed == []
+
+    def test_mixed_batch_pushes_only_watch(self, monkeypatch):
+        """一票 BUY 一票 WATCH：只把 WATCH 那条交给推送。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        client.script = [self._reply("BUY", 92), self._reply("WATCH", 70)]
+        pushed = _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
+        assert runner.run_for_date(TRADE_DATE) == 2
+        assert len(pushed) == 1
+        assert [r["code"] for r in pushed[0][1]] == ["c2"]
+
+    def test_gated_watch_is_not_pushed(self, monkeypatch):
+        """被 R67-3 闸门丢掉的票不进 items，自然也不该被推送。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        pushed = _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            tradable=set(),
+        )
+        assert runner.run_for_date(TRADE_DATE) == 0
+        assert pushed == [], "停牌票的 WATCH 结论不许外推"
+
+    def test_pass_items_saved_but_not_pushed(self, monkeypatch):
+        """PASS 照常落库（保留「有判断但不动手」语义），但绝不进推送。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        client.script = [self._reply("PASS", 10), self._reply("PASS", 10)]
+        pushed = _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+        )
+        assert runner.run_for_date(TRADE_DATE) == 2
+        assert [it["action"] for it in store.items] == ["PASS", "PASS"]
+        assert pushed == [], "PASS 是沉默结论，推了就是噪声"
 
 
 class TestPromptHashUnification:
