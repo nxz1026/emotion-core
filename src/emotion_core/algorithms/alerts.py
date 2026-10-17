@@ -114,8 +114,32 @@ def push_pending_webhook() -> None:
     items = [a for a in pending(20) if a["level"] in ("WARN", "ERROR")]
     if not items:
         return
-    body = "\n".join(f"[{a['level']}] {a['source']}: {a['detail']}"
-                     for a in items[:8])
+    body = "\n".join(
+        f"[{a['level']}] {a['source']}: {a['detail']}（第 {_days_active(a['created_at'])} 天 / 创建于 {_fmt_date(a['created_at'])}）"
+        for a in items[:8]
+    )
     # notify._summary 只认「## ⓪ 速览」段——告警文本包一层可提取结构
     md = "## ⓪ 速览\n\n" + f"**未确认告警 {len(items)} 条**\n\n{body}\n"
     _push(md, None)
+
+
+def _days_active(created_at: str) -> int:
+    """从 created_at 计算连续活跃天数（日历日差 + 1，至少 1 天）。"""
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(created_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        today = datetime.now(timezone.utc).date()
+        created_date = dt.date()
+        return max(1, (today - created_date).days + 1)
+    except (ValueError, TypeError):
+        return 1
+
+
+def _fmt_date(created_at: str) -> str:
+    """把 ISO timestamp 格式成 YYYY-MM-DD。"""
+    try:
+        return created_at[:10]
+    except (TypeError, IndexError):
+        return created_at

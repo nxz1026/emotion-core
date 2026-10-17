@@ -115,8 +115,10 @@ class TestPushPendingWebhook:
     def test_items_trigger_push(self):
         """有未确认 WARN/ERROR → 调 push 发送汇总。"""
         fake_items = [
-            {"level": "ERROR", "source": "daily", "detail": "test error 1"},
-            {"level": "WARN", "source": "pool", "detail": "test warn 1"},
+            {"level": "ERROR", "source": "daily", "detail": "test error 1",
+             "created_at": "2026-10-17T02:00:00+00:00"},
+            {"level": "WARN", "source": "pool", "detail": "test warn 1",
+             "created_at": "2026-10-16T08:30:00+00:00"},
         ]
         with patch("emotion_core.algorithms.alerts.pending", return_value=fake_items):
             with patch("emotion_core.algorithms.alerts._push") as mock_push:
@@ -127,3 +129,6 @@ class TestPushPendingWebhook:
                 body = args[0]
                 assert "未确认告警" in body
                 assert "ERROR" in body
+                assert "创建于 2026-10-17" in body  # _fmt_date 字段
+                assert "第 1 天" in body            # 当日创建 → 第 1 天
+                assert "第 2 天" in body            # 昨日创建 → 第 2 天
