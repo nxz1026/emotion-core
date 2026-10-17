@@ -218,7 +218,7 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 ```bash
 cd emotion-core
 # 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 1935 passed
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 数字随提交变动，以实测为准（2026-10-17：2529 passed）
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
@@ -241,6 +241,13 @@ PYTHONPATH=src .venv/bin/python -m emotion_core.services.ecosystem_service --sta
 # 持仓决策（运维入口；★ 默认只读，`--persist` 才写 holding_decision；`--no-cpt` 关 CPT 查询）
 PYTHONPATH=src .venv/bin/python -m emotion_core.services.holding_service --code 601811 --cost 21.5 --shares 1000 --capital 1000000
 #                           + 可选：--risk-pct 0.02 --liq-pct 0.01 --max-position-pct 0.5 --ensure-factors --user alice
+
+# A 类死功能治理后接 CLI（2026-10-17 接线）：全仓健康 / 实盘 - 回测比对 / RS 排名 / 涨跌幅规则回填 / 分红除权回填
+PYTHONPATH=src .venv/bin/python -m emotion_core.algorithms.doctor                 # 全仓健康自检（7 项，未通过返回 1）
+PYTHONPATH=src .venv/bin/python -m emotion_core.algorithms.compare 2026-10-17      # 实盘 - 回测漂移比对（一致返 0，漂移返 1，--json 出 JSON）
+PYTHONPATH=src .venv/bin/python -m emotion_core.services.ref_rs --top 20           # RS 强弱排名（默认 top 20，--benchmark 改基准）
+PYTHONPATH=src .venv/bin/python -m emotion_core.services.ref_limit_rule --seed     # 涨跌幅制度规则回填（幂等 upsert，10 条）
+PYTHONPATH=src .venv/bin/python -m emotion_core.services.ref_dividend --codes 600519  # 分红除权回填试跑（--sleep 调 Wind 配额）
 
 # 持仓决策（HTTP，恒只读）：GET /api/holding?code=601811&cost=21.5&shares=1000&capital=1000000&cpt=0
 #                             + 可选：risk_pct=0.02&liq_pct=0.01&max_position_pct=0.5&ensure_factors=1&user=alice

@@ -102,3 +102,49 @@ def render(rep: dict) -> str:
         lines.append(f"⚠ **规则漂移报警**：{rep['drift']}"
                      "——已插入 alert（lkl alerts 查看 / alert-ack 确认）")
     return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI：`python -m emotion_core.algorithms.compare <YYYY-MM-DD>`（产品 A2-5）。
+
+    只读对比，但**漂移会写 alert**（与原实现一致，不静默）。
+    返回码：0 两侧一致 / 1 有规则漂移 / 2 参数错。
+    """
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="emotion-core-compare",
+        description="回测—实盘一致性对比：signal 表当日 BUY vs evaluate.replay 重放",
+    )
+    parser.add_argument("date", nargs="?", help="交易日 YYYY-MM-DD，缺省今天")
+    parser.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    try:
+        d = date.fromisoformat(args.date) if args.date else date.today()
+    except ValueError:
+        print(f"日期格式错误：{args.date}（应为 YYYY-MM-DD）", file=sys.stderr)
+        return 2
+
+    rep = compare(d)
+    if args.json:
+        import json
+
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+    else:
+        print(render(rep), end="")
+    if rep["consistent"]:
+        return 0
+    print(f"⚠ 规则漂移 {len(rep['drift'])} 个代码：{rep['drift']}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

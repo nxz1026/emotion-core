@@ -186,3 +186,41 @@ def _extract_digit(text: str, keyword: str) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI：`python -m emotion_core.services.ref_dividend [--codes ...] [--sleep S]`。
+
+    Wind 配额敏感：缺省只补 `stock_basic` 中 2024 年前上市的 500 只。
+    返回码：0 有写入或明确空转（Wind 不可用视为空转，不算失败）/ 1 参数错。
+    """
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="emotion-core-ref-dividend",
+        description="分红除权回补（Wind 源）：写入 ref_dividend",
+    )
+    parser.add_argument("--codes", nargs="+", help="指定代码；缺省取 2024 前上市的 500 只")
+    parser.add_argument("--sleep", type=float, default=0.5, help="每次调用间隔秒数，默认 0.5")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    if args.sleep < 0:
+        print(f"--sleep 不能为负：{args.sleep}", file=sys.stderr)
+        return 1
+
+    inserted, skipped = backfill_dividend(codes=args.codes, sleep_sec=args.sleep)
+    print(f"分红事件回补完成：写入 {inserted} 条，跳过 {skipped} 条")
+    if inserted == 0:
+        print("（0 条写入：Wind 不可用或该批无事件，查上方 warning 日志）")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

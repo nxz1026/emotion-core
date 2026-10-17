@@ -95,3 +95,73 @@ def get_limit_pct(market: str, board: str, as_of: date) -> float | None:
             if row:
                 return float(row[0])
     return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI：`python -m emotion_core.services.ref_limit_rule [--seed] [--query ...]`。
+
+    缺省打印已落库规则；`--seed` 幂等写入 SEED_RULES；`--query` 查单点阈值。
+    返回码：0 成功 / 1 查询未命中或表为空。
+    """
+    import argparse
+    import logging
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="emotion-core-ref-limit-rule",
+        description="制度规则表 ref_limit_rule：种子写入与涨跌幅阈值查询",
+    )
+    parser.add_argument("--seed", action="store_true", help="幂等写入 SEED_RULES")
+    parser.add_argument(
+        "--query", nargs=2, metavar=("MARKET", "BOARD"), help="查询阈值，如 SSE main"
+    )
+    parser.add_argument("--as-of", dest="as_of", help="查询日期 YYYY-MM-DD，缺省今天")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+    if args.seed:
+        n = seed_ref_limit_rule()
+        print(f"ref_limit_rule 种子已写入 {n} 条（幂等 upsert）")
+
+    if args.query:
+        market, board = args.query
+        try:
+            as_of = date.fromisoformat(args.as_of) if args.as_of else date.today()
+        except ValueError:
+            print(f"日期格式错误：{args.as_of}（应为 YYYY-MM-DD）", file=sys.stderr)
+            return 2
+        pct = get_limit_pct(market, board, as_of)
+        if pct is None:
+            print(f"{market}/{board} @ {as_of}：未匹配规则（表空则先跑 --seed）")
+            return 1
+        print(f"{market}/{board} @ {as_of}：±{pct:g}%")
+        return 0
+
+    if args.seed:
+        return 0
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT market, board, limit_pct, effective_from, effective_to
+                   FROM ref_limit_rule ORDER BY market, board, effective_from"""
+            )
+            rows = cur.fetchall()
+    if not rows:
+        print("ref_limit_rule 为空（跑 --seed 写入种子）")
+        return 1
+    print(f"ref_limit_rule 共 {len(rows)} 条：")
+    for market, board, pct, eff_from, eff_to in rows:
+        span = f"{eff_from}~{eff_to or '至今'}"
+        print(f"  {market:<5} {board:<9} ±{float(pct):g}%  {span}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

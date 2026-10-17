@@ -207,3 +207,41 @@ CHECKS = [
 def run() -> list[tuple[str, bool, str]]:
     """逐项检查，返回 [(name, ok, note)]；DB 项失败后续项仍尝试。"""
     return [(name, *fn()) for name, fn in CHECKS]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI：`python -m emotion_core.algorithms.doctor`（产品 A1-2 一键自检）。
+
+    返回码：0 全通过 / 1 有未通过项（便于脚本与 systemd 判成败）。
+    只读检查，不动任何数据；`--quiet` 只输出未通过项。
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="emotion-core-doctor",
+        description="emotion-core 环境自检（只读）：数据库/日历/时区/trade/报告/可选功能/日线双源",
+    )
+    parser.add_argument("--quiet", action="store_true", help="只输出未通过项")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    results = run()
+    failed = 0
+    for name, ok, note in results:
+        if ok:
+            if not args.quiet:
+                print(f"✅ {name}：{note}")
+        else:
+            failed += 1
+            print(f"❌ {name}：{note}")
+    print(f"—— {len(results) - failed}/{len(results)} 项通过")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

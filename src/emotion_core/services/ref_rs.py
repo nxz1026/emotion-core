@@ -161,3 +161,60 @@ def get_top_rs(
                 {"code": row[0], "rs": row[1], "rank": row[2]}
                 for row in cur.fetchall()
             ]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI：`python -m emotion_core.services.ref_rs [--calculate] [--top N]`。
+
+    缺省只读排名（`get_top_rs`）；`--calculate` 才会真算并写 `ref_rs`。
+    返回码：0 成功 / 1 无数据或算不出。
+    """
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="emotion-core-ref-rs",
+        description="相对强度（RS）：计算并写入 ref_rs，或查看排名靠前个股",
+    )
+    parser.add_argument("--calculate", action="store_true", help="计算并写入 ref_rs（默认只读）")
+    parser.add_argument("--as-of", dest="as_of", help="基准日 YYYY-MM-DD，缺省今天")
+    parser.add_argument(
+        "--benchmark", default=DEFAULT_BENCHMARK, help=f"基准代码，默认 {DEFAULT_BENCHMARK}"
+    )
+    parser.add_argument("--period", type=int, default=20, choices=RS_PERIODS, help="RS 周期")
+    parser.add_argument("--top", type=int, default=20, help="展示条数，默认 20")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    try:
+        as_of = date.fromisoformat(args.as_of) if args.as_of else date.today()
+    except ValueError:
+        print(f"日期格式错误：{args.as_of}（应为 YYYY-MM-DD）", file=sys.stderr)
+        return 2
+
+    if args.calculate:
+        n = calculate_rs(as_of_date=as_of, benchmark=args.benchmark)
+        print(f"ref_rs 已写入 {n} 行（as_of={as_of} benchmark={args.benchmark}）")
+        if n == 0:
+            return 1
+
+    rows = get_top_rs(
+        as_of_date=as_of, period=args.period, limit=args.top, benchmark=args.benchmark
+    )
+    if not rows:
+        print(f"ref_rs 无 {as_of} / {args.benchmark} 数据（先跑 --calculate）")
+        return 1
+    print(f"RS 排名 TOP{len(rows)}（rs_{args.period}d，as_of={as_of}，benchmark={args.benchmark}）")
+    for r in rows:
+        rank = "—" if r["rank"] is None else str(r["rank"])
+        print(f"  {rank:>5}  {r['code']}  rs={r['rs']:.2f}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
