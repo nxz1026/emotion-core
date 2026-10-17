@@ -125,9 +125,11 @@ def _wire(
     retry_round_delay=0.0,
     max_consecutive_failures=8,
     universe=None,
+    tradable=None,
     **cfg,
 ):
     import emotion_core.services.llm_backend as backend
+    import emotion_core.services.notify as notify
 
     conf = dataclasses.replace(REAL_CONFIG, STRATEGY_ENABLED=True, STRATEGY_MAX_LLM=max_llm, **cfg)
     monkeypatch.setattr(runner, "CONFIG", conf)
@@ -136,6 +138,13 @@ def _wire(
     monkeypatch.setattr(runner, "RETRY_BASE_DELAY", retry_base_delay)
     monkeypatch.setattr(runner, "RETRY_ROUND_DELAY", retry_round_delay)
     monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
+    # R67-3 硬闸门会查库（tradable_codes）——本文件必须 DB-free，按日缓存也要清。
+    monkeypatch.setattr(
+        runner, "tradable_codes", lambda _d: set(codes if tradable is None else tradable)
+    )
+    monkeypatch.setattr(runner, "_TRADABLE_CACHE", {})
+    # R67-4：_Reply 默认 action=WATCH，不打桩 push_watch_signals 会真发 HTTP。
+    monkeypatch.setattr(notify, "push_watch_signals", lambda *_a, **_k: 0)
     monkeypatch.setattr(runner, "load_strategies", lambda _dir: skills)
     if universe is None:
         monkeypatch.setattr(runner, "build_universe", lambda _d: codes)
@@ -166,6 +175,7 @@ class TestExplicitCodes:
             snap=snap,
             max_llm=5,
             universe=boom,
+            tradable=["600519", "000001"],
         )
         count = runner.run_for_date(TRADE_DATE, codes=["600519", "000001", "830001", "600519"])
         assert count == 2
