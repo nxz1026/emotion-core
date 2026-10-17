@@ -179,6 +179,12 @@ def _upsert_rows(table: str, columns: Sequence[str], rows: list[tuple],
     if len(rows[0]) != len(columns):
         raise ValueError(f"upsert {table}：行宽 {len(rows[0])} != 列数 "
                          f"{len(columns)}")
+    if table == "daily_bar":
+        # 2026-10-17：日线多一道写库前自检（形状 / 顺延 / 整批自洽）。
+        # 放在这里而不是各调用方，是因为本函数是 daily_bar 在 services 侧的
+        # 唯一出口——快照、备源、逐股回填三条路都从这走。见 data/bar_guard.py。
+        from emotion_core.data.bar_guard import check_bars
+        check_bars(rows)
     updates = [c for c in columns if c not in conflict_cols]
     set_clause = ", ".join(f"{c}=EXCLUDED.{c}" for c in updates)
     placeholders = ", ".join(["%s"] * len(columns))
@@ -265,8 +271,10 @@ def snapshot_daily(trade_date: date) -> int:
 
     V1（二轮审计）：守卫内移——此前只在 daily.sh 外部守卫，绕开脚本手动
     补数会把当前实时行情盖上任意传入日期（污染历史 + 派生交易日历）。
+    2026-10-17 加第二道：守卫取数与正式取数是**两次请求**，中间可能漂移；
+    故再按快照自带的 f124 复核一次（源自己的日期）。
     """
-    from emotion_core.data.providers.eastmoney import em_data_date
+    from emotion_core.data.providers.eastmoney import em_data_date, snapshot_data_date
 
     em_date = em_data_date()
     if em_date != trade_date:
@@ -274,7 +282,13 @@ def snapshot_daily(trade_date: date) -> int:
             f"snapshot 守卫：EM 最新数据日期 {em_date} ≠ 传入 {trade_date}，"
             "拒绝把陈旧行情写进目标日期（daily.sh 外补数请核对日期）")
     if not _INGEST_FALLBACK_CHAIN:
-        df = _em_clist(_EM_FS_ALL_A, list(_SPOT_MAP)).rename(columns=_SPOT_MAP)
+        raw = _em_clist(_EM_FS_ALL_A, [*_SPOT_MAP, "f124"])
+        src_date = snapshot_data_date(raw)
+        if src_date is not None and src_date != trade_date:
+            raise ValueError(
+                f"snapshot 守卫：快照自带日期 {src_date} ≠ 传入 {trade_date}，"
+                "拒绝按请求日期盖章")
+        df = raw.rename(columns=_SPOT_MAP)
         for col in set(_SPOT_MAP.values()) - {"code"}:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.dropna(subset=["close", "pre_close"])
@@ -285,7 +299,14 @@ def snapshot_daily(trade_date: date) -> int:
         log.info("snapshot %s 入库 %d 行", trade_date, n)
         return n
     try:
-        em = _em_clist(_EM_FS_ALL_A, list(_SPOT_MAP))
+        em = _em_clist(_EM_FS_ALL_A, [*_SPOT_MAP, "f124"])
+        src_date = snapshot_data_date(em)
+        if src_date is not None and src_date != trade_date:
+            raise ValueError(
+                f"snapshot 守卫：快照自带日期 {src_date} ≠ 传入 {trade_date}，"
+                "拒绝按请求日期盖章")
+    except ValueError:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("EM 日线批量失败：%s", exc)
         em = pd.DataFrame()

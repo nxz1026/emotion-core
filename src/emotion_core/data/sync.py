@@ -14,8 +14,10 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+from emotion_core.data.bar_guard import check_bars
 from emotion_core.data.providers.base import BAR_COLS, ProviderError, valid_frame
 from emotion_core.utils.db import transaction
+from emotion_core.utils.errors import DataError
 
 log = logging.getLogger("emotion_core.sync")
 
@@ -28,8 +30,19 @@ def sync_daily(days: int = 5) -> int:
     2. 解析 → daily_bar 行
     3. 写入 daily_bar（ON CONFLICT DO UPDATE）
     4. 东财 502 时回退新浪（逐股拉取）
+
+    2026-10-17 修：`end` 不再取 `date.today()`（日历日），改取**源自己的数据日期**
+    `em_data_date()`（含收盘判定）。原先周末/节假日/盘中补跑会把「最近一个交易日
+    的快照」盖上今天的日期；若再被外部脚本传入一个历史日期，就是 2026-09-29 那起
+    5218 行污染的形状（见 `data/bar_guard.py`）。
     """
-    end = date.today()
+    from emotion_core.data.providers.eastmoney import em_data_date
+
+    try:
+        end = em_data_date()
+    except Exception as exc:  # noqa: BLE001 —— 守卫不可用不该拦住同步
+        log.warning("数据日期守卫不可用（%s），退回日历日", exc)
+        end = date.today()
     start = end - timedelta(days=days)
     log.info("sync_daily: %s ~ %s", start, end)
 
@@ -47,11 +60,35 @@ def sync_daily(days: int = 5) -> int:
     return upsert_daily_bars(rows)
 
 
-def fetch_snapshot(trade_date: date) -> list[tuple]:
-    """东财 clist 全市场快照 → daily_bar 行。"""
-    from emotion_core.data.providers.eastmoney import _em_clist, _EM_FS_ALL_A, _SPOT_MAP
+def fetch_snapshot(trade_date: date, *,
+                   allow_data_date_mismatch: bool = False) -> list[tuple]:
+    """东财 clist 全市场快照 → daily_bar 行（**只许写快照自己的日期**）。
 
-    raw = _em_clist(_EM_FS_ALL_A, list(_SPOT_MAP))
+    2026-10-17 加日期闸门：快照自带 `f124`（源说自己是哪个交易日），与
+    `trade_date` 不等即抛 `DataError`，绝不按调用方给的日期盖章 —— 2026-09-29
+    的 5218 行就是「调用方说 09-29、源其实是 10-13 的盘中快照」写出来的。
+    新浪回退帧没有 f124，此时退回守卫口径 `em_data_date()`。
+    """
+    from emotion_core.data.providers.eastmoney import (
+        _EM_FS_ALL_A,
+        _SPOT_MAP,
+        _em_clist,
+        em_data_date,
+        snapshot_data_date,
+    )
+
+    raw = _em_clist(_EM_FS_ALL_A, [*_SPOT_MAP, "f124"])
+    src_date = snapshot_data_date(raw)
+    if src_date is None:
+        try:
+            src_date = em_data_date()
+        except Exception as exc:  # noqa: BLE001 —— 守卫不可用时不假装通过
+            raise DataError(f"快照无 f124 且日期守卫不可用（{exc}）："
+                            "无法确认快照属于哪一天，拒绝入库") from exc
+    if src_date != trade_date and not allow_data_date_mismatch:
+        raise DataError(
+            f"快照自带日期 {src_date} ≠ 请求写入日期 {trade_date}："
+            "拒绝把当前快照盖上别的日期（补数请核对目标交易日）")
     raw = raw.rename(columns=_SPOT_MAP)
     # 过滤 bj*（北交所）
     raw = raw[~raw["code"].astype(str).str.startswith("bj")]
@@ -86,10 +123,18 @@ def fallback_rows(codes: list[str], start: date, end: date) -> list[tuple]:
     return rows
 
 
-def upsert_daily_bars(rows: list[tuple]) -> int:
-    """写入 daily_bar（幂等 upsert）。返回写入行数。"""
+def upsert_daily_bars(rows: list[tuple], *, validate: bool = True,
+                      allow_gap: bool = False) -> int:
+    """写入 daily_bar（幂等 upsert）。返回写入行数。
+
+    2026-10-17：写库前过一遍 `data.bar_guard` 自检（形状 / 顺延 / 整批自洽）。
+    不通过抛 `BarGuardError`，**不静默丢行**；历史修复场景可显式
+    `validate=False`（形状也一起跳过，故优先用 `allow_gap=True`）。
+    """
     if not rows:
         return 0
+    if validate:
+        check_bars(rows, allow_gap=allow_gap)
     from psycopg import sql
 
     with transaction() as conn:

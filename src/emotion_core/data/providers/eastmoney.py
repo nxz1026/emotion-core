@@ -256,6 +256,36 @@ def _em_data_date_em() -> date:
     return winners[-1]
 
 
+def snapshot_data_date(frame: pd.DataFrame) -> date | None:
+    """**待入库这批行**自带的行情日期（f124 时间戳 → 北京时区）；无该字段返 None。
+
+    与 `_em_data_date_em` 的区别：那个另发一次守卫请求，本函数直接用即将写库的
+    这批行判定「**源说自己是哪一天**」，零额外请求，也不受「守卫取数与正式取数
+    是两次请求」之间的漂移影响。取众数日期抗单票停牌（与守卫同口径）。
+
+    2026-10-17 加：2026-09-29 的 5218 行曾被写成 2026-10-13 的盘中快照
+    （行的 date 是调用方给的 09-29，价格却是 10-13 的），见 `data/bar_guard.py`
+    模块头。调用方拿到本函数的日期后必须与目标交易日比对，不等就拒绝写库。
+    新浪回退帧没有 f124 ⇒ None，调用方自行退回守卫口径 `em_data_date()`。
+    """
+    if frame is None or "f124" not in frame.columns:
+        return None
+    dates: list[date] = []
+    for v in frame["f124"]:
+        if v is None or (isinstance(v, float) and v != v):
+            continue
+        try:
+            dates.append(datetime.fromtimestamp(
+                int(v), timezone(timedelta(hours=8))).date())
+        except (TypeError, ValueError, OSError):
+            continue
+    if not dates:
+        return None
+    cnt = Counter(dates)
+    top = max(cnt.values())
+    return sorted(d for d, c in cnt.items() if c == top)[-1]
+
+
 def _sina_quote_payload(text: str) -> list[str] | None:
     """取 hq.sinajs.cn 回报里引号内的字段数组。"""
     m = re.search(r'="([^"]*)"', text)
@@ -421,10 +451,21 @@ class EastmoneyProvider:
     name = "eastmoney"
 
     def fetch_daily_bars(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """单股「日线」= 把全市场**实时快照**按请求日期盖章。
+
+        本路径本质是「当前交易日的一份快照」，不是历史序列：`start` 不参与取数，
+        `end` 必须等于快照自带日期，否则应当返回空帧（缺口交给新浪/TDX 备源）。
+        2026-10-17 加第二道判据：`f124` 的时间戳（源自己的日期）与 `end` 不等 ⇒
+        抛错，绝不按 `end` 盖章 —— 2026-09-29 的 5218 行就是这么被污染的。
+        """
         try:
             if em_data_date() != end:
                 return pd.DataFrame(columns=BAR_COLS)
-            raw = _em_clist(_EM_FS_ALL_A, list(_SPOT_MAP))
+            raw = _em_clist(_EM_FS_ALL_A, [*_SPOT_MAP, "f124"])
+            src_date = snapshot_data_date(raw)
+            if src_date is not None and src_date != end:
+                raise DataError(
+                    f"快照自带日期 {src_date} ≠ 请求 {end}（拒绝按请求日期盖章）")
             raw = raw.rename(columns=_SPOT_MAP)
             raw = raw[raw["code"].astype(str).str.zfill(6) == code]
             raw["date"] = end

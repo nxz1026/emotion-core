@@ -368,3 +368,76 @@ class TestGetJsonErrorSplit:
 
         result = fetch_json("https://example.com", {})
         assert result == {"data": {"total": 100}}
+
+
+# ── 4. _upsert_rows：daily_bar 写库前自检挂钩（2026-10-17 护栏） ──────────
+
+class _FakeCursor:
+    def executemany(self, sql, rows):      # noqa: ANN001, ANN201
+        self.rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):                # noqa: ANN002
+        return False
+
+
+class _FakeConn:
+    def cursor(self):
+        return _FakeCursor()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):                # noqa: ANN002
+        return False
+
+
+def _fake_transaction():
+    return _FakeConn()
+
+
+class TestUpsertRowsBarGuard:
+    """`_upsert_rows` 是 daily_bar 在 services 侧的唯一出口，护栏挂在这里。"""
+
+    def test_daily_bar_runs_guard(self, monkeypatch):
+        from emotion_core.data import bar_guard
+
+        called: list[object] = []
+
+        def _fake_check(rows, **kw):
+            called.append(rows)
+
+        monkeypatch.setattr(bar_guard, "check_bars", _fake_check)
+        monkeypatch.setattr(ingest, "transaction", _fake_transaction)
+        rows = [("600000", date(2026, 9, 29), 10.0, 10.5, 9.5, 10.2, 10.0,
+                 1000.0, 1000.0, 0.05)]
+        ingest._upsert_rows("daily_bar", ingest.BAR_COLS, rows, ["code", "date"])
+        assert called == [rows]
+
+    def test_daily_bar_guard_failure_propagates(self, monkeypatch):
+        from emotion_core.data import bar_guard
+
+        def _boom(rows, **kw):
+            raise bar_guard.BarGuardError("形状/顺延自检不通过")
+
+        monkeypatch.setattr(bar_guard, "check_bars", _boom)
+        monkeypatch.setattr(ingest, "transaction", _fake_transaction)
+        with pytest.raises(bar_guard.BarGuardError):
+            ingest._upsert_rows("daily_bar", ingest.BAR_COLS,
+                                [("600000", date(2026, 9, 29), 10.0, 10.5, 9.5,
+                                  10.2, 10.0, 1000.0, 1000.0, 0.05)],
+                                ["code", "date"])
+
+    def test_other_tables_not_guarded(self, monkeypatch):
+        from emotion_core.data import bar_guard
+
+        def _boom(*a, **kw):  # pragma: no cover —— 不该被调到
+            raise AssertionError("非 daily_bar 不该过护栏")
+
+        monkeypatch.setattr(bar_guard, "check_bars", _boom)
+        monkeypatch.setattr(ingest, "transaction", _fake_transaction)
+        n = ingest._upsert_rows("hot_rank", ["code", "date"],
+                                [("600000", date(2026, 9, 29))], ["code", "date"])
+        assert n == 1

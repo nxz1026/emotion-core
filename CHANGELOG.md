@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+### 加固 · 2026-10-17 `daily_bar` 写入护栏：源自带日期闸门 + 写库前自检
+
+> 起因：下面那条 09-29 错价，根因是**没有任何一道守卫能拦住「源说自己是 10-13、调用方却要写 09-29」**——既有守卫比的是 `em_data_date()`（当天）与调用方参数，而污染发生在**历史日期**上，两边都在说「今天」，两边都觉得对。本条目给写入路径补三道。
+
+**一、取数处日期闸门**
+- `EastmoneyProvider.fetch_daily_bars`、`sync.fetch_snapshot`、`services.ingest.snapshot_daily`：请求字段加入 `f124`（**源自己说**的行情日期），与请求日期不等即拒绝（`DataError` / `ValueError`），绝不按调用方给的日期盖章。
+- `sync.sync_daily` 的 `end` 由 `date.today()` 改为源数据日期 `em_data_date()` —— 原先周末/节假日补跑会把上一个交易日的快照盖上今天。
+
+**二、写库前自检（新增 `data/bar_guard.py`）**
+挂点：`data/sync.upsert_daily_bars`、`services/ingest._upsert_rows`（`daily_bar` 在 services 侧的唯一出口——快照 / 备源 / 逐股回填三条路都从这走）。三层判据：
+1. **形状/顺延**：行宽、OHLC 自洽、`close>0`、`volume>=0`；顺延行（OHLC 全 0 且零成交）只许两种形状——`close=0`（无价占位）或 `close=pre_close`（带上一真实收盘）。
+2. **链式偏离**：`pre_close` 与库内前收偏离 > 21% 记告警（除权除息日属正常；**成片**出现即整批写错日期）。
+3. **整批自洽**：中位偏离 > 1% ⇒ 拒绝入库（≥20 行才统计）；`allow_gap=True` 可显式放行（历史修复场景）。
+
+**三、拿污染前的真实快照彩排**
+- `check_bars(2026-09-29 污染批 5224 行)` → **第 3 层命中**：`整批自洽不通过：pre_close 与库内前收的中位偏离 3.31%（上限 1.0%）`；第 1 层 0 处。
+- 对照 `2026-10-16` 真实批 5225 行 → **通过**（只 2 行 >21% 的除权告警）。
+- 新增测试：`tests/unit/test_bar_guard.py`（18 例）、`test_sync.py` +4 例、`test_ingest_fallback.py` +3 例。
+
 ### 修复 · 2026-10-17 `daily_bar` 的 **2026-09-29 全市场错价**（5218 行）+ 连板口径「零成交顺延行不得打断」
 
 > 起因：10-16 报告可用性告警 `WARN review … PARTIAL：对账差异 1 行`。差异票 `600825` 新华传媒：东财池 `cont_days_em=11`，自算 `1`。两条线都出在 09-29 那一天。
