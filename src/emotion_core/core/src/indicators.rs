@@ -172,6 +172,10 @@ pub struct DerivedBar {
 ///
 /// 停牌断档处理：只遍历实际存在的行，遇到非涨停行重置计数。
 /// 停牌日无行，自然实现「停牌不断」（C1）。
+///
+/// 零成交行（`volume == 0`）是 loader 给停牌日补的「顺延行」：既不计数也不打断，
+/// 与 Python oracle (`algorithms/indicators.py`) 及 `_CONT_SQL` 的
+/// `COALESCE(b.volume, 0) > 0` 过滤保持一致。
 #[pyfunction]
 pub fn compute_derived(bars: Vec<Bar>) -> Vec<DerivedBar> {
     // 按 code 分组，用 `order` 保留首次出现顺序（等价 Python dict 插入序）。
@@ -198,10 +202,13 @@ pub fn compute_derived(bars: Vec<Bar>) -> Vec<DerivedBar> {
             let ex = lu && b.low_cents < lim_up; // 换手板
             let tl = b.high_cents >= lim_up; // 曾触板
             let bomb = tl && !lu; // 炸板
-            if lu {
-                cont += 1;
-            } else {
-                cont = 0;
+            let suspended = b.volume == 0; // 顺延行：不参与连板
+            if !suspended {
+                if lu {
+                    cont += 1;
+                } else {
+                    cont = 0;
+                }
             }
             // 振幅 = (high - low) / pre_close * 100，四舍五入到 4 位
             let amp = if b.pre_close_cents != 0 {
@@ -219,7 +226,7 @@ pub fn compute_derived(bars: Vec<Bar>) -> Vec<DerivedBar> {
                 is_exchange: ex,
                 is_bomb: bomb,
                 touched_limit: tl,
-                cont_days: cont,
+                cont_days: if suspended { 0 } else { cont },
                 amplitude,
                 quality: "valid".to_string(),
             });

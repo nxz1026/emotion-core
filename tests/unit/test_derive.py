@@ -99,6 +99,25 @@ class TestComputeContDays:
             result = derive.compute_cont_days(date(2024, 1, 1), date(2024, 6, 30))
             assert result == 10
 
+    def test_suspended_day_neither_counts_nor_breaks_chain(self):
+        """停牌日（daily_bar.volume=0）不进链条：既不参与分组，也不算涨停。
+
+        回归 2026-10-17：600825 停牌三天后复牌第 11 板，旧 SQL 把它当非涨停日
+        打断链条 ⇒ cont_days=1，与 EM 池的 11 不一致，触发对账差异告警。
+        """
+        sql = derive._CONT_SQL
+        # 只对「有成交」的行做分组与排名
+        assert "JOIN daily_bar" in sql
+        assert "COALESCE(b.volume, 0) > 0" in sql
+        # 分组与排名的谓词都要落在同一份过滤后的集合上（不能只在 WHERE 里滤排名）
+        assert sql.count("COALESCE(b.volume, 0) > 0") == 1
+        assert "FROM derived_bar d" in sql
+
+    def test_sql_still_targets_derived_bar_only(self):
+        """只写 derived_bar，不碰 daily_bar。"""
+        assert "UPDATE derived_bar d SET cont_days" in derive._CONT_SQL
+        assert "UPDATE daily_bar" not in derive._CONT_SQL
+
 
 class TestZeroReset:
     def test_calls_execute(self):

@@ -139,10 +139,13 @@ def compute_derived(start: date, end: date) -> int:
 
 _CONT_SQL = """
 WITH f AS (
-  SELECT code, date, is_limit_up,
-         SUM(CASE WHEN NOT is_limit_up THEN 1 ELSE 0 END)
-           OVER (PARTITION BY code ORDER BY date) AS grp
-  FROM derived_bar WHERE date BETWEEN %s AND %s),
+  SELECT d.code, d.date, d.is_limit_up,
+         SUM(CASE WHEN NOT d.is_limit_up THEN 1 ELSE 0 END)
+           OVER (PARTITION BY d.code ORDER BY d.date) AS grp
+  FROM derived_bar d
+  JOIN daily_bar b ON b.code = d.code AND b.date = d.date
+ WHERE d.date BETWEEN %s AND %s
+   AND COALESCE(b.volume, 0) > 0),
 s AS (
   SELECT code, date,
          ROW_NUMBER() OVER (PARTITION BY code, grp ORDER BY date) AS rn
@@ -152,7 +155,17 @@ FROM s WHERE d.code = s.code AND d.date = s.date"""
 
 
 def compute_cont_days(start: date, end: date) -> int:
-    """连板数回填（SQL 窗口函数）。"""
+    """连板数回填（SQL 窗口函数）。
+
+    停牌日（`daily_bar.volume = 0`，含 loader 顺延出来的零成交行）**不算涨停、
+    也不打断链条** —— 与 `limit_pool_em` 的口径一致：东财池子里停牌日整行不存在，
+    复牌首日接着停牌前的连板数往下数。
+
+    实测背景（2026-10-17）：600825 新华传媒 2026-09-21~10-12 连 10 个一字板，
+    10-13~10-15 停牌（10-14/15 在本地是零成交顺延行），10-16 复牌第 11 板。
+    旧口径把这三天当「非涨停日」⇒ grp 前移、链条从 0 重数，当日 cont_days=1，
+    与 EM 池的 11 对不上，触发 `review` 的「报告可用性 PARTIAL：对账差异 1 行」告警。
+    """
     return execute(_CONT_SQL, (start, end))
 
 

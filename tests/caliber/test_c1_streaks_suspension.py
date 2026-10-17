@@ -19,24 +19,39 @@ from itertools import pairwise
 from pathlib import Path
 
 from emotion_core.algorithms import derive
+from emotion_core.algorithms.indicators import compute_derived
+from emotion_core.domain.bar import Bar
+from emotion_core.utils.price import limit_up_price_cents
 
 FIXTURE = Path(__file__).resolve().parents[1] / "oracle" / "fixtures" / "streaks_sample.json"
 
 
-def simulate_cont_days(rows: list[tuple[date, bool]]) -> list[int]:
+def simulate_cont_days(rows: list[tuple]) -> list[int]:
     """逐行重演 `_CONT_SQL` 语义：grp=非涨停累计数；同 grp 内涨停行取行号。
 
     与 SQL 一一对应：
       f.grp = SUM(CASE WHEN NOT is_limit_up THEN 1 ELSE 0 END)
                 OVER (PARTITION BY code ORDER BY date)
       s.rn  = ROW_NUMBER() OVER (PARTITION BY code, grp ORDER BY date)
-    行序 = 该股**已入库**的交易日序列 —— 缺行（停牌/节假日）根本不参与，
+    行序 = 该股**已入库且当日有成交**的交易日序列 —— 缺行（停牌/节假日）根本不参与，
     所以不构成断档；只有真实的非涨停行才把 grp 推到下一段。
+
+    每行取 `(date, is_limit_up)` 或 `(date, is_limit_up, suspended)`；`suspended=True`
+    代表 volume=0 的顺延行：既不累加、也不推进 grp（SQL 里它被 `volume > 0` 滤掉，
+    再由 zero_reset 把自己置 0）。
     """
     grp = 0
     counted: dict[int, int] = {}
     out: list[int] = []
-    for _d, is_limit_up in rows:
+    for row in rows:
+        if len(row) == 2:
+            _d, is_limit_up = row
+            suspended = False
+        else:
+            _d, is_limit_up, suspended = row
+        if suspended:
+            out.append(0)
+            continue
         if is_limit_up:
             counted[grp] = counted.get(grp, 0) + 1
             out.append(counted[grp])
@@ -47,11 +62,12 @@ def simulate_cont_days(rows: list[tuple[date, bool]]) -> list[int]:
 
 
 def test_cont_sql_primitives():
-    """SQL 里必须只有这两种原语；出现按日期差归零的逻辑即为语义变更。"""
+    """SQL 里必须只有这两种原语 + 零成交过滤；出现按日期差归零的逻辑即为语义变更。"""
     sql = derive._CONT_SQL
-    assert "SUM(CASE WHEN NOT is_limit_up THEN 1 ELSE 0 END)" in sql
-    assert "PARTITION BY code ORDER BY date" in sql
+    assert "SUM(CASE WHEN NOT d.is_limit_up THEN 1 ELSE 0 END)" in sql
+    assert "PARTITION BY d.code ORDER BY d.date" in sql
     assert "ROW_NUMBER() OVER (PARTITION BY code, grp ORDER BY date)" in sql
+    assert "COALESCE(b.volume, 0) > 0" in sql, "停牌顺延行（零成交）不得打断连板"
     assert "LAG" not in sql, "连板不得用 LAG 按日期差重算（停牌会误判断档）"
 
 
@@ -89,3 +105,42 @@ def test_missing_day_does_not_reset_but_a_flat_day_does():
     assert simulate_cont_days([(d1, True), (d3, True)]) == [1, 2]
     # d2 正常交易但非涨停：断板，d3 重新从 1 起
     assert simulate_cont_days([(d1, True), (d3, False), (d4, True)]) == [1, 0, 1]
+
+
+def _bar(code: str, d: date, close_cents: int, pre_cents: int, volume: int) -> Bar:
+    return Bar(code=code, date=d, open_cents=close_cents, high_cents=close_cents,
+               low_cents=close_cents, close_cents=close_cents,
+               pre_close_cents=pre_cents, volume=volume, turnover_rate=1.0)
+
+
+def test_zero_volume_padding_row_does_not_break_chain():
+    """600825 实况：10 连板 → 停牌 3 天（loader 补零成交顺延行）→ 复牌第 11 板。
+
+    旧口径把顺延行当普通非涨停日 ⇒ 复牌当天 cont_days=1，与 `limit_pool_em`
+    记的 11 对不上（review 告警「报告可用性 PARTIAL：对账差异 1 行」）。
+    """
+    code = "600825"
+    boards = [date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24),
+              date(2026, 9, 28), date(2026, 9, 29), date(2026, 9, 30),
+              date(2026, 10, 8), date(2026, 10, 9), date(2026, 10, 12)]
+    halted = [date(2026, 10, 13), date(2026, 10, 14), date(2026, 10, 15)]
+
+    bars: list[Bar] = []
+    close = 531  # 5.31 元起板
+    for d in boards:
+        nxt = limit_up_price_cents(close, code)
+        bars.append(_bar(code, d, nxt, close, 1000))
+        close = nxt
+    for d in halted:  # 停牌：loader 顺延出来的零成交行
+        bars.append(_bar(code, d, close, close, 0))
+    bars.append(_bar(code, date(2026, 10, 16), limit_up_price_cents(close, code), close, 2000))
+
+    got = [b.cont_days for b in compute_derived(bars)]
+    assert got == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 11]
+    assert bars[-1].volume > 0 and bars[10].volume == 0  # 前提：第 11 行确实是顺延行
+
+    # 同一序列在「缺行」口径下重演，结果必须一致
+    flags: list[tuple] = [(d, True) for d in boards]
+    flags += [(d, False, True) for d in halted]
+    flags.append((date(2026, 10, 16), True))
+    assert simulate_cont_days(flags) == got
