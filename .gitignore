@@ -29,6 +29,7 @@ deploy/env/*
 # GraphFlow 知识图谱产物（本地重建，不进版本库）
 graphflow-out/
 .graphflow-cache/
+.graphflow/
 
 # 编辑器 / 系统
 .idea/
