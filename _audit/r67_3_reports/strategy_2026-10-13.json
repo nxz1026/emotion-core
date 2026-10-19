@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-13",
+  "generated_at": "2026-10-17T05:34:17.353363+00:00",
+  "strategy_version": "emotion-core-dev",
+  "items": [],
+  "skipped": [
+    {
+      "strategy": "bottom_volume",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "box_oscillation",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "bull_trend",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "chan_theory",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "dragon_head",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "emotion_cycle",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "event_driven",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "expectation_repricing",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "growth_quality",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "hot_theme",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "ma_golden_cross",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "one_yang_three_yin",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "shrink_pullback",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "volume_breakout",
+      "code": "600825",
+      "reason": "no_bar_today"
+    },
+    {
+      "strategy": "wave_theory",
+      "code": "600825",
+      "reason": "no_bar_today"
+    }
+  ]
+}

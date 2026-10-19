@@ -1,0 +1,4 @@
+line1 LF
+line2 CRLF
+line3 中文 UTF-8 测试 — ※
+line4 tab	tab

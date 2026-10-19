@@ -6,6 +6,44 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-19 REA 分析回填：Rust 孪生四处对齐 + `.so` 重建（消除 09-30 漂移）+ 五模块补对账
+
+> 起因：用 REA（`rea-agents@6.5.0`）逆向分析本仓找缺陷，产出 `_audit/2026-10-19-REA分析报告.md`。REA 对 Python 主体无覆盖（无 Python 分析面），但给出 `.so` 身份（sha256 / mtime / 架构 / rustc commit），顺线挖出三处缺陷，用户拍板全部修复。**勘误：初版报告称「本机无 `cargo`/`rustc`」是错的——工具链在 `~/.cargo/bin`，只是不在 `PATH`。**
+
+**一、`tests/unit/test_alert_webhook.py` 时间炸弹（HEAD 上就红）**
+- `:133` 断言硬编码「第 1 天/第 2 天」，桩 `created_at` 写死 `2026-10-17`/`2026-10-16`，而 `alerts._days_active` 取墙上时钟 ⇒ 只在提交当天（10-17）绿；10-19 实测 `1 failed, 2581 passed`（跑出「第 3 天 / 第 4 天」）。
+- 修：桩按 `datetime.now(UTC) - timedelta(days=N)` 构造，保留「第 1 天/第 2 天」语义断言；新增 `TestDaysActive` 6 例（今日=1 / 昨日=2 / 10 天前=11 / naive 视为 UTC / 未来钳到 1 / 非法与 None 归 1）。该文件 **15 passed**。
+
+**二、Rust 孪生 `.so` 与已提交源码漂移**
+- 「零成交顺延行不打断连板」修复（`indicators.rs`，`ca14705`，10-17）从未编进 `.so`（产物 mtime 2026-09-30 01:47）。同一 600825 场景实测：Rust `cont_days=[1,0,1]` vs Python `[1,0,2]`。
+- 用 `~/.cargo/bin/cargo 1.98.1`（rustc `48a229cea`，正是 REA 从 `.so` 推断出的 commit）重建：`cd src/emotion_core/core && PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo build --release`，拷回 `src/core_lib/emotion_core_rust.so` 与 `src/emotion_core/core_lib/emotion_core_rust.so`（两份一致）。sha256 `25b8a6a4…`（1,592,696 B）→ **`6cb81c9d…`（1,595,816 B）**；漂移消除：两轨同为 `[1,2,0,3]`。
+
+**三、补 5 个对账测试 + 写测试时挖出的 5 处 Rust 孪生分歧（一律以 Python 为权威）**
+- 新增 `tests/oracle/test_{indicators,price,ladder,promotion,entry}_rust_vs_python.py`（**141 passed**）。此前 `tests/oracle/` 只有 6 个 rust-vs-python 文件，`lib.rs` 声明的 14 个导出函数绑定级引用为 0。
+- 分歧 1 `ladder.rs` 缺 R67-2 停牌旁路：补 `LadderDay.is_suspended` 字段、`top_group` 过滤 `is_suspended`、`fold_candidates` 增 `suspended` 参数。
+- 分歧 2 `entry.rs::_field("name")` 在 `ctx.name` 为空时回落 `cand.code`，Python 回落 default（空串）⇒ 消息文案不同 → 改 default。
+- 分歧 3 `entry.rs` c5 用 `{}` 格式化 `diverge_min`（`5%` vs Python `5.0%`）→ 改 `{:?}`。
+- 分歧 4 `promotion.rs` 取整为 Rust 五远离零（1/32→0.0313），Python `round()` 五取偶（0.0312）→ 新增手写 `round4`（五取偶）用于 `rate`/`div`/`fail_perf`。
+- 分歧 5（语义缺陷）`entry.rs::passed_of` 把 W- 警告行一起聚合，警告 False 会静默否决——Python 侧 V4 审计早已用 `split_checklist` 结构分离，Rust 孪生残留 → 剔除 `W` 前缀行后再聚合。
+
+**四、文档**
+- `algorithms/indicators.py:5-6` 模块 docstring 判据描述与实现相反（写 `close >= limit_up` / `low == limit_up`，实为 `==` / `low >= limit_up`）→ 按实现改写。
+- `core/src/indicators.rs:25` 注释指向的 `tests/oracle/test_price_rust_vs_python.py` 此前**不存在**（空气引用），本轮真实创建。
+- `docs/15-实施追踪.md:165` 的「11 个模块全部 Rust↔Python 逐值一致」改写为与现状一致（本轮起 11 个模块确有对账文件；Rust 侧仍无 `entry._c3_secondary`/`c3_loose` 宽松路径，测试内注明为接口差异）。
+
+**五、全量验证**
+- `PYTHONPATH=src .venv/bin/python -m pytest tests -q` → **2808 passed, 2 skipped**（92.78s，退出码 0）。
+- 门禁 B（`scripts/check_lint_debt.py`）：ruff check 245（基线 276）、ruff format 220（基线 225），未增长；5 个新文件 ruff clean。
+- `.so` 已改为随仓库分发（见「六」）；`fold_candidates`/`layer_row`/`matrix` 三个死导出已被对账测试直接调用，生产接线仍待拍板。
+
+**六、`.so` 随仓库分发 + `available()` 升级为「试加载」（用户 2026-10-19 拍板）**
+- 背景：产物原本被 `*.so` 整类排除，干净 checkout 上 `import emotion_core.core` 必炸；且「文件存在」被当成可用，异构机器（CI 是 x86_64）会带着 arm64 产物在**收集阶段**报 `AttributeError: 'NoneType' object has no attribute 'loader'`。
+- `.gitignore`：保留 `*.so`，追加 `!src/core_lib/emotion_core_rust.so` **精确放行**（只放行加载器真正读取的那一份；其余 `.so` 仍整类忽略，防误入库）。删除历史副本 `src/emotion_core/core_lib/`（全仓零引用）。
+- `src/emotion_core/core/__init__.py`：`available()` 由「文件存在」升级为「存在 **且** 能在当前解释器里加载」，新增 `load_error()` 返回失败原因；`_load()` 的 `try` 扩到 `module_from_spec`——dlopen 发生在这一步，伪产物曾直接抛 `ImportError: … file too short` **穿透 `available()`**。
+- `tests/conftest.py`：跳过提示同步打印产物路径 + 失败原因，并注明「这不是测过了，是根本没测」。
+- 验证（伪产物 = `printf 'not-an-elf' > src/core_lib/emotion_core_rust.so`）：正常态 `available=True`；伪产物 `available=False` 且 `load_error()` 首行为 `ImportError: … file too short`；伪产物下按 CI 口径 `pytest tests/oracle`（目录遍历）→ 依赖 Rust 的模块被忽略、其余 10 passed、**0 error**；还原后全量 `pytest tests -q` → **2808 passed, 2 skipped**。
+- 注意：`pytest_ignore_collect` 对**命令行直接点名的文件**不生效（pytest 9.1.1 实测：单独点某个 oracle 文件时仍会 import 并报收集错误）；CI 与日常 `pytest tests` 走目录遍历，不受影响。
+
 ### 加固 · 2026-10-17 `daily_bar` 写入护栏：源自带日期闸门 + 写库前自检
 
 > 起因：下面那条 09-29 错价，根因是**没有任何一道守卫能拦住「源说自己是 10-13、调用方却要写 09-29」**——既有守卫比的是 `em_data_date()`（当天）与调用方参数，而污染发生在**历史日期**上，两边都在说「今天」，两边都觉得对。本条目给写入路径补三道。
