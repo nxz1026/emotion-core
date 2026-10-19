@@ -37,4 +37,12 @@ graphflow-out/
 *.swp
 .omp-logs/
 target/
+
+# Rust 产物：2026-10-19 起**随仓库分发**。
+# ⚠️ 只精确放行加载器真正读取的那一份（`core/__init__.py` 的 SO_PATH =
+# `src/core_lib/emotion_core_rust.so`）；其余 `*.so` 仍整类忽略，
+# 免得把本机临时构建物误入库。
+# 产物是**平台相关**的（本机 arm64 / pyo3 0.20），异构机器上
+# `emotion_core.core.available()` 试加载会失败，依赖 Rust 的测试整份跳过。
 *.so
+!src/core_lib/emotion_core_rust.so
