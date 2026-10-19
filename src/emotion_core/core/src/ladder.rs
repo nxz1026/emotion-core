@@ -20,12 +20,15 @@ pub struct LadderDay {
     pub y_top_group_count: i64,
     #[pyo3(get, set)]
     pub y_top_survivor_count: i64,
+    /// 当日停牌（R67-2：旁路展示，不计身位 / 不进最高组）。
+    #[pyo3(get, set)]
+    pub is_suspended: bool,
 }
 
 #[pymethods]
 impl LadderDay {
     #[new]
-    #[pyo3(signature = (date, code, cont_days, is_exchange, is_top=false, is_sole_top=false, y_top_group_count=0, y_top_survivor_count=0))]
+    #[pyo3(signature = (date, code, cont_days, is_exchange, is_top=false, is_sole_top=false, y_top_group_count=0, y_top_survivor_count=0, is_suspended=false))]
     pub fn new(
         date: String,
         code: String,
@@ -35,8 +38,9 @@ impl LadderDay {
         is_sole_top: bool,
         y_top_group_count: i64,
         y_top_survivor_count: i64,
+        is_suspended: bool,
     ) -> Self {
-        LadderDay { date, code, cont_days, is_exchange, is_top, is_sole_top, y_top_group_count, y_top_survivor_count }
+        LadderDay { date, code, cont_days, is_exchange, is_top, is_sole_top, y_top_group_count, y_top_survivor_count, is_suspended }
     }
 }
 
@@ -44,10 +48,12 @@ const MIN_LEADER_DAYS: i64 = 4;
 
 #[pyfunction]
 pub fn top_group(rows: Vec<LadderDay>) -> Vec<LadderDay> {
-    let ex: Vec<&LadderDay> = rows.iter().filter(|r| r.is_exchange).collect();
+    let ex: Vec<&LadderDay> = rows.iter()
+        .filter(|r| r.is_exchange && !r.is_suspended)
+        .collect();
     if ex.is_empty() { return vec![]; }
     let h = ex.iter().map(|r| r.cont_days).max().unwrap_or(0);
-    rows.into_iter().filter(|r| r.is_exchange && r.cont_days == h).collect()
+    rows.into_iter().filter(|r| r.is_exchange && !r.is_suspended && r.cont_days == h).collect()
 }
 
 #[pyfunction]
@@ -58,18 +64,27 @@ pub fn sole_top(rows: Vec<LadderDay>, min_days: Option<i64>) -> Option<LadderDay
 }
 
 #[pyfunction]
+#[pyo3(signature = (date, rows, prev_rows, today_exchange, suspended=None))]
 pub fn fold_candidates(
     date: String,
     rows: Vec<(String, i64, bool)>,
     prev_rows: Vec<(String, i64, bool)>,
     today_exchange: HashSet<String>,
+    suspended: Option<Vec<(String, i64)>>,
 ) -> Vec<LadderDay> {
     let mk = |day: &str, code: &str, days: i64, exchange: bool| LadderDay {
         date: day.to_string(), code: code.to_string(), cont_days: days,
         is_exchange: exchange, is_top: false, is_sole_top: false,
-        y_top_group_count: 0, y_top_survivor_count: 0,
+        y_top_group_count: 0, y_top_survivor_count: 0, is_suspended: false,
     };
     let mut base: Vec<LadderDay> = rows.iter().map(|(c, d, e)| mk(&date, c, *d, *e)).collect();
+    // R67-2（2026-10-19 补齐，此前 Rust 孪生缺这一段）：当日停牌但仍有连板身位的行
+    // 只在旁路展示，is_exchange=false ⇒ 不进最高组、不参与 R2 计数。
+    base.extend(suspended.unwrap_or_default().iter().map(|(c, d)| LadderDay {
+        date: date.clone(), code: c.clone(), cont_days: *d,
+        is_exchange: false, is_top: false, is_sole_top: false,
+        y_top_group_count: 0, y_top_survivor_count: 0, is_suspended: true,
+    }));
     base.sort_by(|a, b| b.cont_days.cmp(&a.cont_days).then_with(|| a.code.cmp(&b.code)));
     let top_codes: HashSet<String> = top_group(base.iter().map(|r| r.clone()).collect())
         .iter().map(|r| r.code.clone()).collect();

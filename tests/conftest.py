@@ -1,13 +1,14 @@
 """测试根 conftest —— **本仓此前一个 conftest 都没有**（2026-10-07 新增）。
 
-存在理由：Rust 产物 `src/core_lib/emotion_core_rust.so` 是 **`.gitignore` 排除的
-构建产物**，仓里没有编译它的 CI 步骤，本地/CI 环境也没有 cargo。于是在干净环境里
+存在理由：Rust 产物 `src/core_lib/emotion_core_rust.so` 是**平台相关**产物
+（本机 arm64 / pyo3 0.20）。2026-10-19 起它随仓库分发，于是异构机器（CI 是
+x86_64）拿到的是一份**加载不了**的产物。若「就位」只按文件存在判断，这些机器上
 任何 import Rust 的测试都会在**收集阶段**炸掉（`AttributeError: 'NoneType' object
-has no attribute 'loader'`），而 CI 的命令正是 `pytest tests` —— 那条 CI 因此
-从未真正跑通过。
+has no attribute 'loader'`），而 CI 的命令正是 `pytest tests`。
 
-这里的行为：**产物缺失时，把确实依赖 Rust 的测试模块整份跳过并说明原因**，
-而不是让收集失败。判据用 **AST 解析 import 语句**而不是文本搜索——后者会把
+这里的行为：**产物不可用（缺失或加载失败）时，把确实依赖 Rust 的测试模块整份
+跳过并说明原因**，而不是让收集失败。判据是 `emotion_core.core.available()`
+——存在 **且** 能在当前解释器里加载。判据用 **AST 解析 import 语句**而不是文本搜索——后者会把
 `tests/architecture/test_dependency_direction.py` 里那两处**注释**中提到的
 `dragon_env` 也算进去，把一条无关的门禁误伤掉。
 
@@ -23,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from emotion_core.core import available
+from emotion_core.core import available, load_error, so_path
 
 # 传递依赖 Rust 的模块：core 是产物本身；dragon_env 在模块级持有 `_rust`；
 # ecosystem_service 又 import dragon_env；daily 的 `_run_step("ecosystem")`
@@ -69,11 +70,13 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
     if not _announced:
         _announced = True
         print(
-            "\n[conftest] Rust 产物 emotion_core_rust.so 未构建 —— 依赖 Rust 的测试"
-            "本次整份跳过。\n"
-            "          这不是「测过了」，是**根本没测**：编译产物被 .gitignore 排除，\n"
-            "          而 CI 里没有 cargo。Rust↔Python 对账目前只在生产机"
-            "（docs/06 §3.3）跑。\n"
+            f"\n[conftest] Rust 产物不可用 —— 依赖 Rust 的测试本次整份跳过。\n"
+            f"          产物：{so_path()}\n"
+            f"          原因：{load_error()}\n"
+            "          这不是「测过了」，是**根本没测**：产物是平台相关的"
+            "（本机 arm64 / pyo3 0.20），\n"
+            "          异构机器与 CI（x86_64）上加载不了。\n"
+            "          Rust↔Python 对账目前只在生产机（docs/06 §3.3）跑。\n"
             "          详见 scripts/ 与 docs/06-上线后工作手册.md §3.3。\n",
             file=sys.stderr,
         )

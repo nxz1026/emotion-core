@@ -56,9 +56,16 @@ impl EntryCtx {
     }
 }
 
-fn _field(ctx: &EntryCtx, cand: &crate::ladder::LadderDay, key: &str, default: &str) -> String {
+/// 逐字对齐 Python `entry._field(cand, ctx, key, default)`：ctx 预取值优先，
+/// 缺失回落 `default` —— Python 侧候选类型 `LadderDay` 不带 `name` 列，
+/// `getattr(cand, "name", "")` 恒回落空串，故 default 即终值。
+///
+/// ⚠️ 2026-10-19 修：此前 ctx.name 为空时回落 `cand.code`，与 Python 分叉
+/// （同一笔候选会输出 `600825(600825) 5板` vs Python 的 `(600825) 5板`）。
+/// 由 tests/oracle/test_entry_rust_vs_python.py 逐条钉住。
+fn _field(ctx: &EntryCtx, _cand: &crate::ladder::LadderDay, key: &str, default: &str) -> String {
     match key {
-        "name" => if ctx.name.is_empty() { cand.code.clone() } else { ctx.name.clone() },
+        "name" => if ctx.name.is_empty() { default.to_string() } else { ctx.name.clone() },
         _ => default.to_string(),
     }
 }
@@ -109,11 +116,13 @@ pub fn c5_strength_diverge(cand: &crate::ladder::LadderDay, ctx: &EntryCtx) -> (
         return (Some(true), format!("炸板{}次回封", bomb_times));
     }
     match ctx.turnover_rate {
-        None => (Some(true), format!("⚠ 换手率缺失（非 0）——强度补偿无法核验，阈值{}%，建议人工确认", ctx.diverge_min)),
-        Some(t) if t.is_nan() => (Some(true), format!("⚠ 换手率缺失（非 0）——强度补偿无法核验，阈值{}%，建议人工确认", ctx.diverge_min)),
+        None => (Some(true), format!("⚠ 换手率缺失（非 0）——强度补偿无法核验，阈值{:?}%，建议人工确认", ctx.diverge_min)),
+        Some(t) if t.is_nan() => (Some(true), format!("⚠ 换手率缺失（非 0）——强度补偿无法核验，阈值{:?}%，建议人工确认", ctx.diverge_min)),
         Some(t) => {
             let ok = t >= ctx.diverge_min;
-            (Some(ok), format!("换手{:.2}%{}{}阈值{}%", t, if ok { "≥" } else { "<" }, "", ctx.diverge_min))
+            // `{:?}`（而非 `{}`）才能对齐 Python `f"{threshold}"`：5.0 → "5.0"，
+            // 而 Rust 的 Display 会给 "5"。
+            (Some(ok), format!("换手{:.2}%{}阈值{:?}%", t, if ok { "≥" } else { "<" }, ctx.diverge_min))
         }
     }
 }
@@ -132,9 +141,19 @@ pub fn w1_crowding(_cand: &crate::ladder::LadderDay, ctx: &EntryCtx) -> (bool, S
     }
 }
 
+/// 聚合五条件行，对齐 Python `domain.Checklist.passed`（filter None 后 all True）。
+///
+/// ⚠️ 2026-10-19 修：此前把行列表里**所有**行一起聚合，W- 警告行若返回 False 即
+/// 静默获得否决权——正是 V4 审计在 Python 侧用 `split_checklist` 结构分离掉的缺陷，
+/// 在 Rust 孪生里残留（今天 `_WARNINGS` 恒 True 所以没暴露）。此处按标签前缀剔除
+/// 警告行，与 `split_checklist` 同一口径。由 tests/oracle/test_entry_rust_vs_python.py 钉住。
 #[pyfunction]
 pub fn passed_of(results: Vec<(String, Option<bool>, String)>) -> bool {
-    results.iter().filter_map(|(_, ok, _)| *ok).all(|v| v)
+    results
+        .iter()
+        .filter(|(label, _, _)| !label.starts_with('W'))
+        .filter_map(|(_, ok, _)| *ok)
+        .all(|v| v)
 }
 
 #[pyfunction]

@@ -1,8 +1,8 @@
 """判据 + 连板。语义逐字照搬 lkl/services/derive.py。
 
 关键口径（不得改动）：
-- is_limit_up: close >= limit_up_price(pre_close)
-- is_one_word: low == limit_up_price（一字板）
+- is_limit_up: close == limit_up_price(pre_close)（精确等于，不是 >=；见 utils/price.py）
+- is_one_word: low >= limit_up_price（一字板）
 - is_exchange: is_limit_up AND low < limit_price（换手板）
 - is_bomb: touched_limit AND NOT is_limit_up（炸板）
 - touched_limit: high >= limit_up_price

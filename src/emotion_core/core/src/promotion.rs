@@ -59,9 +59,32 @@ const PROMOTION_LAYERS: &[(&str, i64, Option<i64>)] = &[
     ("5+->6+", 5, None),
 ];
 
+/// 对齐 Python `round(x, 4)`：十进制四舍六入五取偶（round-half-even）。
+///
+/// ⚠️ 2026-10-19 修：此前用 `(x * 1e4).round() / 1e4`，而 Rust 的 `f64::round`
+/// 是「五远离零」，Python 的 `round` 是「五取偶」。分母为 32 时实测分叉：
+/// 1/32 = 0.03125 → Python 0.0312 / 旧 Rust 0.0313；3/32 = 0.09375 → 两边同为
+/// 0.0938（恰好末位取偶）。晋级率分母（昨日该层连板只数）到 32 只并不罕见，
+/// 故此处显式实现半偶取整。由 tests/oracle/test_promotion_rust_vs_python.py 钉住。
+fn round4(x: f64) -> f64 {
+    let scaled = x * 10000.0;
+    let floor = scaled.floor();
+    let frac = scaled - floor;
+    let rounded = if frac > 0.5 {
+        floor + 1.0
+    } else if frac < 0.5 {
+        floor
+    } else if floor % 2.0 == 0.0 {
+        floor // 恰好 .5：取偶
+    } else {
+        floor + 1.0
+    };
+    rounded / 10000.0
+}
+
 fn rate(part: i64, whole: i64, min_denom: i64) -> Option<f64> {
     if whole < min_denom { return None; }
-    Some((part as f64 / whole as f64 * 10000.0).round() / 10000.0)
+    Some(round4(part as f64 / whole as f64))
 }
 
 #[pyfunction]
@@ -82,14 +105,14 @@ pub fn layer_row(
     let r_nom = rate(n_nom, n_from, min_denom);
     let r_exch = rate(n_exch, n_from, min_denom);
     let div = match (r_nom, r_exch) {
-        (Some(rn), Some(re)) => Some(((rn - re) * 10000.0).round() / 10000.0),
+        (Some(rn), Some(re)) => Some(round4(rn - re)),
         _ => None,
     };
     let failed: Vec<f64> = sel.iter().filter(|p| p.1 < p.0 + 1).filter_map(|p| p.3).collect();
     let fail_perf = if failed.len() < min_denom as usize {
         None
     } else {
-        Some((failed.iter().sum::<f64>() / failed.len() as f64 * 10000.0).round() / 10000.0)
+        Some(round4(failed.iter().sum::<f64>() / failed.len() as f64))
     };
     PromotionRow {
         date, layer, promote_from: n_from, promote_nominal: n_nom,
