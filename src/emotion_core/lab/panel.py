@@ -24,23 +24,35 @@ log = logging.getLogger(__name__)
 PANEL_DIR = Path(__file__).resolve().parents[3] / "var" / "lab"
 PANEL_PATH = PANEL_DIR / "panel.pkl"
 
-#: 候选宇宙 + 市场状态 + 当日 K 线 + 之后两日 K 线（一次查完）
+#: 候选宇宙 + 市场状态 + 候选质量 + 当日 K 线 + 之后两日 K 线（一次查完）
+#:
+#: 市场指标取**全部**状态机输入（`state.DayMetrics` 的 12 个字段）+ phase/diverge：
+#: P2 的 Lab 变体要重跑相位判定，少一列就判不出来（也不能拿 phase 反推）。
+#: 候选质量列与 `entry._VIEW_SQL` 逐字同源：换手率 `COALESCE(东财ZT池, daily_bar)`、
+#: 炸板次数取东财 ZT 池、票名取 `stock_basic.name`。
 _SQL = """
 WITH l AS (
   SELECT l.date AS d0, l.code, l.cont_days, l.is_exchange, l.is_top, l.is_sole_top,
          l.y_top_group_count, l.y_top_survivor_count, l.is_suspended,
          m.phase, m.buy_window, m.diverge, m.limit_up_count, m.bomb_rate,
-         m.zt_performance_median
+         m.zt_performance, m.zt_performance_median, m.max_limit_days,
+         m.limit_down_count, m.top_amplitude, m.top_broke, m.bomb_threshold,
+         m.has_candidate, m.tradable_max_days, m.oneword_ratio,
+         d.is_one_word, d.is_limit_up, d.is_bomb, d.touched_limit,
+         p.bomb_times, s.name AS stock_name,
+         COALESCE(p.turnover_rate, b0.turnover_rate) AS turnover_rate
   FROM ladder_day l
   JOIN market_stat m ON m.date = l.date
+  LEFT JOIN derived_bar d ON d.code = l.code AND d.date = l.date
+  LEFT JOIN daily_bar b0 ON b0.code = l.code AND b0.date = l.date
+  LEFT JOIN limit_pool_em p
+         ON p.code = l.code AND p.date = l.date AND p.pool_type = 'ZT'
+  LEFT JOIN stock_basic s ON s.code = l.code
   WHERE l.date BETWEEN %s AND %s
 ),
 b0 AS (
-  SELECT l.d0, l.code, l.cont_days, l.is_exchange, l.is_top, l.is_sole_top,
-         l.y_top_group_count, l.y_top_survivor_count, l.is_suspended,
-         l.phase, l.buy_window, l.diverge, l.limit_up_count, l.bomb_rate,
-         l.zt_performance_median,
-         b.pre_close, b.open, b.low, b.close, b.volume
+  SELECT l.*,
+         b.pre_close, b.open, b.high, b.low, b.close, b.volume
   FROM l
   LEFT JOIN daily_bar b ON b.code = l.code AND b.date = l.d0
 ),
@@ -64,10 +76,11 @@ ORDER BY b0.d0, b0.code
 """
 
 _FLOAT_COLS = (
-    "pre_close", "open", "low", "close", "volume",
+    "pre_close", "open", "high", "low", "close", "volume",
     "n1_open", "n1_high", "n1_low", "n1_close", "n1_pre_close", "n1_volume",
     "n2_open", "n2_close", "n3_open",
-    "bomb_rate", "zt_performance_median",
+    "bomb_rate", "zt_performance", "zt_performance_median", "top_amplitude",
+    "bomb_threshold", "oneword_ratio", "turnover_rate",
 )
 
 

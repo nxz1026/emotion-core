@@ -9,5 +9,6 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/DSH/emotion-core
 ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.lab.runner
 Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+EnvironmentFile=-/home/ubuntu/DSH/emotion-core/deploy/env/emotion-core.env
 Nice=10
 TimeoutStartSec=1800

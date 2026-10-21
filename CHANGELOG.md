@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+### 功能 · 2026-10-21 Lab P2 上线（参数化 + 搜索 + 七道门禁）
+
+- `algorithms/state.py` 新增 `StateRules`(frozen) / `DEFAULT_RULES`，四个规则函数与
+  `classify_series(series, rules=None)` 支持外部传参；不传 = 原行为（`tests/caliber/test_state_rules_default.py` 逐字段钉住与 `CONFIG` 的映射）。
+- 新增 `lab/rules.py`（`LabRules` 13 旋钮 + 单点 `variants()`）、`lab/replay.py`（内存重跑判据）、
+  `lab/search.py`（选参/验证切分 + 七门禁 + ±1 邻域 + 淘汰 + 提案）、`lab/notify.py`（飞书摘要）。
+- 等价性：默认规则回放与 `signal` 表 BUY 集合逐条相等（377 vs 377），相位与 `market_stat` 逐日相等
+  （`tests/e2e/test_lab_replay_live.py`，真库复核）。
+- 首轮 17 变体：选参 317 条 / 验证 58 条，基线验证 −1.178%（LCB −2.699%），**过门禁 0 个**；
+  选参最优变体在验证区间退化 ⇒ 门禁拦下教科书式过拟合。
+- 修复：`lab_score` upsert 漏更新 `window_name`（sel/hold 行被回填成 `full`），排行榜改 `LATERAL` 取验证区间一行。
+- 修复：`algorithms/intraday.py` 自带涨停价实现违反「唯一实现」门禁，改为复用
+  `utils/price.limit_up_price_cents(..., pct_milli=)`，函数更名 `limit_price`（`utils/price.py` 增加 `pct_milli` 覆盖，供 ST 5% 使用）。
+
 ### 功能 · 2026-10-21 Lab P1 上线（自我进化闭环的度量层）
 
 - 新增 `src/emotion_core/lab/` 子包（`db`/`schema`/`metrics`/`panel`/`score`/`runner`/`web`）：

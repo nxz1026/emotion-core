@@ -91,7 +91,7 @@ def test_is_main_board() -> None:
 
 def test_limit_up_price_rounds_to_cent() -> None:
     """涨停价必须四舍五入到**分**。浮点 `10.0 * 1.1 = 11.000000000000002`。"""
-    assert it.limit_up_price("600519", 10.0) == 11.0
+    assert it.limit_price("600519", 10.0) == 11.0
 
 
 @pytest.mark.parametrize(
@@ -105,18 +105,18 @@ def test_limit_up_price_rounds_to_cent() -> None:
 )
 def test_limit_up_price_half_up_rounding(pre_close: float, expected: float) -> None:
     """ROUND_HALF_UP，不是 Python 默认的银行家舍入。"""
-    assert it.limit_up_price("600519", pre_close) == pytest.approx(expected, abs=0.005)
+    assert it.limit_price("600519", pre_close) == pytest.approx(expected, abs=0.005)
 
 
 def test_limit_up_price_returns_none_without_prev_close() -> None:
     """没有昨收就算不出涨停价 —— 返回 None，不许拍一个数。"""
-    assert it.limit_up_price("600519", 0.0) is None
-    assert it.limit_up_price("600519", -1.0) is None
+    assert it.limit_price("600519", 0.0) is None
+    assert it.limit_price("600519", -1.0) is None
 
 
 def test_growth_board_limit_price() -> None:
     """创业板 20% 板：昨收 10 涨到 12 才是涨停，涨到 11 不是。"""
-    assert it.limit_up_price("300750", 10.0) == 12.0
+    assert it.limit_price("300750", 10.0) == 12.0
 
 
 # ───────────────────────── 涨幅 ─────────────────────────

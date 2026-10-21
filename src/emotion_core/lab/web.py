@@ -80,7 +80,11 @@ def _all_variants(conn: Any) -> list[dict[str, Any]]:
     df = labdb.query_df(
         "SELECT v.variant_id, v.status, v.note, v.created_at, s.window_start, "
         "s.window_end, s.n, s.fill_rate, s.expectancy, s.win_rate, s.lcb "
-        "FROM lab.lab_variant v LEFT JOIN lab.lab_score s ON s.variant_id = v.variant_id "
+        "FROM lab.lab_variant v LEFT JOIN LATERAL ("
+        "    SELECT * FROM lab.lab_score x WHERE x.variant_id = v.variant_id "
+        "      AND x.window_name IN ('hold', 'full') "
+        "    ORDER BY (x.window_name = 'hold') DESC, x.window_end DESC LIMIT 1"
+        ") s ON true "
         "ORDER BY s.lcb DESC NULLS LAST"
     )
     return [] if df.empty else [_floats(r) for r in df.to_dict("records")]

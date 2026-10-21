@@ -261,3 +261,42 @@ B 轮的教训直接套用：**别用 `LEFT JOIN LATERAL` 逐行找前一日**�
 - `lab_runner` 数据库角色：当前用同一连接 + 代码级写守卫（`check_write` 只放行 `lab.`），角色级最小权限留到 P2（要改 `utils/db.py` 支持第二份配置）。
 - 页面「提案采纳/驳回」的写路径已实现，但 P1 没有提案来源，实际不会被触发。
 - 面板缓存与服务日志都在 `var/lab/`，未做清理策略（单文件 2 MB，可忽略）。
+
+## 15 P2 实施记录（2026-10-21，已上线）
+
+### 15.1 落地物
+
+| 文件 | 作用 |
+|---|---|
+| `src/emotion_core/algorithms/state.py` | 新增 `StateRules`(frozen) + `DEFAULT_RULES`；四个 `_rule_*` 与 `classify_series(series, rules=None)` 全部读规则对象。不传规则 = 原行为（`tests/caliber/test_state_rules_default.py` 钉住每条字段与 `CONFIG` 的对应关系） |
+| `src/emotion_core/lab/panel.py` | 面板扩列到「够重跑一遍判据」：`derived_bar` 的 `is_one_word/is_limit_up/is_bomb/touched_limit`、`limit_pool_em` 的 `bomb_times/turnover_rate`、`stock_basic.name`、`market_stat` 全部状态机输入 |
+| `src/emotion_core/lab/rules.py` | `LabRules`(frozen) = 状态机 9 项 + 判据 5 项 + 档位倍率 3 项；`variants()` 只造**单点变体**（一次改一个旋钮，17 个，避免 8 个旋钮 5832 格组合爆炸） |
+| `src/emotion_core/lab/replay.py` | 内存内重跑「状态机 → 梯队 → c1..c5 → 档位」整条判据，`signals()` 出观察记录；默认规则下与 `signal` 表 BUY 集合**逐条一致**（377 vs 377，`tests/e2e/test_lab_replay_live.py` 真库复核） |
+| `src/emotion_core/lab/search.py` | 选参/验证切分 + 七道门禁 + ±1 邻域稳健性 + 淘汰标记 + 提案落库 |
+| `src/emotion_core/lab/notify.py` | Lab 自己的飞书摘要（不复用主线 `services/notify.py`；正文明确写「没有变体过门禁是有效结论，不是故障」） |
+| `src/emotion_core/lab/runner.py` | 面板 → 基线打分 → 变体搜索 → 提案 → 推送；新增 `--no-search/--no-push` |
+
+### 15.2 首轮搜索结果（2024-01-01 ~ 2026-10-20）
+
+- 单点变体 **17 个**（`min_leader_days` 3/5、`diverge_min_turnover` 3/4/5/6、`climax_zt` 70/90、`ebb_zt_perf` −3/−1、`ferment_zt_perf` 1/2、`ice_zt_max` 30/50、`tier_mult_strict=0`、`tier_mult_newcomer=0/0.5）。
+- 切分：选参 2024-01-03 ~ 2026-04-21（317 条），验证 2026-04-22 ~ 2026-10-20（58 条）。
+- 基线：选参 −1.161%，验证 **−1.178%**（LCB −2.699%，t=−1.27）。
+- **过七道门禁：0 个**。选参区间最好的是 +0.29pp 的变体，验证区间退化到 −1.21% —— 教科书式的过拟合，被第四道门禁（验证区间必须优于基线）拦下。
+- 淘汰：hold-out LCB 比基线低 1pp 以上者标 `retired`（本轮无），其余 `draft`；`lab.lab_promotion` 仍为 0 行。
+
+结论：**现行参数邻域内没有可提升的组合**。这不是搜索失败，而是这次搜索应得的答案——
+关掉门禁的话，同一批数据能立刻"找出"一个 +0.29pp 的变体。
+
+### 15.3 顺手修掉的一个真缺陷
+
+`_INSERT_SCORE` 的 `ON CONFLICT DO UPDATE` 漏了 `window_name = EXCLUDED.window_name`，
+于是 upsert 时 sel/hold 两类行会被先前的 NULL→`full` 回填永久钉成 `full`，页面上
+「一个变体出现两行」且窗口列全是同一段。已补，且 `web.py` 的排行榜改 `LEFT JOIN LATERAL
+… ORDER BY (window_name='hold') DESC, window_end DESC LIMIT 1`，保证每个变体一行、取验证区间。
+
+### 15.4 未做
+
+- `lab_runner` 数据库角色（仍靠代码级写守卫）。
+- 淘汰后的「连续 2 窗进前 20%」才可复活/晋升的历史序列；目前 `retired` 只按单轮 LCB 差判定。
+- 飞书摘要的定时：`emotion-lab.timer` 每日 17:45 跑一遍（面板 + 基线 + 搜索 + 推送，实测全流程约 40s），
+  hold-out 窗口随之前移，等价于每日前滚一天。

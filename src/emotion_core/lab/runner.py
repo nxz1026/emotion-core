@@ -1,10 +1,11 @@
-"""Lab 每日流水线：物化面板 → 给主线基线打分 → 落 `lab.lab_score`。
+"""Lab 流水线：物化面板 → 基线打分 → 变体搜索（hold-out + 七门禁）→ 飞书摘要。
 
 单独进程（`emotion-lab.service`）、单独日志、只写 `lab` schema。
 主线任何一步都不依赖本模块；本模块失败也不影响主线（unit 之间没有 Requires）。
 
-P1 只做「度量」：算出主线现行规则在固定口径下的历史表现，作为后续所有变体的对照。
-**没有任何自动化会把变体提升成主线**——那必须人看提案再点。
+P1 做「度量」：算出主线现行规则在固定口径下的历史表现，作为所有变体的对照。
+P2 做「搜索」：单点变体 → 选参区间排序 → 最后 120 个交易日验证 → 门禁 → 提案。
+**没有任何自动化会把变体提升成主线**——必须人看提案、手动改常量、记 ADR。
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import sys
 from datetime import date
 
 from emotion_core.lab import db as labdb
-from emotion_core.lab import panel, score
+from emotion_core.lab import notify, panel, score, search
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", default=DEFAULT_START)
     ap.add_argument("--end", default="", help="默认取 market_stat 的最后一天（当日已跑完主线）")
     ap.add_argument("--no-build", action="store_true", help="复用已有面板缓存")
-    ap.add_argument("--dry-run", action="store_true", help="只算不写 lab.lab_score")
+    ap.add_argument("--dry-run", action="store_true", help="只算不写 lab")
+    ap.add_argument("--no-search", action="store_true", help="只打分基线，不跑变体搜索")
+    ap.add_argument("--no-push", action="store_true", help="不推飞书摘要")
     args = ap.parse_args(argv)
 
     start = date.fromisoformat(args.start)
@@ -54,6 +57,14 @@ def main(argv: list[str] | None = None) -> int:
         "基线：n=%s 成交率=%s%% 每信号=%s%% 胜率=%s%% LCB=%s%%",
         out["n"], out["fill_rate"], out["expectancy"], out["win_rate"], out["lcb"],
     )
+    if args.no_search:
+        return 0
+
+    # c5 的「可核验」基准取运行当天（与主线 check_signal 的 as_of=None 同义）
+    found = search.run(start, end, as_of=date.today(), persist=not args.dry_run)
+    log.info("变体 %d 个，过门禁 %d 个", found["vars"], len(found["proposals"]))
+    if not args.no_push and not args.dry_run:
+        notify.push(notify.digest(found))
     return 0
 
 

@@ -26,11 +26,44 @@ mean +5.35%、胜率 77%，比高潮 ENHANCED（+1.48%/68%）**更好**；退潮
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date
 from typing import Optional
 
 from emotion_core.utils.config import CONFIG
+
+
+@dataclass(frozen=True)
+class StateRules:
+    """相位判定的可替换参数（P2：Lab 搜索用；主线不传就是用现行口径）。
+
+    默认值逐项取自 `CONFIG`，所以 `classify_series(series)` 与改版前**逐字等价**
+    （`tests/caliber/test_state_rules_default.py` 钉住）。Lab 用它物化变体：
+    只换这一个对象，就能在内存里重跑 675 天的相位判定，既不碰 `CONFIG`
+    （`config_hash()` 不变），也不写任何生产表。
+    """
+    ebb_zt_perf: float = CONFIG.EBB_ZT_PERF
+    ebb_ld_min: int = CONFIG.EBB_LD_MIN
+    ebb_ld_mult: float = CONFIG.EBB_LD_MULT
+    climax_zt: int = CONFIG.CLIMAX_ZT
+    climax_amplitude: float = CONFIG.CLIMAX_AMPLITUDE
+    ferment_zt_perf: float = CONFIG.FERMENT_ZT_PERF
+    ferment_min_days: int = CONFIG.MIN_LEADER_DAYS
+    ice_max_days: int = CONFIG.ICE_MAX_DAYS
+    ice_zt_max: int = CONFIG.ICE_ZT_MAX
+
+    def replace(self, **kw: object) -> "StateRules":
+        """显式替换（frozen dataclass 用 dataclasses.replace 也行，这里省个 import）。"""
+        from dataclasses import replace as _replace
+
+        return _replace(self, **kw)
+
+    def as_dict(self) -> dict[str, object]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+#: 主线现行口径（默认值），Lab 的对照基线也用它
+DEFAULT_RULES = StateRules()
 
 
 def _lt(a: Optional[float], b: float) -> bool:
@@ -68,15 +101,17 @@ class EmotionState:
     reason: str
 
 
-def _rule_ebb(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -> bool:
+def _rule_ebb(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
+              r: StateRules = DEFAULT_RULES) -> bool:
     two_day = bool(t.top_broke) and y is not None and bool(y.top_broke)
-    perf = _lt(t.zt_performance, CONFIG.EBB_ZT_PERF)
-    ld = (y is not None and t.limit_down_count > CONFIG.EBB_LD_MIN
-          and t.limit_down_count > y.limit_down_count * CONFIG.EBB_LD_MULT)
+    perf = _lt(t.zt_performance, r.ebb_zt_perf)
+    ld = (y is not None and t.limit_down_count > r.ebb_ld_min
+          and t.limit_down_count > y.limit_down_count * r.ebb_ld_mult)
     return two_day or perf or ld
 
 
-def _rule_climax(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -> bool:
+def _rule_climax(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
+                 r: StateRules = DEFAULT_RULES) -> bool:
     """高潮：涨停家数 / 炸板率越阈 / 最高板振幅越阈。
 
     `top_amplitude` 用 `_gt` 护 None（当日无涨停股时 max(amplitude)=NULL →
@@ -84,22 +119,24 @@ def _rule_climax(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]
     直接把 emotion.run_range 打崩（本模块与 emotion.classify 共用 _RULES）。
     None 的语义是「没有最高板振幅可比」→ 该分支不触发。
     """
-    return (t.limit_up_count > CONFIG.CLIMAX_ZT
+    return (t.limit_up_count > r.climax_zt
             or _gt(t.bomb_rate, t.bomb_threshold)
-            or _gt(t.top_amplitude, CONFIG.CLIMAX_AMPLITUDE))
+            or _gt(t.top_amplitude, r.climax_amplitude))
 
 
-def _rule_ferment(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -> bool:
-    return (t.max_limit_days >= CONFIG.MIN_LEADER_DAYS and y is not None
+def _rule_ferment(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
+                  r: StateRules = DEFAULT_RULES) -> bool:
+    return (t.max_limit_days >= r.ferment_min_days and y is not None
             and b is not None
-            and _gt(t.zt_performance, CONFIG.FERMENT_ZT_PERF)
-            and _gt(y.zt_performance, CONFIG.FERMENT_ZT_PERF)
+            and _gt(t.zt_performance, r.ferment_zt_perf)
+            and _gt(y.zt_performance, r.ferment_zt_perf)
             and t.limit_up_count > y.limit_up_count > b.limit_up_count)
 
 
-def _rule_ice(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]) -> bool:
-    base = (t.max_limit_days <= CONFIG.ICE_MAX_DAYS
-            and t.limit_up_count < CONFIG.ICE_ZT_MAX)
+def _rule_ice(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
+              r: StateRules = DEFAULT_RULES) -> bool:
+    base = (t.max_limit_days <= r.ice_max_days
+            and t.limit_up_count < r.ice_zt_max)
     rev = y is not None and _lt(y.zt_performance, 0) and _gt(t.zt_performance, 0)
     return base and (rev or not t.has_candidate)
 
@@ -127,13 +164,19 @@ def window_of(phase: str) -> tuple[str, bool]:
     return "NONE", False  # 冰点：禁买，不清仓（无持仓可清）
 
 
-def classify_series(series: list[DayMetrics]) -> list[EmotionState]:
-    """按优先级逐日推进状态机（纯函数）。"""
+def classify_series(series: list[DayMetrics],
+                    rules: StateRules | None = None) -> list[EmotionState]:
+    """按优先级逐日推进状态机（纯函数）。
+
+    `rules=None` ⇒ 用 `DEFAULT_RULES`（= CONFIG 现值），与改版前逐字等价；
+    Lab 传自己的 `StateRules` 即得到变体的相位序列（不读库、不写库）。
+    """
+    r = rules or DEFAULT_RULES
     result: list[EmotionState] = []
     for i, t in enumerate(series):
         y = series[i - 1] if i >= 1 else None
         b = series[i - 2] if i >= 2 else None
-        fired = next(((rule, name) for rule, name in _RULES if rule(t, y, b)), None)
+        fired = next(((rule, name) for rule, name in _RULES if rule(t, y, b, r)), None)
         phase = fired[1] if fired else (result[-1].phase if result else "冰点")
         buy_window, force_liq = window_of(phase)
         tag = "·首日基线" if (fired is None and y is None) else (

@@ -42,22 +42,26 @@ def board_pct_milli(code: str) -> int:
     return 100  # 主板 10%
 
 
-def limit_up_price_cents(pre_close_cents: int, code: str) -> int:
+def limit_up_price_cents(pre_close_cents: int, code: str, *,
+                         pct_milli: int | None = None) -> int:
     """涨停价（分）。四舍五入与 SQL (x*pct + 50)/100 一致。
 
     Args:
         pre_close_cents: 昨收价，单位分（int）
         code: 6 位股票代码
+        pct_milli: 可选，覆盖按代码推断的涨跌幅千分比。**只有 ST 需要**
+            （主板 ST 是 5%，代码里分不出来，必须靠股票名判断）。
     Returns:
         涨停价，单位分（int）
     """
-    pct = board_pct_milli(code)
+    pct = board_pct_milli(code) if pct_milli is None else pct_milli
     return (pre_close_cents * (1000 + pct) + 500) // 1000
 
 
-def limit_down_price_cents(pre_close_cents: int, code: str) -> int:
-    """跌停价（分）。"""
-    pct = board_pct_milli(code)
+def limit_down_price_cents(pre_close_cents: int, code: str, *,
+                           pct_milli: int | None = None) -> int:
+    """跌停价（分）。`pct_milli` 同 `limit_up_price_cents`。"""
+    pct = board_pct_milli(code) if pct_milli is None else pct_milli
     return (pre_close_cents * (1000 - pct) + 500) // 1000
 
 

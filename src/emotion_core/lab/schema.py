@@ -74,6 +74,7 @@ DDL: dict[str, str] = {
             worst        numeric(8,3),
             sub_worst    numeric(8,3),
             trials       integer,
+            window_name  text,
             detail       jsonb,
             updated_at   timestamptz NOT NULL DEFAULT now(),
             PRIMARY KEY (variant_id, window_start, window_end)
@@ -100,6 +101,12 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_lab_score_variant ON lab.lab_score (variant_id, window_end)",
 )
 
+#: 已建库的增量迁移（`create_all` 幂等执行；只加列，不改语义）
+_ALTERS = (
+    "ALTER TABLE lab.lab_score ADD COLUMN IF NOT EXISTS window_name text",
+    "UPDATE lab.lab_score SET window_name = 'full' WHERE window_name IS NULL",
+)
+
 
 def create_all(conn: psycopg.Connection[Any] | None = None) -> int:
     """建 schema + 表 + 索引，幂等。返回执行语句条数。"""
@@ -109,6 +116,7 @@ def create_all(conn: psycopg.Connection[Any] | None = None) -> int:
         stmts = [f"CREATE SCHEMA IF NOT EXISTS {labdb.SCHEMA}"]
         stmts += list(DDL.values())
         stmts += list(_INDEXES)
+        stmts += list(_ALTERS)
         for sql in stmts:
             labdb.execute(active, sql)
         active.commit()

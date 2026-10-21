@@ -33,13 +33,13 @@ ORDER BY confirm_date, code
 _INSERT_SCORE = """
 INSERT INTO lab.lab_score (
     variant_id, window_start, window_end, n, fill_rate, expectancy, median,
-    win_rate, lcb, worst, sub_worst, trials, detail, updated_at
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
+    win_rate, lcb, worst, sub_worst, trials, window_name, detail, updated_at
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
 ON CONFLICT (variant_id, window_start, window_end) DO UPDATE SET
     n = EXCLUDED.n, fill_rate = EXCLUDED.fill_rate, expectancy = EXCLUDED.expectancy,
     median = EXCLUDED.median, win_rate = EXCLUDED.win_rate, lcb = EXCLUDED.lcb,
     worst = EXCLUDED.worst, sub_worst = EXCLUDED.sub_worst, trials = EXCLUDED.trials,
-    detail = EXCLUDED.detail, updated_at = now()
+    window_name = EXCLUDED.window_name, detail = EXCLUDED.detail, updated_at = now()
 """
 
 _INSERT_VARIANT = """
@@ -144,7 +144,7 @@ def run(start: date, end: date, *, persist: bool = False,
                 (
                     variant_id, out["window_start"], out["window_end"], out["n"],
                     out["fill_rate"], out["expectancy"], out["median"], out["win_rate"],
-                    out["lcb"], out["worst"], out["sub_worst"], 1,
+                    out["lcb"], out["worst"], out["sub_worst"], 1, "full",
                     json.dumps(out["detail"], ensure_ascii=False, default=str),
                 ),
             )

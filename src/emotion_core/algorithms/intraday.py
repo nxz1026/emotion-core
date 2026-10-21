@@ -26,7 +26,7 @@ ADR D3 已经这么定了，这里照办。
 3. **`chg_pct >= 9.7` **只用来筛候选**，不用来判涨停**。CPT 的
    `cpt/domain/a_share_rules.py` 模块头写明：「±10% 阈值不可靠（ST/科创/创业/北交
    规则不同），直接读 `public.derived_bar.is_limit_up`」。盘中拿不到 derived_bar，
-   所以这里**按代码算涨跌停价**（`limit_up_price`），9.7 只是拉榜单时省请求。
+   所以这里**按代码算涨跌停价**（`limit_price`），9.7 只是拉榜单时省请求。
    两者混用会让 20% 板（创业板/科创板）永远漏判。
 4. **连续 N 轮确认**：单帧可能是撤单前的一瞬间。`SEAL_CONFIRM_TICKS = 2` 要求
    同一个 `(code, 当日)` 连续两轮都成立。状态由调用方持有（本模块无状态），
@@ -38,6 +38,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import time
 from typing import Any, Final
+
+from emotion_core.utils import price as price_util
 
 __all__ = [
     "CHG_PCT_MIN",
@@ -53,7 +55,7 @@ __all__ = [
     "is_at_limit",
     "is_main_board",
     "is_st_name",
-    "limit_up_price",
+    "limit_price",
     "seal_hit",
     "seal_weaken",
 ]
@@ -150,23 +152,23 @@ def is_main_board(code: str) -> bool:
     return code.strip().startswith(_MAIN_PREFIXES)
 
 
-def limit_up_price(code: str, pre_close: float, *, name: str | None = None) -> float | None:
-    """涨停价。**四舍五入到分**，这是交易所规则，不是显示格式。
+def limit_price(code: str, pre_close: float, *, name: str | None = None) -> float | None:
+    """涨停价（元）。**公式唯一实现在 `utils/price.py`**，这里只补 ST 的幅度。
 
-    用 `Decimal` 不是洁癖：`10.0 * 1.1` 在浮点里是 `11.000000000000002`，
-    而交易所给的是 `11.00`。差这 0.002 会让「>= 涨停价」判成 False，
-    把真封板漏掉。CPT 侧踩过同一个坑（`a_share_rules.py` 模块头：「±10% 阈值不可靠」）。
+    为什么不能在这里自己写一遍：`tests/caliber/test_price_unique_impl.py` 有源码级
+    门禁——涨停价只许有一个实现（第二套公式出错时没人比对，2026-10-07 就吃过一次
+    北交所 920 号段漏判的亏）。这里唯一多出来的信息是「ST 靠名字、主板 5%」，
+    所以走 `pct_milli=` 覆盖，不复制四舍五入逻辑。
 
     Returns:
         涨停价；`pre_close <= 0` 或不可用时返回 `None`（停牌/无昨收）。
     """
     if pre_close is None or pre_close <= 0:
         return None
-    from decimal import ROUND_HALF_UP, Decimal
-
-    pct = Decimal(str(board_pct_limit(code, name=name))) / Decimal(100)
-    raw = Decimal(str(pre_close)) * (Decimal(1) + pct)
-    return float(raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    pct_milli = int(round(board_pct_limit(code, name=name) * 10))
+    cents = price_util.limit_up_price_cents(
+        int(round(pre_close * 100)), code, pct_milli=pct_milli)
+    return cents / 100
 
 
 def chg_pct(quote: dict[str, Any]) -> float | None:
@@ -198,7 +200,7 @@ def is_at_limit(quote: dict[str, Any], *, code: str | None = None) -> bool | Non
     code = code or _code6(quote)
     pre_close = _num(quote.get("prev_close"))
     last = _num(quote.get("last"))
-    limit = limit_up_price(code, pre_close if pre_close else 0.0, name=quote.get("name"))
+    limit = limit_price(code, pre_close if pre_close else 0.0, name=quote.get("name"))
     if limit is None or last is None:
         return None
     # >= 而不是 >：涨停价是四舍五入到分的，实盘成交价可以正好等于它。
