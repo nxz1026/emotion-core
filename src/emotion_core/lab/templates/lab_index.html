@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emotion-core · Lab 实验台</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+<link rel="stylesheet" href="/static/lab.css">
+</head>
+<body>
+<div class="container">
+<h1>Lab 实验台</h1>
+
+<div class="lab-status">
+  <span class="badge badge-muted">只读页面</span>
+  <span>基线变体：<code>{{ base.variant_id if base else "—" }}</code></span>
+  <span>窗口：{{ base.window_start if base else "—" }} → {{ base.window_end if base else "—" }}</span>
+  <span>口径：T+1 涨停价触及即成交 → T+2 开盘卖 · 费后 0.15% · 未成交算 0</span>
+  <span>页面时间：{{ today }}</span>
+</div>
+
+<h2>① 主线基线</h2>
+{% if not base %}
+  <div class="lab-empty">还没有基线分数。先跑 <code>lab.panel --build</code>，再跑 <code>lab.score --persist</code>。</div>
+{% else %}
+<div class="lab-grid">
+  {% set cells = [
+    ("每信号期望", base.expectancy, "含未成交（未成交按 0）"),
+    ("成交率", base.fill_rate, "T+1 最高价够到涨停价的比例"),
+    ("胜率", base.win_rate, "含未成交（未成交算不赢）"),
+    ("置信下界", base.lcb, "95% 单侧；>0 才算可能有效")
+  ] %}
+  {% for label, value, note in cells %}
+  <div class="lab-stat">
+    <div class="k">{{ label }}</div>
+    <div class="v {% if value is none %}na{% elif value < 0 %}neg{% else %}pos{% endif %}">
+      {% if value is none %}—{% elif label == "成交率" or label == "胜率" %}{{ value }}%{% else %}{{ value|pct }}{% endif %}
+    </div>
+    <div class="n">n = {{ base.n }} · {{ note }}</div>
+  </div>
+  {% endfor %}
+</div>
+<div class="lab-sub">
+  <span>中位 {{ base.median|pct }}（n≥30 才给）</span>
+  <span>最差一笔 {{ base.worst|pct }}</span>
+  <span>最差切片 {{ base.sub_worst|pct }}</span>
+  <span><a href="/lab/variant/{{ base.variant_id }}">看切片明细 →</a></span>
+</div>
+{% endif %}
+
+<h2>② 退化与风险</h2>
+<ul class="lab-alarms">
+  {% for a in alarms %}
+    <li class="lab-alarm {{ a.level }}">
+      <span class="badge {% if a.level == 'danger' %}badge-danger{% elif a.level == 'warn' %}badge-warning{% elif a.level == 'ok' %}badge-success{% else %}badge-muted{% endif %}">{{ a.level }}</span>
+      <strong>{{ a.title }}</strong>
+      <span class="muted">{{ a.detail }}</span>
+    </li>
+  {% else %}
+    <li class="lab-empty">没有触发任何报警。</li>
+  {% endfor %}
+</ul>
+
+<h2>③ 变体排行榜</h2>
+{% if variants %}
+<table class="data-table">
+  <thead>
+    <tr><th>变体</th><th>状态</th><th>窗口</th><th>n</th><th>成交率</th><th>每信号期望</th><th>与基线差</th><th>置信下界</th></tr>
+  </thead>
+  <tbody>
+  {% for v in variants %}
+    <tr class="{% if (v.n or 0) < min_n %}dim{% endif %}">
+      <td><a href="/lab/variant/{{ v.variant_id }}">{{ v.variant_id }}</a></td>
+      <td><span class="badge badge-muted">{{ v.status }}</span></td>
+      <td>{{ v.window_start or "—" }} → {{ v.window_end or "—" }}</td>
+      <td class="num">{{ v.n|num }}</td>
+      <td class="num">{% if v.fill_rate is none %}—{% else %}{{ v.fill_rate }}%{% endif %}</td>
+      <td class="num {% if v.expectancy is not none and v.expectancy < 0 %}neg{% endif %}">{{ v.expectancy|pct }}</td>
+      <td class="num">
+        {% if v.expectancy is none or not base or base.expectancy is none %}—
+        {% else %}{{ "%+.2f"|format(v.expectancy - base.expectancy) }}pp{% endif %}
+      </td>
+      <td class="num">{{ v.lcb|pct }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">按置信下界排序；灰色行表示 n&lt;{{ min_n }}，只看方向不看数字。P1 只有基线一条。</p>
+{% else %}
+<div class="lab-empty">还没有变体。</div>
+{% endif %}
+
+<h2>④ 待批提案</h2>
+{% if proposals %}
+<table class="data-table">
+  <thead><tr><th>#</th><th>提案</th><th>动作</th><th>证据</th><th>状态</th><th>裁决</th></tr></thead>
+  <tbody>
+  {% for p in proposals %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td>{{ p.proposal }}</td>
+      <td><code>{{ p.actions }}</code></td>
+      <td class="muted">{{ p.evidence }}</td>
+      <td><span class="badge {% if p.status == 'pending' %}badge-warning{% else %}badge-muted{% endif %}">{{ p.status }}</span></td>
+      <td>
+        {% if p.status == 'pending' %}
+        <form method="post" action="/lab/proposal/{{ p.id }}/decide" class="lab-inline">
+          <button class="btn btn-primary" name="decision" value="approve">采纳</button>
+          <button class="btn" name="decision" value="reject">驳回</button>
+        </form>
+        {% else %}{{ p.decided_by or "—" }}{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="lab-empty">暂无提案。提案从 P2 的 walk-forward 搜索才开始产出；<strong>没有任何自动化会把变体提升成主线</strong>。</div>
+{% endif %}
+
+<p class="muted lab-foot">
+口径说明：买点 = T 日收盘 × 板比的涨停价，T+1 最高价够到即视为成交（成交价=涨停价）；
+未成交在该信号上记 0。卖出 = T+2 开盘无条件卖，若 T+2 开盘与收盘都在跌停则顺延 T+3 开盘。
+费按双边 0.15% 扣。数字全部来自历史回放，不代表未来。
+</p>
+</div>
+</body>
+</html>

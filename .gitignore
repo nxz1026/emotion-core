@@ -47,3 +47,6 @@ target/
 # `emotion_core.core.available()` 试加载会失败，依赖 Rust 的测试整份跳过。
 *.so
 !src/core_lib/emotion_core_rust.so
+
+# Lab 实验缓存（面板/回放产物，本地重建）
+var/

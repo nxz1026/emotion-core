@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+### 功能 · 2026-10-21 Lab P1 上线（自我进化闭环的度量层）
+
+- 新增 `src/emotion_core/lab/` 子包（`db`/`schema`/`metrics`/`panel`/`score`/`runner`/`web`）：
+  同库新 schema `lab` 五张表、口径B 触及即成交的收益口径、面板物化（8801 行/675 天/2 MB）、
+  主线基线打分、`:8091` 只读页面。
+- 新增 `emotion-lab.service`（每日 17:45 Asia/Shanghai）+ `emotion-lab.timer` +
+  `emotion-lab-web.service`，与主线 unit 无 `Requires` 依赖，停掉即完全回滚。
+- 基线首次跑通：成交率 63.7%、每信号期望 **−1.16%**（LCB −1.95%）、成交后 −1.85%、
+  胜率 50.8%，与 `_audit/probe_fill.py` 的 −1.26% 同向同量级；页面首屏即报「现行规则无正期望」。
+- 新增 `tests/unit/test_lab_metrics.py`（17 例）、`tests/architecture/test_lab_isolation.py`（6 例）：
+  钉住成交看最高价、卖在 T+2 开盘、跌停开收同判、小样本不给分位数，以及
+  主线不得 import lab / lab 写语句只能落 `lab.` / 禁 f-string 拼 SQL。
+- `docs/20-自我进化闭环-Lab-设计与实施.md` 增 §14 实施记录（含三个实现期坑位）。
+
 ### 文档 · 2026-10-21 自我进化闭环（Lab）方案
 
 - `docs/20-自我进化闭环-Lab-设计与实施.md`（**新增，方案待拍板**）：与神经网络的逐项对应关系、

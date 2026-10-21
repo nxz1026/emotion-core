@@ -1,0 +1,10 @@
+[Unit]
+Description=Emotion Core Lab daily (after mainline daily)
+
+[Timer]
+OnCalendar=Mon-Fri 17:45:00 Asia/Shanghai
+Persistent=true
+Unit=emotion-lab.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ v.variant_id }} · Lab 明细</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+<link rel="stylesheet" href="/static/lab.css">
+</head>
+<body>
+<div class="container">
+<p><a href="/">← 回实验台</a></p>
+<h1>{{ v.variant_id }}</h1>
+<div class="lab-status">
+  <span>窗口：{{ v.window_start }} → {{ v.window_end }}</span>
+  <span>n = {{ v.n }}</span>
+  <span>成交率 {{ v.fill_rate }}%</span>
+  <span>每信号期望 {{ v.expectancy|pct }}</span>
+  <span>置信下界 {{ v.lcb|pct }}</span>
+</div>
+
+<h2>整体</h2>
+{% set d = v.detail or {} %}
+{% set allst = d.get('all') or {} %}
+{% set filled = d.get('filled') or {} %}
+<div class="lab-grid">
+  <div class="lab-stat">
+    <div class="k">每信号（含未成交）</div>
+    <div class="v {% if allst.mean is not none and allst.mean < 0 %}neg{% else %}pos{% endif %}">{{ allst.mean|pct }}</div>
+    <div class="n">n = {{ allst.n }} · 胜率 {{ allst.win_rate }}% · 最差 {{ allst.worst|pct }}</div>
+  </div>
+  <div class="lab-stat">
+    <div class="k">成交后（只看买到的）</div>
+    <div class="v {% if filled.mean is not none and filled.mean < 0 %}neg{% else %}pos{% endif %}">{{ filled.mean|pct }}</div>
+    <div class="n">n = {{ filled.n }} · 中位 {{ filled.median|pct }} · 胜率 {{ filled.win_rate }}%</div>
+  </div>
+  <div class="lab-stat">
+    <div class="k">最差切片</div>
+    <div class="v {% if v.sub_worst is not none and v.sub_worst < 0 %}neg{% else %}pos{% endif %}">{{ v.sub_worst|pct }}</div>
+    <div class="n">只统计 n≥{{ min_n }} 的切片</div>
+  </div>
+</div>
+
+<h2>切片</h2>
+{% set slices = d.get('slices') or {} %}
+{% if slices %}
+<table class="data-table">
+  <thead><tr><th>切片</th><th>n</th><th>均值</th><th>中位</th><th>胜率</th><th>置信下界</th><th>最差</th></tr></thead>
+  <tbody>
+  {% for key, s in slices.items()|sort %}
+    <tr class="{% if (s.n or 0) < min_n %}dim{% endif %}">
+      <td>{{ key }}</td>
+      <td class="num">{{ s.n }}</td>
+      <td class="num {% if s.mean is not none and s.mean < 0 %}neg{% endif %}">{{ s.mean|pct }}</td>
+      <td class="num">{{ s.median|pct }}</td>
+      <td class="num">{% if s.win_rate is none %}—{% else %}{{ s.win_rate }}%{% endif %}</td>
+      <td class="num">{{ s.lcb|pct }}</td>
+      <td class="num">{{ s.worst|pct }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">灰色行 n&lt;{{ min_n }}：样本不足，不给分位数，只看方向。</p>
+{% else %}
+<div class="lab-empty">这条变体没有切片数据。</div>
+{% endif %}
+
+<h2>其他变体</h2>
+<table class="data-table">
+  <thead><tr><th>变体</th><th>状态</th><th>n</th><th>每信号期望</th><th>置信下界</th></tr></thead>
+  <tbody>
+  {% for o in variants %}
+    <tr class="{% if (o.n or 0) < min_n %}dim{% endif %}">
+      <td><a href="/lab/variant/{{ o.variant_id }}">{{ o.variant_id }}</a></td>
+      <td>{{ o.status }}</td>
+      <td class="num">{{ o.n|num }}</td>
+      <td class="num">{{ o.expectancy|pct }}</td>
+      <td class="num">{{ o.lcb|pct }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</body>
+</html>

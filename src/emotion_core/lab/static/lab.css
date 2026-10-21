@@ -1,0 +1,76 @@
+/* Lab 实验台：只补 dashboard.css 没覆盖的布局，配色沿用主站。 */
+.lab-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  padding: 0.6rem 0.8rem;
+  margin: 0.8rem 0 1.2rem;
+  border: 1px solid #e3e6ea;
+  border-radius: 6px;
+  background: #fafbfc;
+  font-size: 0.86rem;
+  color: #4a5562;
+}
+
+.lab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.9rem;
+  margin: 0.8rem 0 1rem;
+}
+
+.lab-stat {
+  border: 1px solid #e3e6ea;
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  background: #fff;
+}
+
+.lab-stat .k { font-size: 0.82rem; color: #6b7684; }
+.lab-stat .v { font-size: 1.5rem; font-weight: 600; margin: 0.25rem 0; }
+.lab-stat .v.pos { color: #1c7c4a; }
+.lab-stat .v.neg { color: #b23b3b; }
+.lab-stat .v.na { color: #9aa3ad; }
+.lab-stat .n { font-size: 0.78rem; color: #7b848f; line-height: 1.4; }
+
+.lab-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  font-size: 0.84rem;
+  color: #5b6673;
+  margin-bottom: 1.4rem;
+}
+
+.lab-alarms { list-style: none; padding: 0; margin: 0.6rem 0 1.4rem; }
+.lab-alarm {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid #d5dae0;
+  background: #fbfcfd;
+  margin-bottom: 0.45rem;
+  border-radius: 0 4px 4px 0;
+}
+.lab-alarm.danger { border-left-color: #c0392b; }
+.lab-alarm.warn { border-left-color: #d68910; }
+.lab-alarm.ok { border-left-color: #1c7c4a; }
+
+.lab-empty {
+  padding: 0.9rem 1rem;
+  border: 1px dashed #d5dae0;
+  border-radius: 6px;
+  color: #6b7684;
+  background: #fcfdfe;
+  margin: 0.6rem 0 1.4rem;
+}
+
+.data-table tr.dim td { color: #a3aab2; }
+.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table td.neg { color: #b23b3b; }
+
+.lab-inline { display: inline-flex; gap: 0.35rem; margin: 0; }
+.lab-foot { margin-top: 1.6rem; font-size: 0.8rem; line-height: 1.6; }
+.muted { color: #6b7684; }

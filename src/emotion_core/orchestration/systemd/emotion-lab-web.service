@@ -1,0 +1,16 @@
+[Unit]
+Description=Emotion Core Lab Web (read-only lab dashboard, port 8091)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/DSH/emotion-core
+ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.lab.web --serve --port 8091
+Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
