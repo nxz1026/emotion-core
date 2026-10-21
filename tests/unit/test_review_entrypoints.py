@@ -432,7 +432,7 @@ class TestEntryRows:
         assert len(rows) == 6, rows            # 5 条件 + 1 警告
         assert all(note for _, _, note in rows), rows
         assert [r[0] for r in rows[:5]] == [
-            "c1 唯一换手高标", "c2 换手板非一字", "c3 淘汰赛身份",
+            "c1 唯一换手高标", "c2 换手板非一字", "c3 身份档（不否决）",
             "c4 最低板数门槛", "c5 强度与分歧补偿"]
         conds, warns = review_mod._split_rows(rows)
         assert len(conds) == 5 and len(warns) == 1

@@ -7,6 +7,8 @@ Part 3（渲染与发布）：JSON/Markdown 渲染与四出口发布。
 """
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 from dataclasses import dataclass
@@ -20,9 +22,10 @@ from emotion_core.algorithms import theme as theme_svc
 from emotion_core.algorithms.review.utils import (
     _CHECKS, _MARK, _atomic_write, _counter_items, _delta_of,
     _env_caveat, _env_conflict, _fmt_caliber, _fmt_catalyst,
-    _fmt_stat, _jsonable, _ladder_tag, _pct, _pctv,
+    _fmt_stat, _human_cond, _jsonable, _ladder_tag, _pct, _pctv,
     _ENV_MEANING, _seal_notes, _usability, _strip_position_block,
 )
+from emotion_core.algorithms.review.wording import translate_phase, translate_window
 from emotion_core.services import notify, position
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import prev_trading_day
@@ -401,6 +404,68 @@ def _top_boards_note(d: dict, key: str) -> str:
         return ""
 
 
+def _close_of(trade_date: date, code: str) -> float | None:
+    """当日收盘价（口径B 买点 = 收盘 × 板比的涨停价）；缺数 None，不猜。"""
+    df = query_df("SELECT close FROM daily_bar WHERE date = %s AND code = %s",
+                  (trade_date, code))
+    if df is None or df.empty:
+        return None
+    v = df["close"].iloc[0]
+    return None if v is None or pd.isna(v) else float(v)
+
+
+def _name_of(d: dict, code: str) -> str:
+    """候选票名：先在当日梯队行里找，找不到留空（不为了好看去查全表）。"""
+    for r in d.get("ladder_rows") or []:
+        if r.code == code:
+            return r.name or ""
+    sole = d.get("sole")
+    return (sole.name or "") if sole is not None and sole.code == code else ""
+
+
+def _action_card(d: dict) -> list[str]:
+    """⓪ 顶部卡（A 止血版）：市场温度 / 观察名单 / 次日验证点。
+
+    A 止血（2026-10-21 奎爷拍板 + ADR 0002 复核节）：口径B 打板按「触及即成交」
+    实测每信号 −1.26%（成交后 −2.01%、胜率 50%、炸板占成交 30% 且均亏 15%），
+    故本卡**不给买点、不给卖点、不给仓位**——只回答「今天市场什么样、谁进了
+    观察名单、明天看什么」。信息与 ⑥⑨ 段同源，这里只做翻译与压缩，不新增判定。
+    """
+    if "window" not in d or not d.get("stat"):
+        return []
+    s = d["stat"]
+    phase = s.get("phase") or "?"
+    mood = f"**市场**：{translate_phase(phase)}（{phase}）"
+    if s.get("diverge"):
+        mood += "·高位分歧"
+    lc, br = s.get("limit_up_count"), s.get("bomb_rate")
+    detail = []
+    if lc is not None:
+        detail.append(f"涨停 {int(lc)} 家")
+    if br is not None and not pd.isna(br):
+        detail.append(f"炸板 {_pct(br)}")
+    if detail:
+        mood += "——" + "，".join(detail)
+    lines = [mood, ""]
+
+    sig = d.get("signal")
+    if sig:
+        code = sig["code"]
+        who = f"{code} {_name_of(d, code)}".strip()
+        lines.append(f"**观察**：{who} —— 硬条件全过，只进观察名单，不出买点")
+        lines.append("")
+        lines.append("> 盘后可执行的打板口径实测每信号 −1.26%（成交后 −2.01%、"
+                     "胜率 50%、炸板占成交 30% 且均亏 15%）→ 本报告不出买点、不给仓位。")
+    else:
+        # 不出手的原因统一由 _no_signal_reason 给，顶部与⑥段不许两套说法
+        lines.append(f"**观察**：{_no_signal_reason(d, short=True)}")
+    checks = _CHECKS.get(phase) or []
+    if checks:
+        lines += ["", f"**次日验证点**：{checks[0]}"]
+    lines.append("")
+    return lines
+
+
 def _sec_overview(d: dict) -> str:
     """⓪ 速览（V9）：链路健康 + 较昨日变化。放最前，30 秒读完当日结论。
 
@@ -410,7 +475,7 @@ def _sec_overview(d: dict) -> str:
     """
     u = d.get("usability") or _usability(d)
     mark = {"OK": "✅", "PARTIAL": "⚠", "UNKNOWN": "⚠"}[u["state"]]
-    lines = ["## ⓪ 速览", "",
+    lines = ["## ⓪ 速览", ""] + _action_card(d) + [
              f"**数据可信度：{mark} {u['state']}** —— {u['note']}",
              "", _health_of(d["date"]), ""]
     # #7 口径覆盖声明（精简版，完整口径见⑩质检段）
@@ -421,8 +486,10 @@ def _sec_overview(d: dict) -> str:
                      f" ｜ 含20cm ｜ 自算涨停 {c['counts_self']['zt']} / "
                      f"东财池 {c['counts_em_pool']['zt']}")
     lines.append("")
-    # #2 空仓/不动理由可见化（仅当 dict 含所需字段，否则跳过）
-    if not d.get("signal") and "window" in d:
+    # #2 空仓/不动理由可见化（仅当 dict 含所需字段，否则跳过）。
+    # W1′：不出手的原因已经进了顶部操作卡的「买」行，这里不再重复一遍；
+    # 只有操作卡没渲染（旧调用方缺字段）时才补。
+    if not _action_card(d) and not d.get("signal") and "window" in d:
         reason = _no_signal_reason(d)
         if reason:
             lines.append(f"**今日建议**：{reason}")
@@ -442,8 +509,10 @@ def _sec_overview(d: dict) -> str:
                          f"{s.get('phase')}")
         else:
             lines.append(f"- 阶段：{s.get('phase')}（持平）")
-        lines.append(_delta_of(s.get("buy_window"), p.get("buy_window"),
-                               "buy_window"))
+        # W8′：字段名换成用户能读的词，且档位翻成人话（A 止血后＝情绪强度档）
+        lines.append(_delta_of(translate_window(s.get("buy_window") or "NONE"),
+                               translate_window((p or {}).get("buy_window") or ""),
+                               "情绪档"))
         lines.append(_delta_of(s.get("dragon_env"), p.get("dragon_env"),
                                "生态评级"))
     return "\n".join(lines) + "\n"
@@ -457,11 +526,15 @@ def _sec_trend(d: dict) -> str:
     df = query_df(
         "SELECT date, phase, buy_window, dragon_env FROM market_stat"
         " WHERE date = ANY(%s) ORDER BY date", (days,))
-    lines = ["## ⑫ 近 20 日走势（phase / 窗口 / 生态）", "",
-             "| 日期 | 阶段 | 窗口 | 生态 |", "|---|---|---|---|"]
+    lines = ["## ⑫ 近 20 日走势（情绪 / 情绪档 / 生态）", "",
+             "| 日期 | 情绪 | 情绪档 | 生态 |", "|---|---|---|---|"]
     for r in df.itertuples():
-        lines.append(f"| {r.date} | {r.phase or '—'} | {r.buy_window or '—'}"
-                     f" | {r.dragon_env or '—'} |")
+        ph = r.phase or "—"
+        win = translate_window(r.buy_window) if r.buy_window else "—"
+        lines.append(f"| {r.date} | {ph}（{translate_phase(ph)}）" if r.phase
+                     else f"| {r.date} | — | {win} | {r.dragon_env or '—'} |")
+        if r.phase:
+            lines[-1] += f" | {win} | {r.dragon_env or '—'} |"
     return "\n".join(lines) + "\n"
 
 
@@ -502,14 +575,51 @@ def _sec_emotion(d: dict) -> str:
     banner = ""
     if s.get("accelerate"):
         mode = "已降级" if _ACCEL_ENFORCE else "影子模式，未干预窗口"
-        banner = (f"\n\n⚡ **加速事件命中**（{mode}）\n\n{s.get('accel_reason', '')}\n")
+        banner = (f"\n\n⚡ **加速事件命中**（{mode}）\n\n"
+                  f"内部判据（排查用，不参与买卖）：{s.get('accel_reason', '')}\n")
     inherited = bool(s.get("phase_inherited"))
-    phase_label = f"{s['phase']}（延续）" if inherited else f"{s['phase']}（当日触发）"
+    phase_label = f"{s['phase']}（延续昨日）" if inherited else f"{s['phase']}（当日触发）"
+    window = s.get("buy_window") or "NONE"
+    tail = f"情绪档：{translate_window(window)}"
+    if s.get("diverge"):
+        tail += "（高位分歧）"
     return ("## ① 情绪面板\n\n" + _fmt_stat(s, d["prev_stat"])
-            + f"\n\n**阶段：{phase_label}** buy_window={s['buy_window']}"
+            + f"\n\n**市场情绪：{translate_phase(s['phase'])} · {phase_label}**"
+            + f"\n\n{tail}"
             + ("\n\n⚠ **退潮清仓信号生效**" if s["force_liquidate"] else "")
             + banner
-            + f"\n\n依据：{s.get('reason', '')}\n")
+            + f"\n\n**为什么这么判**：{_human_state_reason(s)}\n")
+
+
+#: 市场相位触发词 → 人话（`market_stat.reason` 括号里那句话）。
+_STATE_TRIGGER_HUMAN = {
+    "反转": "跌停/炸板开始收敛（反转迹象）",
+    "无候选放宽": "没有可做的候选，按放宽条件判定",
+    "两日最高板炸板": "最高板连着两天炸板",
+    "延续：当日无规则触发，数字仅参考": "今天没有任何规则触发，沿用昨天的判断",
+}
+
+
+def _human_state_reason(s: dict) -> str:
+    """把 `market_stat.reason` 的机器串翻成一句人话（W8′）。
+
+    原始串形如 `退潮（延续：当日无规则触发…）·加速(影子)(涨停55 炸率0.2/阈0.39 …)`：
+    括号里的数字在①段的表里已经逐列给过，这里不再重复；`·加速(影子)` 由专门的
+    横幅展示，也不重复。拿不准触发词时只回「触发了某相的规则」，不编理由。
+    """
+    raw = (s or {}).get("reason") or ""
+    if not raw:
+        return "无判定依据记录"
+    head = raw.split("·")[0]
+    m = re.match(r"^[^（(]*[（(]([^）)]*)[）)]", head)
+    trig = m.group(1) if m else ""
+    if trig in _STATE_TRIGGER_HUMAN:
+        return _STATE_TRIGGER_HUMAN[trig]
+    if s.get("phase_inherited"):
+        return "今天没有规则触发，沿用昨天的判断"
+    if re.match(r"^nb=\d", trig):
+        return f"高位股负反馈集中（{trig}）"
+    return f"当天数据触发了「{s.get('phase')}」的判定规则"
 
 
 def _sec_ladder(d: dict) -> str:
@@ -724,9 +834,14 @@ def _sec_advice(d: dict) -> str:
     if d["signal"]:
         sig = d["signal"]
         conds, warns = _split_rows(sig["checklist"])
+        # W1′：W1 行恒 True（只是观察项），只有真扎堆时 note 才带 ⚠；
+        # 没扎堆就别在「风险提示」里挂一条假警告。
+        warns = [w for w in warns if "⚠" in w[2]]
         passed = _passed_of_rows(sig["checklist"])
-        verdict = "✅ 通过（ALL GREEN）" if passed else "❌ 未通过（有否决项）"
-        lines.append(f"**买入信号**：{sig['reason']}（窗口 {sig['buy_window']}）")
+        verdict = ("✅ 硬条件全部通过（只进观察名单；本系统不出买入建议）" if passed
+                   else "❌ 未通过（有否决项）")
+        who = f"{sig['code']} {_name_of(d, sig['code'])}".strip()
+        lines.append(f"**观察名单：{who}**")
         lines.append("")
         lines.append(f"**结论**：{verdict}")
         lines.append("")
@@ -737,8 +852,8 @@ def _sec_advice(d: dict) -> str:
         lines.append("")
         lines.append("**关键判据**：")
         for name, ok, note in conds:
-            mark = "✓" if ok else ("✗" if ok is False else "?")
-            lines.append(f"- [{mark}] {name}: {note}")
+            mark = "✓" if ok else ("✗" if ok is False else "·")
+            lines.append(f"- [{mark}] {_human_cond(name)}：{note}")
         if warns:
             lines.append("")
             lines.append("**风险提示**：")
@@ -747,10 +862,12 @@ def _sec_advice(d: dict) -> str:
     else:
         lines.append(_no_signal_reason(d))
     lines += _sec_secondary_block(d.get("secondary_signal"))
-    for s in d["sells"]:
-        lines.append(f"**卖出建议**：{s.code} —— {s.reason}")
-    if not d["sells"] and d["positions"]:
-        lines.append("持仓无卖出建议（仍封板且非退潮）")
+    # A 止血：不再给卖出指令。口径B 的买入前提已废（打板成交即负期望），
+    # 按口径B 排出来的「T+2 开盘卖」就失去依据；持仓明细仍由 ⑩/对账段如实列出。
+    if d["positions"]:
+        lines.append("**持仓**：本系统不再给买卖指令（口径B 复核证伪，见 ADR 0002）。"
+                     "若你仍按旧口径在建仓后第 1 个交易日开盘离场，那是你自己的纪律，"
+                     "不在本报告的建议范围内。")
     return "\n".join(lines) + _hot_of(d) + _sec_reconcile_pos(d) + "\n"
 
 
@@ -763,17 +880,20 @@ def _sec_secondary_block(sec: dict | None) -> list[str]:
     if not sec:
         return []
     conds, warns = _split_rows(sec["checklist"])
+    warns = [w for w in warns if "⚠" in w[2]]
     passed = _passed_of_rows(sec["checklist"])
     verdict = "✅ 通过（ALL GREEN）" if passed else "❌ 未通过（有否决项）"
-    lines = ["", f"**次级推荐**：{sec['reason']}（窗口 {sec['buy_window']}"
-             "，放宽阈值 c3/c4/c5）"]
+    why = (sec.get("reason") or "").strip() or "硬条件放宽档的观察记录"
+    lines = ["", f"**次级观察**：{sec['code']} —— {why}"
+             f"（情绪档：{translate_window(sec['buy_window'])}；"
+             "门槛放宽：低位身位、3 板起、换手要求降档）"]
     if sec.get("buy_window") == "NONE":
-        lines += ["", "> ⚠ 本记录为**禁买日观察记录**：当日 buy_window=NONE 禁买，"
-                   "次级仅为身位线索，不构成买入指令，也不会导出到交易端。"]
+        lines += ["", "> ⚠ 本记录是**不出手日的观察记录**：只提供身位线索，"
+                   "不能下单，也不会导出到交易端。"]
     lines += ["", f"**结论**：{verdict}", ""]
     for name, ok, note in conds:
-        mark = "✓" if ok else ("✗" if ok is False else "?")
-        lines.append(f"- [{mark}] {name}: {note}")
+        mark = "✓" if ok else ("✗" if ok is False else "·")
+        lines.append(f"- [{mark}] {_human_cond(name)}：{note}")
     if warns:
         lines += ["", "**风险提示**："]
         lines += [f"- ⚠ {name}: {note}" for name, _, note in warns]
@@ -802,29 +922,55 @@ def _hot_of(d: dict) -> str:
             " 名（影子验证列，不参与判定）")
 
 
-def _no_signal_reason(d: dict) -> str:
-    """空仓理由：定位卡在哪个条件。"""
+def _no_signal_reason(d: dict, short: bool = False) -> str:
+    """今天不出手的原因（W11′ 人话版）：先给结论，再给卡在哪一条。
+
+    short=True 只回一句结论（操作卡用）；默认带逐条判据与警告（⑥段用）。
+    """
     if d["window"] == "NONE":
         ph = d["stat"]["phase"] if d["stat"] else "?"
-        if d["stat"] is not None and d["stat"].get("diverge"):
-            ph += "·高位分歧降级"
+        gen = translate_phase(ph)
+        if ph == "冰点":
+            head = f"市场处于{gen}（冰点）——连板高度太低，今天不产观察标的"
+        elif ph == "高潮":
+            head = (f"市场处于{gen}（高潮），但高位分歧降级（昨日高位股负反馈集中）"
+                    "——今天不产观察标的")
+        else:
+            # 相位与窗口打架：W7′ 之后只有冰点/高潮降级会出 NONE，
+            # 退潮还写着 NONE 说明 market_stat 没按新口径重算（数据是旧的）。
+            head = (f"市场处于{gen}（{ph}），但库里 buy_window 依旧是 NONE"
+                    "——口径已改为退潮可买，需重跑 emotion 步骤刷新 market_stat")
+        if short:
+            return head
         sec_hint = ""
         sec = d.get("secondary_signal")
         if sec:
             sec_hint = (f"（另有次级观察记录 {sec.get('code')}——"
-                        "仅身位线索，不构成买入指令，详见⑥段）")
-        return f"**空仓理由**：buy_window=NONE（{ph} 禁买）{sec_hint}"
+                        "只有身位线索，不能下单，详见⑥段）")
+        return f"**今天不出手**：{head}{sec_hint}"
     cand = d["sole"]
     if cand is None:
-        return "**空仓理由**：无唯一换手高标候选（梯队断层或一字垄断）"
+        msg = "今天没有符合条件的连板龙头（梯队断层，或高板全是一字板）"
+        return msg if short else f"**今天不出手**：{msg}"
     # 用 rows 而非 checklist()：这里要的是带说明的行（逐条讲清卡在哪），
     # checklist() 只回布尔投影。判定聚合仍走同一套阈值，见 entry.rows 文档。
     conds, warns_raw = _split_rows(entry.rows(cand, d["window"]))
-    fails = [f"{n}: {note}" for n, ok, note in conds if not ok]
+    fails = [f"{_human_cond(n)}：{note}" for n, ok, note in conds if not ok]
     warns = [note for _, _, note in warns_raw if "⚠" in note]
-    head = "**候选通过，未成全信号**" if not fails else \
-        "**空仓理由（候选 " + cand.name + "）**\n" + "\n".join(
-            f"- [✗] {f}" for f in fails)
+    if fails:
+        if short:
+            return f"{cand.name} 卡在「{fails[0].split('：')[0]}」"
+        head = ("**今天不出手（候选 " + cand.name + "）**\n"
+                + "\n".join(f"- [✗] {f}" for f in fails))
+    else:
+        # 硬条件全过却没有记录 → 只可能是档位为「不参与」（分歧降级 + 新插队）
+        try:
+            pt = entry.tier_of(cand, d["window"])
+            why = f"{cand.name} 是{pt.tier}，当前环境下不进观察名单（{pt.reason}）"
+        except Exception as exc:  # noqa: BLE001 —— 报告不能因档位算不出来而崩
+            log.warning("档位计算失败（%s，降级为文案）：%s", cand.code, exc)
+            why = f"{cand.name} 硬条件通过，但当前环境下不进观察名单（档位=不参与）"
+        return why if short else f"**今天不出手**：{why}"
     return head + "".join(f"\n- [{w}]" for w in warns)
 
 

@@ -157,20 +157,38 @@ _HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。把下面这�
 """
 
 
+_HUMANIZE_BUY_PROMPT = """你是给一线交易员发盘后观察记录的助手。把下面这条简报，**用 2-3 句自然中文**说清楚：
+
+1. 观察哪只票（代码+名称+几板）；
+2. 它的硬条件是否全部通过（身位、换手、板数）。
+
+⚠️ 铁律：**只做格式美化，不做语义扩展。**
+- 禁止添加原文中不存在的信息、因果、目标价、买卖价位、仓位建议或收益承诺。
+- **股票代码、票名、板数必须原样保留**，不得概括为「某股」。
+- 不得把观察记录写成「可以买入」「建议买入」；原文没有买点就是没有买点，不许补。
+- 只允许改写句式、调整语序、把 checklist 符号译成口语。
+
+风格：不用 markdown 标题/列表，只输出 2-3 句纯文本；不复述 c1/c2/c3 这类字段名。
+
+简报原文如下：
+"""
+
+
 def _humanize_alert(text: str, kind: str = "daily") -> str:
     """把飞书推送的 markdown 摘要送 LLM 改写为人话；失败回退原文。
 
     Args:
-        text: 已提取的速览段（_summary 输出）。
-        kind: "daily" / "buy" / "watchdog"——目前只对 daily 做改写。
+        text: 已提取的速览段（_summary 输出）或 BUY 简报正文。
+        kind: "daily" / "buy" / "watchdog"——daily 与 buy 走改写，其余原样。
 
     Returns:
         LLM 改写后的文本；LLM 不可用时回退原文，best-effort 不抛。
     """
     if not text:
         return text
-    if kind != "daily":
-        return text  # 暂只对日报摘要 humanize，BUY 即时推送仍走结构化文本
+    prompt = {"daily": _HUMANIZE_PROMPT, "buy": _HUMANIZE_BUY_PROMPT}.get(kind)
+    if prompt is None:
+        return text  # WATCH/WATCHDOG 等其它通道保持结构化文本
     cache_key = (kind, hashlib.md5(text.encode("utf-8")).hexdigest())
     now = time.time()
     cached = _HUMANIZE_DEDUP.get(cache_key)
@@ -180,7 +198,7 @@ def _humanize_alert(text: str, kind: str = "daily") -> str:
         from emotion_core.llm import agnes
         client = agnes.AgnesClient()
         out = client.complete(
-            prompt=_HUMANIZE_PROMPT + text,
+            prompt=prompt + text,
             temperature=0.3,
             max_tokens=512,
         )
@@ -202,74 +220,86 @@ def reset_humanize_dedup() -> None:
     _HUMANIZE_DEDUP.clear()
 
 
-# ---- R58-4 BUY 即时推送：与日报摘要并行，专注 BUY 信号简报 ----
-# daily 主链结尾会调 `push(report_md, trade_date)` 推速览；本函数是 BUY 信号
-# 刚落库即触发（不经 daily 主链），给「BUY 出现就第一时间看到」的用户一个
-# 独立时点。24h 内存 dict 节流：同 (date, code) 24h 内只推一次，防 daily 重
-# 跑/回放/replay 重复轰炸。进程重启节流清空，重启后第一笔 BUY 仍会推。
+# ---- R58-4 观察记录即时推送（A 止血后默认关闭）----
+# daily 主链结尾会调 `push(report_md, trade_date)` 推速览；本通道是观察记录
+# 刚落库即触发（不经 daily 主链）。**PUSH_BUY 默认 0**：口径B 打板被证伪后
+# 「出现即推」等于每天推一条负期望暗示，等 B/C 轮有真东西再打开。
+# 24h 内存 dict 节流：同 (date, code) 24h 内只推一次，防 daily 重跑/回放重复轰炸。
 
 _BUY_DEDUP: dict[tuple[str, str], float] = {}
 _BUY_DEDUP_TTL = 86400  # 24h
 _BUY_DEDUP_PRUNE_EVERY = 64  # 每 N 次调用清理一次过期 key
 
 
+_BUY_COND_HUMAN = (
+    ("c1_uniqueness", "是不是唯一最强连板股"),
+    ("c2_exchange", "今天是否正常换手（非一字板）"),
+    ("c3_elimination", "身位（昨天在不在最强组里）"),
+    ("c4_min_days", "连板高度够不够"),
+    ("c5_strength_diverge", "换手强度够不够"),
+)
+
+
 def _format_buy_signal(code: str, name: str, cont_days: int,
                        buy_window: str, cl: object) -> str:
-    """BUY 信号简报（飞书 text 格式，标题+代码+板数+5 条件 checklist）。
+    """观察记录简报（人话版）：只给标的 + 身位 + 硬条件达标情况。
 
+    A 止血（2026-10-21）：不再带买点/卖点/仓位（口径B 打板成交假设证伪，
+    每信号 −1.26%）；标题也从「买入信号」改成「观察记录」，避免读者当指令。
     不带持仓明细（与 `push` 同纪律）；不带 BUY 之外的段（避免与日报摘要重复）。
-    checklist 用 Checklist 对象（5 字段），每条 True / False / None 三态可见。
     """
-    rows = []
-    for label, field in (
-        ("c1 唯一换手高标", "c1_uniqueness"),
-        ("c2 换手板非一字", "c2_exchange"),
-        ("c3 淘汰赛身份", "c3_elimination"),
-        ("c4 最低板数门槛", "c4_min_days"),
-        ("c5 强度与分歧补偿", "c5_strength_diverge"),
-    ):
-        v = getattr(cl, field, None)
-        mark = "✓" if v is True else ("✗" if v is False else "—")
-        rows.append(f"{mark} {label}")
     name_part = f"{name}({code})" if name else code
-    body = (f"[emotion-core] BUY 信号\n"
-            f"标的：{name_part}  |  {cont_days}板\n"
-            f"窗口：{buy_window or 'NONE'}\n"
-            + "\n".join(rows))
-    return body
+    lines = ["[emotion-core] 今日观察记录（不出买入建议）",
+             f"{name_part}  {cont_days} 板"]
+    passed = [human for field, human in _BUY_COND_HUMAN
+              if getattr(cl, field, None) is True]
+    failed = [human for field, human in _BUY_COND_HUMAN
+              if getattr(cl, field, None) is False]
+    if failed:
+        lines.append("未过关：" + "、".join(failed))
+    elif passed:
+        lines.append("硬条件全部通过：" + "、".join(passed))
+    return "\n".join(lines)
 
 
 def push_buy_signal(code: str, name: str, cont_days: int,
-                     buy_window: str, cl: object,
-                     trade_date: _date | None = None) -> bool:
-    """BUY 信号即时推送：24h 内存节流，best-effort，失败不抛。
+                    buy_window: str, cl: object,
+                    trade_date: _date | None = None) -> bool:
+    """观察记录即时推送：默认关闭，24h 内存节流，best-effort，失败不抛。
 
-    仅 BUY 信号触发（SECONDARY/RECOMMEND 不调）；同日同 code 重跑不重推。
-    与 `push(report_md)` 的关系：日报摘要仍由 daily 主链推送，本函数是
-    独立时点的 BUY 简报——可在 BUY 落库后立即看到，不必等 daily 跑完。
+    **默认关闭**（A 止血）：读 `EMOTION_PUSH_BUY` / `PUSH_BUY`，缺省 0。口径B 打板
+    被证伪后，「BUY 出现即推」等于每天推一条负期望的操作暗示；等 B 轮找到正期望
+    边缘或 C 轮补上盘中能力再打开（届时这条通道才有意义）。
+
+    仅 BUY 记录触发（SECONDARY/RECOMMEND 不调）；同日同 code 重跑不重推。
 
     Args:
-        code/name/cont_days: 信号标的与身位。
+        code/name/cont_days: 标的与身位。
         buy_window: market_stat.buy_window 原文（NONE/ENHANCED/STANDARD）。
         cl: domain.Checklist 对象（含 5 字段 + W1）。
         trade_date: 交易日，仅用于日志；key 仍以 (date_iso, code) 为单位。
 
     Returns:
-        bool 推送是否成功（被节流时返回 False）。
+        bool 推送是否成功（关闭/未配置/被节流时返回 False）。
     """
+    if _cfg("PUSH_BUY", "0").strip() not in ("1", "true", "True"):
+        log.debug("PUSH_BUY 未开启（A 止血默认关），观察记录即时推送跳过")
+        return False
     url = _cfg("LKL_WEBHOOK_URL", "")
     if not url:
-        log.debug("LKL_WEBHOOK_URL 未配置，BUY 即时推送跳过")
+        log.debug("LKL_WEBHOOK_URL 未配置，观察记录即时推送跳过")
         return False
     d_iso = (trade_date or _date.today()).isoformat()
     key = (d_iso, code)
     now = time.time()
     last = _BUY_DEDUP.get(key, 0.0)
     if now - last < _BUY_DEDUP_TTL:
-        log.info("BUY 信号 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
+        log.info("观察记录 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
                  d_iso, code, last, now - last)
         return False
-    text = _format_buy_signal(code, name, cont_days, buy_window, cl)
+    text = _humanize_alert(
+        _format_buy_signal(code, name, cont_days, buy_window, cl),
+        kind="buy")
     channel = _guess_channel(url)
     try:
         import requests
@@ -278,13 +308,13 @@ def push_buy_signal(code: str, name: str, cont_days: int,
         ok = _resp_ok(channel, resp)
         if not ok and channel == "feishu" and resp.status_code == 200:
             log.warning(
-                "飞书 BUY 即时推送返回 HTTP 200 但 body 非成功码：%s",
+                "飞书观察记录即时推送返回 HTTP 200 但 body 非成功码：%s",
                 resp.text[:120],
             )
-        log.info("BUY 即时推送 %s/%s（%s）：HTTP %s 成功=%s",
+        log.info("观察记录即时推送 %s/%s（%s）：HTTP %s 成功=%s",
                  d_iso, code, channel, resp.status_code, ok)
     except Exception as exc:  # noqa: BLE001
-        log.warning("BUY 即时推送失败（不影响 BUY 落盘）：%s", exc)
+        log.warning("观察记录即时推送失败（不影响落盘）：%s", exc)
         return False
     # 仅在 HTTP 请求**发出**后记节流——未配置/网络异常时不污染 dedup
     _BUY_DEDUP[key] = now

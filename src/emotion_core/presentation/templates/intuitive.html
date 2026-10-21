@@ -14,7 +14,7 @@
     </p>
     {% endif %}
     <div class="stats">
-        <div class="stat"><div class="stat-label">买入窗口</div>
+        <div class="stat"><div class="stat-label">情绪档</div>
             <div class="stat-value">{{ buy_window }}</div></div>
         <div class="stat"><div class="stat-label">涨停家数</div>
             <div class="stat-value">{{ limit_up_count }}</div></div>
@@ -28,7 +28,7 @@
 </div>
 
 <div class="card">
-    <h2>当日推荐 <span class="muted">{{ banner.selected_iso }}</span></h2>
+    <h2>当日观察名单 <span class="muted">{{ banner.selected_iso }}</span></h2>
     {% if recommendations %}
     <ul class="recommend-list">
         {% for s in recommendations %}
@@ -42,7 +42,7 @@
         {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">该快照日<strong>没有 BUY 推荐</strong>：{{ no_buy_reason }}</p>
+    <p class="muted">该快照日<strong>没有观察记录</strong>：{{ no_buy_reason }}</p>
     <p class="muted"><code>signal</code> 表当日 {{ signal_counts.day }} 行、
         全表 <strong>{{ signal_counts.total }} 行</strong>（含 SECONDARY 观察信号）。</p>
     <form class="stock-form" action="{{ base_path }}/stock" method="get">

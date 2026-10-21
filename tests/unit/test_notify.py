@@ -284,7 +284,16 @@ class TestPushFeishu:
 
 
 class TestPushBuySignal:
-    """R58-4：BUY 即时推送——24h 内存节流、防重推、专注 BUY 信号简报。"""
+    """观察记录即时推送——24h 内存节流、防重推。
+
+    A 止血（2026-10-21）后 `push_buy_signal` **默认关闭**（无正期望买点，不该
+    主动推「今日买入信号」）；本类验证「显式打开后」的节流/格式化行为，
+    默认关的行为由 `test_disabled_by_default` 钉住。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _push_on(self, monkeypatch):
+        monkeypatch.setenv("EMOTION_PUSH_BUY", "1")
 
     @staticmethod
     def _cl():
@@ -299,6 +308,21 @@ class TestPushBuySignal:
             posted.append({"args": a, "kw": kw})
             return _resp(200, {"code": 0})
         return mock_post
+
+    def test_disabled_by_default(self, monkeypatch):
+        """A 止血：不带 EMOTION_PUSH_BUY 时不推（默认关）。"""
+        posted = []
+        import requests as real_requests
+        monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
+        monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        monkeypatch.delenv("EMOTION_PUSH_BUY", raising=False)
+        monkeypatch.delenv("PUSH_BUY", raising=False)
+        notify.reset_buy_dedup()
+
+        ok = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
+                                    self._cl(), date(2026, 10, 10))
+        assert ok is False
+        assert posted == []
 
     def test_first_push_attempts(self, monkeypatch):
         import requests as real_requests
@@ -385,11 +409,15 @@ class TestPushBuySignal:
         assert notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
                                       self._cl(), date(2026, 10, 10)) is False
 
-    def test_payload_format_includes_checklist(self, monkeypatch):
+    def test_payload_format_is_plain_language(self, monkeypatch):
+        """简报走人话——代码/票名/板数保留，内部代号 c1..c5 不再出现；
+        A 止血后正文不得出现买点/卖点/仓位（不再给操作指令）。"""
         import requests as real_requests
         posted = []
         monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        # 只验格式化层的人话；LLM 改写有独立用例，这里关掉免得断言被改写打断
+        monkeypatch.setattr(notify, "_humanize_alert", lambda t, kind="daily": t)
         notify.reset_buy_dedup()
 
         notify.push_buy_signal("000017", "测试龙", 5, "ENHANCED",
@@ -397,10 +425,13 @@ class TestPushBuySignal:
         payload = posted[0]["kw"]["json"]
         assert payload["msg_type"] == "text"
         body = payload["content"]["text"]
-        assert "000017" in body and "测试龙" in body and "5板" in body
-        assert "ENHANCED" in body
-        assert "✓ c1 唯一换手高标" in body
-        assert "✓ c3 淘汰赛身份" in body
+        assert "000017" in body and "测试龙" in body
+        assert "5 板" in body or "5板" in body
+        assert "唯一最强连板股" in body                          # 人话条件
+        assert "c1 " not in body and "c3 " not in body           # 不再出现内部代号
+        # A 止血红线：正文不得出现买点/卖点/仓位这类操作指令
+        for banned in ("买点", "卖点", "仓位", "满仓", "半仓"):
+            assert banned not in body, f"观察记录里不该出现「{banned}」"
 
     def test_zero_cont_days_in_body(self, monkeypatch):
         """cont_days 缺数（Signal 字段未填）→ 显示 0 板，不抛。"""
@@ -423,10 +454,25 @@ class TestHumanizeAlert:
         notify.reset_humanize_dedup()
         assert notify._humanize_alert("", kind="daily") == ""
 
-    def test_non_daily_kind_passes_through(self):
-        """kind='buy' / 'watchdog' 暂不 humanize，直接返回原文。"""
-        text = "## ⓪ 速览\n**今日 BUY：000017 5板**"
-        assert notify._humanize_alert(text, kind="buy") == text
+    def test_buy_is_humanized_others_pass_through(self, monkeypatch):
+        """W9′：buy 也走改写；watchdog 等其它通道原样返回。"""
+        notify.reset_humanize_dedup()
+
+        class _StubAgnes:
+            def __init__(self):
+                pass
+            def complete(self, *, prompt, temperature, max_tokens):
+                assert "盘后观察记录" in prompt      # 用的是 buy 专用 prompt
+                return "000017 测试龙 5 板，硬条件全过，进了观察名单。"
+
+        import sys
+        sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
+        sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
+        sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
+
+        text = "[emotion-core] 今日观察记录（不出买入建议）\n000017(测试龙)  5 板"
+        out = notify._humanize_alert(text, kind="buy")
+        assert out != text and "000017" in out
         assert notify._humanize_alert(text, kind="watchdog") == text
 
     def test_llm_failure_falls_back_to_original(self, monkeypatch):
@@ -650,6 +696,7 @@ class TestPushWatchSignals:
         posted = []
         mock_post, requests = self._spy(posted)
         monkeypatch.setattr(requests, "post", mock_post)
+        monkeypatch.setenv("EMOTION_PUSH_BUY", "1")
         notify.reset_buy_dedup()
 
         cl = SimpleNamespace(c1_uniqueness=True, c2_exchange=True,

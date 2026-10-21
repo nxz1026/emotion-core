@@ -1,36 +1,24 @@
-"""决策语言翻译层：通俗语言，不用术语。"""
+"""决策语言翻译层（本站唯一的"说人话"入口）。
+
+实现放在 `algorithms/review/wording.py`：报告正文由算法层拼装，而架构约束是
+`presentation → algorithms` 单向。这里只做 re-export，公开签名保持不变。
+"""
 from __future__ import annotations
 
-PHRASE_MAP = {
-    "发酵": "上升期",
-    "高潮": "狂热期",
-    "退潮": "下跌期",
-    "冰点": "低迷期",
-}
+from emotion_core.algorithms.review.wording import (
+    PHRASE_MAP,
+    RATING_MAP,
+    WINDOW_MAP,
+    translate_phase,
+    translate_rating,
+    translate_window,
+)
 
-WINDOW_MAP = {
-    "ENHANCED": "可买入（强度高）",
-    "STANDARD": "可买入",
-    "NONE": "禁买",
-}
-
-
-def translate_phase(phase: str) -> str:
-    """翻译情绪阶段为通俗语言。"""
-    return PHRASE_MAP.get(phase, phase)
-
-
-def translate_window(window: str) -> str:
-    """翻译窗口为通俗语言。"""
-    return WINDOW_MAP.get(window, window)
-
-
-def translate_rating(rating: str) -> str:
-    """翻译生态评级为通俗语言。"""
-    if rating == "FAVORABLE":
-        return "有利"
-    elif rating == "NEUTRAL":
-        return "一般"
-    elif rating == "UNFAVORABLE":
-        return "不利"
-    return rating
+__all__ = [
+    "PHRASE_MAP",
+    "RATING_MAP",
+    "WINDOW_MAP",
+    "translate_phase",
+    "translate_rating",
+    "translate_window",
+]

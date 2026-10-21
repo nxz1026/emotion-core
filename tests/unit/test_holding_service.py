@@ -57,6 +57,10 @@ def io(monkeypatch):
     monkeypatch.setattr(hs, "_derived", lambda code, d: box["drv"])
     monkeypatch.setattr(hs, "_market", lambda d: box["stat"])
     monkeypatch.setattr(hs.holding_store, "holding_for", lambda code: box["pos"])
+    # exit 侧的两个读口（都要查库）换掉，保持 DB-free
+    monkeypatch.setattr(hs.exit_svc, "held_days", lambda entry, d: box.get("held"))
+    monkeypatch.setattr(
+        hs.exit_svc, "open_locked_limit_down", lambda d, code: bool(box.get("locked")))
     monkeypatch.setattr(
         hs.holding_store, "upsert_decision", lambda d: (box["writes"].append(d), 1)[1]
     )
@@ -76,110 +80,118 @@ def io(monkeypatch):
 # ────────────────────────── §7.2 优先级表（纯函数） ──────────────────────────
 
 
-class TestDecideAction:
-    def test_force_liquidate_beats_everything(self):
+class TestPositionView:
+    """持仓视角（有成本）：口径B 只按建仓后经过的交易日数退出，不再看退潮/止损/断板。"""
+
+    def test_no_entry_date_is_degrade_hold(self):
+        """有成本但查不到建仓日 → 算不出持有天数，不许猜「清仓」也不许猜「持有」。"""
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(), held=None
+        )
+        assert action == "HOLD" and "建仓日" in r["text"]
+
+    def test_entry_day_holds(self):
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(), held=0
+        )
+        assert action == "HOLD" and "刚建仓" in r["text"]
+
+    def test_next_trading_day_exits(self):
+        """建仓后第 1 个交易日 = T+2 → 开盘卖。"""
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(), held=1
+        )
+        assert action == "EXIT"
+        assert "T+2 开盘卖出" in r["text"] and "口径B" in r["text"]
+
+    def test_locked_limit_down_holds_and_defers(self):
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(),
+            held=1, locked=True,
+        )
+        assert action == "HOLD" and "顺延" in r["text"]
+
+    def test_overdue_forces_exit_even_when_locked(self):
+        """超过 T+3 无条件了结：即便今天又跌停封死，也要给卖出指令。"""
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(),
+            held=2, locked=True,
+        )
+        assert action == "EXIT" and "强制了结" in r["text"]
+
+    def test_ebb_no_longer_liquidates(self):
+        """旧规则「退潮 → 清仓」已废止：退潮日有成本也只按时间退出。"""
         stat = {
             "phase": "退潮",
-            "buy_window": "NONE",
-            "force_liquidate": True,
+            "buy_window": "STANDARD",
+            "force_liquidate": False,
             "dragon_env": "UNFAVORABLE",
             "accel_reason": None,
         }
-        drv = {
-            "is_limit_up": False,
-            "cont_days": 3,
-            "is_one_word": False,
-            "touched_limit": True,
-            "is_bomb": False,
-        }
         action, r = hs._decide_action(
-            stat=stat, drv=drv, cost=5.0, close=10.0, levels=_levels(stop_price=99.0)
+            stat=stat, drv={"is_limit_up": True, "cont_days": 3}, cost=5.0,
+            close=10.0, levels=_levels(), held=0,
         )
-        assert action == "EXIT" and "退潮" in r["text"]
+        assert action == "HOLD" and "刚建仓" in r["text"]
+        assert "退潮" not in r["text"]
 
-    def test_stop_loss_beats_break(self):
-        drv = {
-            "is_limit_up": False,
-            "cont_days": 3,
-            "is_one_word": False,
-            "touched_limit": True,
-            "is_bomb": False,
-        }
+    def test_broken_board_no_longer_trims(self):
+        """断板也不减仓：口径B 的退出理由只有时间。"""
         action, r = hs._decide_action(
-            stat=None, drv=drv, cost=5.0, close=10.0, levels=_levels(stop_price=10.0)
+            stat=None, drv={"is_limit_up": False, "cont_days": 3}, cost=5.0,
+            close=10.0, levels=_levels(), held=1,
         )
-        assert action == "EXIT" and "止损" in r["text"]
+        assert action == "EXIT" and "T+2 开盘卖出" in r["text"]
+        assert "断板" not in r["text"]
 
-    def test_break_trim(self):
-        drv = {
-            "is_limit_up": False,
-            "cont_days": 3,
-            "is_one_word": False,
-            "touched_limit": True,
-            "is_bomb": False,
-        }
-        action, r = hs._decide_action(stat=None, drv=drv, cost=5.0, close=10.0, levels=_levels())
-        assert action == "TRIM" and "断板" in r["text"]
 
-    def test_target_trim(self):
+class TestWatchView:
+    """观察视角（无成本）：A 止血后只回答「在不在观察名单」，不给买点。"""
+
+    def test_sealed_board_is_watch_only(self):
         action, r = hs._decide_action(
-            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(target_price=10.0)
+            stat=None, drv={"is_limit_up": True, "cont_days": 3},
+            cost=None, close=10.0, levels=_levels(buy_reference=11.0),
         )
-        assert action == "TRIM" and "目标" in r["text"]
+        assert action == "HOLD" and "观察名单" in r["text"]
+        assert "买入建议" in r["text"]          # 明确说不给建议
+        assert "打板价" not in r["text"]        # 不再出现买点数字
+
+    def test_not_sealed_not_in_watchlist(self):
+        """没封板就不在观察名单；同样不给价位。"""
+        action, r = hs._decide_action(
+            stat=None, drv={"is_limit_up": False, "cont_days": 2},
+            cost=None, close=10.0, levels=_levels(buy_reference=11.0),
+        )
+        assert action == "HOLD" and "不在观察名单" in r["text"]
+        assert "打板价" not in r["text"]
 
     def test_missing_derived_row_is_hold_not_trim(self):
         """F6：缺判据行 = 缺数，绝不是「断板」。"""
-        action, r = hs._decide_action(stat=None, drv=None, cost=5.0, close=10.0, levels=_levels())
+        action, r = hs._decide_action(
+            stat=None, drv=None, cost=None, close=10.0, levels=_levels()
+        )
         assert action == "HOLD" and "缺数" in r["text"]
 
-    def test_unfavorable_env_holds(self):
+    def test_sealed_but_bad_env_still_watch_only(self):
+        """A 止血：环境/相位不再产生「出手/不出手」指令，观察视角一切恒 HOLD。"""
         stat = {
-            "phase": "退潮",
+            "phase": "冰点",
             "buy_window": "NONE",
             "force_liquidate": False,
             "dragon_env": "UNFAVORABLE",
             "accel_reason": None,
         }
-        drv = {
-            "is_limit_up": True,
-            "cont_days": 2,
-            "is_one_word": False,
-            "touched_limit": True,
-            "is_bomb": False,
-        }
-        action, r = hs._decide_action(stat=stat, drv=drv, cost=5.0, close=10.0, levels=_levels())
-        assert action == "HOLD" and "UNFAVORABLE" in r["text"]
-
-    def test_add_only_when_unheld_and_at_or_below_buy(self):
-        """ADD 要求当日**有**判据行（§7.2 第 5 条「无判据行 → HOLD」在它之前）。"""
-        drv = {
-            "is_limit_up": True,
-            "cont_days": 1,
-            "is_one_word": False,
-            "touched_limit": True,
-            "is_bomb": False,
-        }
         action, r = hs._decide_action(
-            stat=None, drv=drv, cost=None, close=10.0, levels=_levels(buy_reference=10.5)
+            stat=stat, drv={"is_limit_up": True, "cont_days": 3},
+            cost=None, close=10.0, levels=_levels(),
         )
-        assert action == "ADD" and "加仓" in r["text"]
-
-    def test_add_not_triggered_above_buy_reference(self):
-        drv = {
-            "is_limit_up": True,
-            "cont_days": 1,
-            "is_one_word": False,
-            "touched_limit": True,
-            "is_bomb": False,
-        }
-        action, _ = hs._decide_action(
-            stat=None, drv=drv, cost=None, close=10.0, levels=_levels(buy_reference=9.0)
-        )
-        assert action == "HOLD"
+        assert action == "HOLD" and "观察名单" in r["text"]
 
     def test_default_hold(self):
         action, _ = hs._decide_action(
-            stat=None, drv=None, cost=None, close=10.0, levels=_levels(buy_reference=9.0)
+            stat=None, drv={"is_limit_up": False, "cont_days": 1},
+            cost=None, close=10.0, levels=_levels(buy_reference=9.0),
         )
         assert action == "HOLD"
 
@@ -235,6 +247,11 @@ class TestLadder:
         `_build_ladder` 自己按 `BUY_LADDER` 构造序返回（恰好降序），排序由 `decide` 保证；
         「买参考」格 = max(BUY.price)，因此它必须排在第一档。
         """
+        # 持仓视角才有「买档/卖档」概念；观察视角（无成本）只给单一打板档
+        from types import SimpleNamespace
+        io["pos"] = SimpleNamespace(
+            code="601811", cost=12.0, shares=1000, entry_date=date(2026, 10, 12))
+        io["held"] = 1
         io["levels"] = _levels(buy_reference=15.0, target_price=27.0)
         d = hs.decide("601811", capital=1_000_000, persist=False)
         buys = [x.price for x in d.ladder if x.side == "BUY"]
@@ -244,6 +261,18 @@ class TestLadder:
         assert buys[0] == pytest.approx(15.0)
         assert sells == sorted(sells)
         assert d.ladder[0].side == "BUY"  # 买档整体在卖档之前
+
+    def test_watch_view_has_no_ladder_or_sizing(self, io):
+        """A 止血：观察视角不给分档、不给数量（没有买点就没有对应的量）。"""
+        io["levels"] = _levels(buy_reference=10.0)
+        io["drv"] = {"is_limit_up": True, "cont_days": 3}
+        d = hs.decide("601811", capital=1_000_000, persist=False)
+        assert d.facts["view"] == "watch"
+        assert d.facts["advice"] is False
+        assert d.ladder == ()
+        assert d.sizing.suggested_shares is None
+        assert d.levels.basis == "pct_fallback" and d.levels.buy_reference is None
+        assert d.action_label == "只观察（不出建议）"
 
     def test_no_levels_no_ladder(self):
         ladder = hs._build_ladder(
@@ -276,9 +305,10 @@ class TestDecide:
         hs.decide("601811", persist=False)
         assert len(io["writes"]) == 1
 
-    def test_capital_none_degrades_to_ratio_only(self, io):
+    def test_watch_view_degrades_without_price_advice(self, io):
+        """观察视角：不给买点/数量，reason 里直接说明为什么（A 止血）。"""
         d = hs.decide("601811", persist=False)
-        assert any("未给总资金" in r["text"] for r in d.reasons)
+        assert any("观察视角不给买点/数量" in r["text"] for r in d.reasons)
 
     def test_use_cpt_false_never_calls_cpt(self, monkeypatch, io):
         monkeypatch.setattr(
@@ -591,6 +621,11 @@ class TestCliR4:
         monkeypatch.setattr(hs, "_derived", lambda code, d: box["drv"])
         monkeypatch.setattr(hs, "_market", lambda d: box["stat"])
         monkeypatch.setattr(hs.holding_store, "holding_for", lambda code: box["pos"])
+        # exit 侧的两个读口（都要查库）换掉，保持 DB-free
+        monkeypatch.setattr(hs.exit_svc, "held_days", lambda entry, d: box.get("held"))
+        monkeypatch.setattr(
+            hs.exit_svc, "open_locked_limit_down",
+            lambda d, code: bool(box.get("locked")))
         monkeypatch.setattr(
             hs.holding_store, "upsert_decision", lambda d: (box["writes"].append(d), 1)[1]
         )

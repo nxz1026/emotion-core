@@ -1,10 +1,11 @@
-"""胶水层：买入信号服务。
+"""胶水层：观察记录服务。
 
 职责：调 algorithms.entry.check_signal（内部已包含 ladder+state+entry 逻辑）。
 
-R58-4：当 action=BUY 时调 notify.push_buy_signal 立即推飞书（24h 节流），
-SECONDARY/RECOMMEND 不触发即时推送（与日报摘要推送同纪律，仅 BUY 给
-「第一时间看到」的独立时点）。
+A 止血（2026-10-21 奎爷拍板）：口径B 打板的成交假设被证伪（触及即成交 →
+每信号 −1.26%），本服务不再推送「买入信号简报」。R58-4 的 BUY 即时推送保留代码
+但**默认关闭**（`notify.push_buy_signal` 读 EMOTION_PUSH_BUY，默认 0），等 B 轮
+找到正期望边缘、或 C 轮盘中能力补齐后再开。
 """
 from __future__ import annotations
 
@@ -19,33 +20,32 @@ log = logging.getLogger("emotion_core.signal_service")
 
 
 def run(trade_date: date, source: SignalSource = SignalSource.LIVE) -> Signal | None:
-    """生成当日买入信号。
+    """生成当日观察记录。
 
     Args:
         trade_date: 交易日。
         source: 信号来源（live 或 replay）。
 
     Returns:
-        信号对象，无信号返回 None。
+        观察记录对象，无记录返回 None。
     """
     sig = entry.check_signal(trade_date, source)
     if sig is not None:
         log.info("signal_service %s: %s %s", trade_date, sig.action.value, sig.code)
-        # R58-4：BUY 即时推送——与日报摘要推送并行，专注 BUY 信号简报。
-        # SECONDARY/RECOMMEND 是观察信号，不触发即时推送。
+        # 仅 BUY 档（观察名单成员）走即时推送；SECONDARY/RECOMMEND 是降档线索，
+        # 只进报告，不单独推送。
         if sig.action == Action.BUY:
-            _push_buy_safe(sig)
+            _push_watch_safe(sig)
     else:
-        log.info("signal_service %s: 无信号", trade_date)
+        log.info("signal_service %s: 无观察记录", trade_date)
     return sig
 
 
-def _push_buy_safe(sig: Signal) -> None:
-    """BUY 推送包裹：异常吞掉，不影响主链。
+def _push_watch_safe(sig: Signal) -> None:
+    """观察记录推送包裹：默认关闭，异常吞掉，不影响主链。
 
-    push_buy_signal 内部已 best-effort（异常不抛），这里再包一层只是为
-    兜住 sig 字段意外缺失等结构性错误（不应发生，但不让其拖垮
-    signal_service.run）。
+    push_buy_signal 内部自带开关（PUSH_BUY 默认 0）与 best-effort；这里再包一层
+    只为兜住 sig 字段意外缺失等结构性错误，不让它拖垮 signal_service.run。
     """
     try:
         notify.push_buy_signal(
@@ -57,4 +57,4 @@ def _push_buy_safe(sig: Signal) -> None:
             trade_date=sig.date,
         )
     except Exception as exc:  # noqa: BLE001
-        log.warning("BUY 即时推送包装层异常（不影响 BUY 落盘）：%s", exc)
+        log.warning("观察记录推送包装层异常（不影响落盘）：%s", exc)

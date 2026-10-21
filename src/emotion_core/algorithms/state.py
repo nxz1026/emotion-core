@@ -7,7 +7,18 @@
 - 冰点：height ≤ ICE_MAX_DAYS AND count < ICE_COUNT_MAX AND (反转确认 OR 无唯一候选)
 - 无命中 → 继承昨日；首日 seed 冰点
 
-window_of: 发酵→STANDARD, 高潮→ENHANCED, 冰点/退潮→NONE（退潮还 force_liquidate）
+window_of: 发酵→STANDARD, 高潮→ENHANCED, 退潮→STANDARD（解禁，见下）, 冰点→NONE
+
+W7′ 退潮解禁（2026-10-21 实测定档，_audit/2026-10-21-修正方案-实测定档.md）：
+旧口径把「退潮」映射为 buy_window=NONE + force_liquidate=True（禁买 + 清仓）。全史
+实测（口径B T+1封板价买→T+2开盘卖，费后）退潮 n=169 每信号期望 **+2.31%**、封板后
+mean +5.35%、胜率 77%，比高潮 ENHANCED（+1.48%/68%）**更好**；退潮日次日连板高度
+延续率 0.647（n=289）是全相位最高。且退潮→次日隔夜 +3.53%/73%（n=168）。
+⇒ 退潮既不该禁买（砍掉 169 笔正期望），也不该清仓（清仓是反指）。本函数改为：
+- 退潮 → ("STANDARD", False)：可买、不要求 ENHANCED 的强度补偿（c5 不适用）；
+- force_liquidate 恒 False：不再有任何相位强制清仓（卖出只看断板/买点失效）；
+- 冰点 → ("NONE", False)：唯一禁买相位（样本 n=3、封板率 0%，不参与）。
+仓位差异不再由窗口承担，改由 entry.c3_tier（三档）+ phase 决定（见 entry.position_tier）。
 """
 
 # ✅ 已有 Rust 实现：src/emotion_core/core/src/state.rs
@@ -102,11 +113,18 @@ _RULES = (
 
 
 def window_of(phase: str) -> tuple[str, bool]:
+    """相位 → (buy_window, force_liquidate)。
+
+    W7′ 改版：退潮解禁为 STANDARD，force_liquidate 恒 False（详见模块文档）。
+    冰点是唯一 NONE（禁买）。返回二元组形状不变，oracle 与调用方无需改签名。
+    """
     if phase == "发酵":
         return "STANDARD", False
     if phase == "高潮":
         return "ENHANCED", False
-    return "NONE", phase == "退潮"
+    if phase == "退潮":
+        return "STANDARD", False
+    return "NONE", False  # 冰点：禁买，不清仓（无持仓可清）
 
 
 def classify_series(series: list[DayMetrics]) -> list[EmotionState]:

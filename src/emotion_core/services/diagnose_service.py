@@ -37,11 +37,12 @@ TITLE_A = "A · 它现在是什么"
 TITLE_B = "B · 它过去干过什么"
 TITLE_C = "C · 用它赌值不值"
 
-# 窗口人话（window_of：发酵→STANDARD / 高潮→ENHANCED / 冰点·退潮→NONE，见 algorithms/state.py）
+# 情绪档人话（window_of：发酵/退潮→STANDARD、高潮→ENHANCED、冰点→NONE，见
+# algorithms/state.py）。A 止血后这列只表情绪强度，不再表示「能不能买」。
 _WINDOW_TEXT = {
-    "STANDARD": "发酵期（标准窗口）：逐项核对五条件后参与",
-    "ENHANCED": "高潮期（分歧窗口）：仅当炸板回封或换手达标时参与",
-    "NONE": "禁买窗口（退潮/冰点）：本日不产生买入信号，只留观察线索",
+    "STANDARD": "标准档：逐项核对五条件后进观察名单",
+    "ENHANCED": "强度档：仅当炸板回封或换手达标时进观察名单",
+    "NONE": "低迷档（冰点）：本日不产观察标的，只留线索",
 }
 
 # entry.rows 的行序是公开契约（entry.py:175-185：条件按 _CONDITIONS 序 + 警告恒排最后），

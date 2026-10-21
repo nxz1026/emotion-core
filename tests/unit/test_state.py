@@ -58,7 +58,8 @@ class TestWindowOf:
         assert window_of("冰点") == ("NONE", False)
 
     def test_ebb(self):
-        assert window_of("退潮") == ("NONE", True)
+        # W7′：退潮解禁（实测每信号期望 +2.31%/胜率 77%，优于高潮 ENHANCED）
+        assert window_of("退潮") == ("STANDARD", False)
 
 
 class TestRuleEbb:
@@ -173,10 +174,13 @@ class TestClassifySeries:
         assert result[0].buy_window == "ENHANCED"
         assert result[0].force_liquidate is False
 
-    def test_ebb_force_liquidate(self):
+    def test_ebb_no_longer_force_liquidate(self):
+        """W7′：退潮不再强制清仓，也不再禁买（卖出由持有规则决定）。"""
         series = [
             make_metrics(date(2024, 6, 14), top_broke=True, limit_down_count=20),
             make_metrics(date(2024, 6, 15), top_broke=True, limit_down_count=25),
         ]
         result = classify_series(series)
-        assert result[1].force_liquidate is True
+        assert result[1].phase == "退潮"
+        assert result[1].force_liquidate is False
+        assert result[1].buy_window == "STANDARD"

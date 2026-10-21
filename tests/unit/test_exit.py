@@ -1,12 +1,16 @@
-"""卖出建议逐组合（不连库）：涨停 / 断板 / 一字 / 退潮 / 缺行。
+"""卖出建议逐组合（不连库）：口径B「T+2 开盘无条件卖 / 跌停封死顺延 / T+3 强制了结」。
 
-语义来源 lkl/tests/test_exit.py（4 组合纯函数用例逐条保留）+ suggestions 组合路径：
-- _sell 的 date 语义逐字同 lkl：退潮分支填开仓日，suggestions 再统一改写为建议日；
-- exec_hint 恒 CLOSE_ALL（契约 v2）；buy_window 只是买入口径标签（退潮期 NONE）；
-- 缺 derived_bar 行 = 缺数，不当断板（F6）；stat=None 不退潮（逐仓断板检查）。
+裁决来源：`_audit/2026-10-21-修正方案-实测定档.md`（奎爷 2026-10-21 批准）。
+旧规则（退潮清仓 / 断板卖出）已废止，理由见 algorithms/exit.py 模块文档：
+持有到断板 mean −1.90%/胜率 38.1%，而 T+2 开盘卖 mean +3.54%/胜率 68%。
 
-IO（market_stat / derived_bar / position）全部桩掉，真实库差分另跑
-（见交付记录：同 trade_date 与 lkl.services.exit.suggestions 逐字段一致）。
+本文件锁四件事：
+1. `held_days` 的交易日计数（建仓当日 = 0，T+2 = 1，T+3 = 2）；
+2. `_sell` 的四个分支（建仓当日无建议 / T+2 开盘卖 / 开盘跌停封死顺延 / n≥2 强制了结）；
+3. `_open_locked_limit_down` 的开盘跌停+封死判定（缺数按卖得掉处理）；
+4. exec_hint 恒 CLOSE_ALL（契约 v2），SELL 不落库。
+
+IO（daily_bar / derived_bar / position / 交易日历）全部桩掉，真实库差分另跑。
 """
 from __future__ import annotations
 
@@ -19,155 +23,210 @@ from emotion_core.algorithms.exit import (
     Holding,
     SellSignal,
     _derived,
+    _open_locked_limit_down,
     _open_positions,
     _sell,
-    _stat,
+    held_days,
 )
 from emotion_core.domain.bar import DerivedBar
 from emotion_core.domain.signal import Action, Signal, SignalSource
 
-D = date(2026, 9, 4)          # 建议日（lkl 用例里的 2026-08-28 位置）
-BAR_DATE = date(2026, 8, 28)  # 判据行日期
-POS_DATE = date(2026, 8, 20)  # 开仓日
+D = date(2026, 9, 4)          # 建议日（建仓后第 3 个交易日）
+ENTRY = date(2026, 9, 1)      # 建仓日（口径B 的 T+1 封板日）
+T2 = date(2026, 9, 2)         # 建仓后第 1 个交易日 = 卖出日
+T3 = date(2026, 9, 3)         # 建仓后第 2 个交易日 = 强制了结日
 
 
-def pos(code: str = "000017", entry: date = POS_DATE) -> Holding:
+def pos(code: str = "000017", entry: date = ENTRY) -> Holding:
     return Holding(code=code, entry_date=entry)
 
 
-def day(up: bool = True, one_word: bool = False, cont: int = 6,
-        code: str = "000017", d: date = BAR_DATE) -> DerivedBar:
+def day(up: bool = True, cont: int = 6, code: str = "000017", d: date = T2) -> DerivedBar:
     return DerivedBar(code=code, date=d, is_limit_up=up, is_limit_down=False,
-                      is_one_word=one_word, is_exchange=up and not one_word,
-                      is_bomb=False, touched_limit=up, cont_days=cont, amplitude=3.2)
+                      is_one_word=False, is_exchange=up, is_bomb=False,
+                      touched_limit=up, cont_days=cont, amplitude=3.2)
 
 
-STAT_EBB = {"phase": "退潮", "buy_window": "NONE", "force_liquidate": True}
-STAT_CLIMAX = {"phase": "高潮", "buy_window": "ENHANCED", "force_liquidate": False}
+class _Cal:
+    """交易日历替身：只返回 [start, end] 内的预设日期，并记录调用。"""
+
+    def __init__(self, days: list[date]):
+        self.days, self.calls = days, []
+
+    def __call__(self, start: date, end: date) -> list[date]:
+        self.calls.append((start, end))
+        return [d for d in self.days if start <= d <= end]
 
 
-# ────────────────────────── _sell：4 组合（lkl oracle 逐条对应） ──────────────────────────
+def patch_cal(monkeypatch, days: list[date] | None = None) -> _Cal:
+    cal = _Cal(days if days is not None else [T2, T3, D])
+    monkeypatch.setattr(exit, "trading_days", cal)
+    return cal
 
-class TestSellCombos:
-    def test_holding_limit_up_no_signal(self):
-        assert _sell(pos(), None, day(up=True)) is None
 
-    def test_broken_board_sell(self):
-        sig = _sell(pos(), None, day(up=False, cont=0))
-        assert sig and sig.action == "SELL" and "断板" in sig.reason
-        assert sig.exec_hint == "CLOSE_ALL"          # 契约 v2：SELL 执行语义
-        assert sig.buy_window == ""                  # 断板分支不带窗口
-        assert sig.date == BAR_DATE                  # lkl：confirm_date = day.date
+def patch_io(monkeypatch, *, positions: list[Holding],
+             bars: dict[str, DerivedBar | None] | None = None,
+             locked: set[str] | None = None) -> dict[str, Any]:
+    """桩掉 position / derived / 开盘跌停判定，返回调用记录。"""
+    bars = bars or {}
+    locked = locked or set()
+    calls: dict[str, Any] = {"derived": [], "locked": [], "cal": patch_cal(monkeypatch)}
+    monkeypatch.setattr(exit, "_open_positions", lambda: list(positions))
+    monkeypatch.setattr(exit, "_derived",
+                        lambda d, code: calls["derived"].append((d, code)) or bars.get(code))
+    monkeypatch.setattr(exit, "_open_locked_limit_down",
+                        lambda d, code: calls["locked"].append((d, code)) or code in locked)
+    return calls
 
-    def test_one_word_still_holding(self):
-        assert _sell(pos(), None, day(up=True, one_word=True)) is None
 
-    def test_liquidate_overrides_everything(self):
-        sig = _sell(pos(), STAT_EBB, None)
-        assert sig and "清仓" in sig.reason
-        assert sig.exec_hint == "CLOSE_ALL"          # 退潮清仓同样 CLOSE_ALL
-        assert sig.buy_window == "NONE"              # window 只是市场标签
-        assert sig.date == POS_DATE                  # 退潮分支先填开仓日（suggestions 再改写）
-        assert _sell(pos(), {"force_liquidate": False}, None) is None
+# ────────────────────────── held_days：交易日计数 ──────────────────────────
 
-    def test_missing_bar_no_signal(self):
-        assert _sell(pos(), None, None) is None
+class TestHeldDays:
+    def test_zero_on_entry_day(self, monkeypatch):
+        patch_cal(monkeypatch)
+        assert held_days(ENTRY, ENTRY) == 0
+        assert held_days(T2, ENTRY) == 0          # 反向（脏数据）也归 0 而不是负数
 
-    def test_liquidate_ignores_limit_up_day(self):
-        """退潮优先级最高：即使当日仍封板（传 day）也走清仓分支。"""
-        sig = _sell(pos(), STAT_EBB, day(up=True))
-        assert sig is not None and "清仓" in sig.reason and sig.date == POS_DATE
+    def test_one_on_next_trading_day(self, monkeypatch):
+        patch_cal(monkeypatch)
+        assert held_days(ENTRY, T2) == 1
 
-    def test_cont_days_zero_reason_stays_verbatim(self):
-        """lkl 文案逐字：f"断板建议（原{cont_days or ''}连板今日未封）"，0 板不留数字。"""
-        sig = _sell(pos(), None, day(up=False, cont=0))
-        assert sig is not None and sig.reason == "断板建议（原连板今日未封）"
-        sig6 = _sell(pos(), None, day(up=False, cont=6))
-        assert sig6 is not None and sig6.reason == "断板建议（原6连板今日未封）"
+    def test_two_on_the_day_after(self, monkeypatch):
+        patch_cal(monkeypatch)
+        assert held_days(ENTRY, T3) == 2
 
-    def test_signal_contract_fields(self):
+    def test_counts_only_trading_days(self, monkeypatch):
+        """周末不计：9-04(五) 建仓 → 9-07(一) 才是第 1 个交易日。"""
+        cal = patch_cal(monkeypatch, [date(2026, 9, 7)])
+        assert held_days(date(2026, 9, 4), date(2026, 9, 7)) == 1
+        assert cal.calls == [(date(2026, 9, 5), date(2026, 9, 7))]
+
+
+# ────────────────────────── _sell：四个分支 ──────────────────────────
+
+class TestSellBranches:
+    def test_entry_day_no_signal(self, monkeypatch):
+        patch_io(monkeypatch, positions=[pos(entry=D)])
+        assert _sell(pos(entry=D), D) is None
+
+    def test_sell_at_open_on_t2(self, monkeypatch):
+        patch_io(monkeypatch, positions=[pos()])
+        sig = _sell(pos(), T2)
+        assert sig is not None and sig.action is Action.SELL
+        assert sig.date == T2                          # 建议日 = 卖出日
+        assert "T+2 开盘卖出" in sig.reason
+        assert "口径B" in sig.reason
+        assert sig.exec_hint == "CLOSE_ALL"            # 契约 v2
+        assert sig.buy_window == ""                    # 卖出不带买入口径标签
+
+    def test_still_limit_up_still_sells(self, monkeypatch):
+        """当日仍封板也照卖——口径B 不持有到断板。"""
+        patch_io(monkeypatch, positions=[pos()], bars={"000017": day(up=True)})
+        sig = _sell(pos(), T2)
+        assert sig is not None and "照卖" in sig.reason
+
+    def test_locked_limit_down_defers(self, monkeypatch):
+        """开盘跌停且全天封死 → 卖不掉 → 当日无建议（顺延）。"""
+        calls = patch_io(monkeypatch, positions=[pos()], locked={"000017"})
+        assert _sell(pos(), T2) is None
+        assert calls["locked"] == [(T2, "000017")]
+        assert calls["derived"] == []                  # 卖不掉就不读判据行
+
+    def test_force_close_on_t3(self, monkeypatch):
+        patch_io(monkeypatch, positions=[pos()])
+        sig = _sell(pos(), T3)
+        assert sig is not None and "强制了结" in sig.reason
+        assert "已持有2个交易日" in sig.reason
+
+    def test_force_close_beyond_t3_and_ignores_lock(self, monkeypatch):
+        """超过 T+3 仍未卖（含再次跌停）→ 仍出强制了结，不无限顺延。"""
+        calls = patch_io(monkeypatch, positions=[pos()], locked={"000017"})
+        sig = _sell(pos(), D)                          # 已持有 3 个交易日
+        assert sig is not None and "强制了结" in sig.reason
+        assert "已持有3个交易日" in sig.reason
+        assert calls["locked"] == []                   # 强制分支不读跌停封死
+
+    def test_signal_contract_fields(self, monkeypatch):
         """返回的是 domain.Signal（子类）：消费方按 Signal 契约取字段。"""
-        sig = _sell(pos(), None, day(up=False, cont=3))
+        patch_io(monkeypatch, positions=[pos()])
+        sig = _sell(pos(), T2)
         assert isinstance(sig, SellSignal) and isinstance(sig, Signal)
         assert sig.code == "000017" and sig.action is Action.SELL
         assert sig.source is SignalSource.LIVE and sig.status == "SUGGESTED"
-        assert sig.checklist.passed is True          # 六项 UNKNOWN：无否决条件
+        assert sig.checklist.passed is True            # 六项 UNKNOWN：无否决条件
         assert sig.checklist.c1_uniqueness is None
+
+
+# ────────────────────────── 开盘跌停封死判定 ──────────────────────────
+
+class TestOpenLocked:
+    def patch_bar(self, monkeypatch, bar: tuple[float, float, float | None, float] | None):
+        monkeypatch.setattr(exit, "_open_bar", lambda d, code: bar)
+
+    def test_locked_when_open_at_limit_down_and_low_equals_open(self, monkeypatch):
+        # 主板前收 10.00 → 跌停 9.00；开盘 9.00 且收盘 9.00 = 全天封死
+        self.patch_bar(monkeypatch, (9.00, 9.00, 10.00, 9.00))
+        assert _open_locked_limit_down(T2, "000017") is True
+
+    def test_not_locked_when_opened_intraday(self, monkeypatch):
+        """开盘跌停但收盘拉起来（收盘 9.60 > 跌停 9.00）→ 开盘卖得掉。"""
+        self.patch_bar(monkeypatch, (9.00, 9.00, 10.00, 9.60))
+        assert _open_locked_limit_down(T2, "000017") is False
+
+    def test_not_locked_when_gapped_above(self, monkeypatch):
+        self.patch_bar(monkeypatch, (9.80, 9.70, 10.00, 9.75))
+        assert _open_locked_limit_down(T2, "000017") is False
+
+    def test_missing_pre_close_not_locked(self, monkeypatch):
+        self.patch_bar(monkeypatch, (9.00, 9.00, None, 9.00))
+        assert _open_locked_limit_down(T2, "000017") is False
+
+    def test_missing_bar_not_locked(self, monkeypatch):
+        """缺数按「卖得掉」处理（保守：宁可给卖出建议，不静默顺延）。"""
+        self.patch_bar(monkeypatch, None)
+        assert _open_locked_limit_down(T2, "000017") is False
+
+    def test_chinext_uses_20pct_band(self, monkeypatch):
+        """创业板 300xxx 跌停是 −20%：前收 10.00 → 8.00。"""
+        self.patch_bar(monkeypatch, (8.00, 8.00, 10.00, 8.00))
+        assert _open_locked_limit_down(T2, "300750") is True
+        self.patch_bar(monkeypatch, (9.00, 9.00, 10.00, 9.00))
+        assert _open_locked_limit_down(T2, "300750") is False
 
 
 # ────────────────────────── suggestions：组合路径（IO 全桩） ──────────────────────────
 
-def patch_io(monkeypatch, *, stat: dict | None, positions: list[Holding],
-             bars: dict[str, DerivedBar | None]) -> dict[str, Any]:
-    calls: dict[str, Any] = {"derived": []}
-
-    def fake_derived(d: date, code: str) -> DerivedBar | None:
-        calls["derived"].append((d, code))
-        return bars.get(code)
-
-    monkeypatch.setattr(exit, "_stat", lambda d: stat)
-    monkeypatch.setattr(exit, "_open_positions", lambda: list(positions))
-    monkeypatch.setattr(exit, "_derived", fake_derived)
-    return calls
-
-
 class TestSuggestions:
-    def test_liquidate_day_closes_every_position(self, monkeypatch):
-        """退潮：全部持仓出清仓建议，且日期统一改写为建议日（逐仓不看判据行）。"""
-        patch_io(monkeypatch, stat=STAT_EBB,
-                 positions=[pos("601988"), pos("000001")],
-                 bars={"601988": day(up=True, code="601988"),
-                       "000001": day(up=True, code="000001")})
+    def test_entry_day_position_is_skipped(self, monkeypatch):
+        """建仓当日不卖；同一张表里已到期的那只照卖。"""
+        patch_io(monkeypatch, positions=[pos("601988", ENTRY), pos("000001", D)])
         sigs = exit.suggestions(D)
-        assert [s.code for s in sigs] == ["601988", "000001"]
-        for s in sigs:
-            assert s.action is Action.SELL and s.date == D
-            assert "清仓" in s.reason and s.buy_window == "NONE"
-            assert s.exec_hint == "CLOSE_ALL"
+        assert [s.code for s in sigs] == ["601988"]
+        assert sigs[0].date == D and "强制了结" in sigs[0].reason
 
-    def test_non_liquidate_day_only_broken_board(self, monkeypatch):
-        patch_io(monkeypatch, stat=STAT_CLIMAX,
-                 positions=[pos("601988"), pos("000001")],
-                 bars={"601988": day(up=True, code="601988"),
-                       "000001": day(up=False, cont=0, code="000001")})
-        sigs = exit.suggestions(D)
-        assert [s.code for s in sigs] == ["000001"]
-        assert "断板" in sigs[0].reason and sigs[0].date == BAR_DATE
-
-    def test_missing_stat_falls_back_to_broken_board_check(self, monkeypatch):
-        """market_stat 无当日行 → 不走退潮分支（lkl 同：stat and …）。"""
-        patch_io(monkeypatch, stat=None, positions=[pos("000001")],
-                 bars={"000001": day(up=False, cont=2, code="000001")})
-        sigs = exit.suggestions(D)
-        assert len(sigs) == 1 and "断板" in sigs[0].reason
-
-    def test_missing_bar_no_signal(self, monkeypatch):
-        """缺判据行 = 缺数，不当作断板（F6）。"""
-        calls = patch_io(monkeypatch, stat=STAT_CLIMAX, positions=[pos("000001")],
-                         bars={"000001": None})
-        assert exit.suggestions(D) == []
-        assert calls["derived"] == [(D, "000001")]
+    def test_t2_one_sells_one_defers(self, monkeypatch):
+        """同为 T+2：一只正常 → 卖；一只跌停封死 → 顺延，当日无建议。"""
+        patch_io(monkeypatch, positions=[pos("601988", ENTRY), pos("000001", ENTRY)],
+                 bars={"601988": day(up=True, code="601988")}, locked={"000001"})
+        sigs = exit.suggestions(T2)
+        assert [s.code for s in sigs] == ["601988"]
+        assert "T+2 开盘卖出" in sigs[0].reason
 
     def test_no_positions_empty_list(self, monkeypatch):
-        patch_io(monkeypatch, stat=STAT_EBB, positions=[], bars={})
+        patch_io(monkeypatch, positions=[])
         assert exit.suggestions(D) == []
 
-    def test_derived_read_per_position(self, monkeypatch):
-        calls = patch_io(monkeypatch, stat=STAT_CLIMAX,
-                         positions=[pos("601988"), pos("000001")],
+    def test_derived_read_per_selling_position(self, monkeypatch):
+        calls = patch_io(monkeypatch,
+                         positions=[pos("601988", ENTRY), pos("000001", ENTRY)],
                          bars={"601988": day(up=False, code="601988"),
-                               "000001": day(up=False, code="000001")})
-        sigs = exit.suggestions(D)
+                               "000001": day(up=True, code="000001")})
+        sigs = exit.suggestions(T2)
         assert [s.code for s in sigs] == ["601988", "000001"]
-        assert calls["derived"] == [(D, "601988"), (D, "000001")]
-
-    def test_liquidate_branch_skips_derived_reads(self, monkeypatch):
-        calls = patch_io(monkeypatch, stat=STAT_EBB, positions=[pos("601988")], bars={})
-        assert exit.suggestions(D)[0].date == D
-        assert calls["derived"] == []               # 退潮不读判据行（逐字同 lkl）
+        assert calls["derived"] == [(T2, "601988"), (T2, "000001")]
 
 
-# ────────────────────────── 三个读函数（connect_ro 替身） ──────────────────────────
+# ────────────────────────── 两个读函数（connect_ro 替身） ──────────────────────────
 
 class _FakeConn:
     """connect_ro 的最小替身：记录 (sql, params)，返回预置行。"""
@@ -198,17 +257,6 @@ def patch_reads(monkeypatch, conn: _FakeConn) -> _FakeConn:
 
 
 class TestReads:
-    def test_stat_none_without_row(self, monkeypatch):
-        patch_reads(monkeypatch, _FakeConn(row=None))
-        assert _stat(D) is None
-
-    def test_stat_normalizes_null_force_liquidate(self, monkeypatch):
-        conn = patch_reads(monkeypatch, _FakeConn(row=("发酵", "STANDARD", None)))
-        assert _stat(D) == {"phase": "发酵", "buy_window": "STANDARD",
-                            "force_liquidate": False}
-        sql, params = conn.calls[0]
-        assert "market_stat" in sql and "force_liquidate" in sql and params == (D,)
-
     def test_derived_none_without_row(self, monkeypatch):
         conn = patch_reads(monkeypatch, _FakeConn(row=None))
         assert _derived(D, "601988") is None
@@ -233,14 +281,17 @@ class TestReads:
         bar = _derived(D, "688432")
         assert bar is not None and bar.amplitude is None
 
+    def test_open_bar_projection(self, monkeypatch):
+        conn = patch_reads(monkeypatch, _FakeConn(
+            row=(Decimal("9.00"), Decimal("9.12"), Decimal("10.00"), Decimal("9.40"))))
+        assert exit._open_bar(D, "000017") == (9.0, 9.12, 10.0, 9.4)
+        sql, params = conn.calls[0]
+        assert "daily_bar" in sql and params == (D, "000017")
+
     def test_open_positions_projection_and_sql(self, monkeypatch):
         conn = patch_reads(monkeypatch, _FakeConn(
-            rows=[("601988", POS_DATE), ("000001", D)]))
-        assert _open_positions() == [Holding("601988", POS_DATE), Holding("000001", D)]
+            rows=[("601988", ENTRY), ("000001", D)]))
+        assert _open_positions() == [Holding("601988", ENTRY), Holding("000001", D)]
         sql, params = conn.calls[0]
         assert "status = 'OPEN'" in sql and "ORDER BY entry_date" in sql
         assert params is None
-
-    def test_sell_is_pure(self):
-        """_sell 不碰 IO（纯判定）——喂 dict/对象即可断言，无需桩。"""
-        assert _sell(pos(), {"force_liquidate": True}, None) is not None

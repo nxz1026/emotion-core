@@ -200,7 +200,7 @@ def test_intuitive_page_explains_empty_signals(monkeypatch):
         "neg_exp": {"mean": None, "median": None, "n": 0, "hit_rate": None},
         "no_buy_reason": "策略过滤条件较严（五条件 checklist + 生态评级）。"})
     html = server.render_dashboard("intuitive", date="2026-09-24", path="/emotion/")
-    assert "没有 BUY 推荐" in html
+    assert "没有观察记录" in html
     assert "signal" in html and "全表" in html and "0 行" in html
     assert "策略过滤" in html or "五条件" in html or "生态评级" in html  # 策略解释替代 DB 心跳
     assert "当日最高板梯队" in html

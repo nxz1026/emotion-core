@@ -1,4 +1,4 @@
-"""胶水层：买点口径统计服务。
+"""胶水层：打板口径统计服务（A 止血后仅供复盘对照，不是买点建议）。
 
 职责：三口径统计（打板价 / 开盘价 / 回踩）。
 参考 docs/07 §7 打板口径统计。
@@ -14,7 +14,7 @@ log = logging.getLogger("emotion_core.odds_service")
 
 
 def run(trade_date: date) -> dict:
-    """三口径买点统计。
+    """三口径打板统计（口径B 已证伪：触及即成交每信号 −1.26%，仅供复盘）。
 
     Args:
         trade_date: 交易日。

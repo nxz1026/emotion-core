@@ -586,7 +586,9 @@
       if (p.total != null) notes.push(`同层样本 ${p.total}（晋级 ${p.promoted}）`);
       if (p.fail_perf != null) notes.push(`未晋级次日均值 ${p.fail_perf}%`);
       if (f5.n != null) notes.push(`前瞻样本 N=${f5.n}`);
-      if (C.odds && C.odds.limit_price != null) notes.push(`打板价 ${C.odds.limit_price}`);
+      if (C.odds && C.odds.limit_price != null) {
+        notes.push(`打板价 ${C.odds.limit_price}（口径B 已证伪，仅供复盘对照）`);
+      }
       if (C.note) notes.push(C.note);
       const side = (list, label) => {
         if (!Array.isArray(list) || !list.length) return;

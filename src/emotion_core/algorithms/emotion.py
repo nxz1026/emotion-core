@@ -8,8 +8,10 @@ derived_bar 已按板块比例判板（68/30→20%）且剔ST；北交所无日�
 2026-09 校准（奎爷拍板）：高潮炸板阈值改自适应=前30交易日炸板率中位数+σ（预热期回退
 BOMB_RATE_FALLBACK 固定值）；amp 分支 12→15；冰点反转确认在"当日无唯一换手最高板候选"
 时豁免（候选需最高板≥MIN_LEADER_DAYS，与冰点 h≤3 互斥，放宽只落在无候选日）；
-高潮分歧降级：高潮且负反馈 nb≥3（断板/高度降/炸升/表现降/跌停升 计数）→ 窗口降为
-DIVERGE_WINDOW=NONE（禁买不清仓；nb≥3 日信号晋级率 0.17 vs 其余 0.42）。
+高潮分歧降级：高潮且负反馈 nb≥3（断板/高度降/炸升/表现降/跌停升 计数）→ 只打
+diverge 标记 + 降仓位档（W7′：不再压窗口为 NONE——降级日 n=74 每信号期望 +1.05%/
+胜率 66% 仍有正期望，压成 NONE 等于当日零信号；旧口径 nb≥3 晋级率 0.17 vs 0.42
+仍成立，故降档而非禁买）。
 
 本模块职责（lkl services/emotion.py 的三段）：
 1. 指标层（自持 SQL，lkl 原语句逐字）：`_counts` / `_zt_perf` / `_top_amplitude` /
@@ -414,7 +416,11 @@ def classify(series: list[EmotionDay] | pd.DataFrame) -> list[EmotionDay]:
                                         else "·候选守卫")
         elif phase == "高潮" and t.neg_feedback >= CONFIG.DIVERGE_NEG_MIN:
             t.diverge = True
-            t.buy_window = CONFIG.DIVERGE_WINDOW
+            # W7′：降级不再把窗口压成 NONE（旧口径 DIVERGE_WINDOW="NONE" 直接
+            # 让当日一个信号都不出，实测降级日 n=74 每信号期望 +1.05%/胜率 66%
+            # ——仍有正期望，只是弱于 ENHANCED 整体）。改为「照常出信号 + 降档」：
+            # diverge 标记落库，仓位档由 entry.position_tier 读 diverge 决定
+            # （身位延续/严格胜出 → 半仓，新插队 → 观望）。
             tag += f"·高位分歧降级(nb={t.neg_feedback})"
         if t.accelerate:
             tag += "·加速" + ("降级" if _ACCEL_ENFORCE else "(影子)")

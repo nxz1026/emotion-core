@@ -150,9 +150,12 @@ def llm_comment(payload: dict) -> dict:
 
 def _buy_point_reference(basic: dict, trend: dict, layer: str | None,
                           promo_row: dict | None, fwd5: dict) -> dict:
-    """买点参考：打板价 + 赔率对照（P0-2 审计修复）。
+    """打板价 + 赔率对照（P0-2 审计修复；A 止血 2026-10-21 降级为复盘口径）。
 
     返回 {"limit_price": float|None, "odds": dict|None, "disclaimer": str}。
+    **不再叫「买点参考」**：口径B 打板按「触及即成交」实测每信号 −1.26%
+    （成交后 −2.01%、胜率 50%、炸板占成交 30% 且均亏 15%），这个数字只能用于
+    复盘对照，不能作为买入指令。API 字段名保留 `buy_point` 仅为兼容前端。
     """
     from emotion_core.utils import price as price_util
 
@@ -185,8 +188,9 @@ def _buy_point_reference(basic: dict, trend: dict, layer: str | None,
     return {
         "limit_price": limit_price,
         "odds": odds or None,
-        "disclaimer": "打板价 = 昨收 × 板比（分整数式）；"
-                      "赔率 = 同层级历史统计样本，非未来承诺。",
+        "disclaimer": "打板价 = 昨收 × 板比（分整数式），仅供复盘对照；"
+                      "口径B 打板实测每信号 −1.26%（触及即成交、费后），"
+                      "**不构成买入建议**。赔率 = 同层级历史统计样本，非未来承诺。",
     }
 
 

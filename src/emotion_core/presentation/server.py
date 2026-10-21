@@ -1,7 +1,7 @@
 """展示层 web 服务：单一端口 8098。
 
 提供三层 dashboard：
-- 直观层（/）：今日结论 + 推荐 + 买点
+- 直观层（/）：今日结论 + 观察名单（A 止血后不出买卖点）
 - 逻辑层（/logic）：市场参数
 - 算法层（/algorithm）：计算公式 + 数据来源
 
@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 from jinja2 import Environment, FileSystemLoader
 
 from emotion_core.presentation import loaders, snapshot, strategy_view, trade_api
+from emotion_core.presentation.translate import translate_window
 from emotion_core.utils import price as price_util
 
 log = logging.getLogger("emotion_core.dash")
@@ -436,6 +437,7 @@ def _load_intuitive_data(trade_date=None) -> dict:
         "signal_counts": signal_counts,
         "snapshot_date": market.get("date"),
         "buy_window": market.get("buy_window", "NONE"),
+        "buy_window_label": translate_window(market.get("buy_window") or "NONE"),
         "force_liquidate": market.get("force_liquidate", False),
         "limit_up_count": market.get("limit_up_count", "—"),
         "max_limit_days": market.get("max_limit_days", "—"),
@@ -488,37 +490,34 @@ def _load_negative_expectation() -> dict:
 
 
 def _explain_no_buy(phase: str, market: dict, signal_counts: dict) -> str:
-    """解释为什么今天没有 BUY 信号（P1-1 审计修复）。
+    """解释为什么今天没有观察记录（P1-1 审计修复 + A 止血）。
 
-    不再只说「signal 表 N 行」——给出市场阶段、门槛、可能原因。
+    不再只说「signal 表 N 行」——给出市场阶段、门槛、可能原因。A 止血后
+    「BUY」在产品语义里是「观察名单」，故文案统一说「观察记录」。
     """
     total = signal_counts.get("total", 0)
     if total == 0:
-        return ("策略自 2024-01-05 运行至今，尚未产出任何 BUY 信号。"
-                "这可能因为市场长期处于退潮/冰点阶段，或信号门槛过高。")
+        return ("signal 表里还没有观察记录（可能刚建库，或这几天都没出现"
+                "唯一换手高标）。")
 
     reasons = []
-    # 阶段解释
+    # 阶段解释（W8′：退潮已解禁，不再说「收紧买入窗口」）
     phase_explain = {
-        "退潮": "市场处于退潮期，策略主动收紧买入窗口",
-        "冰点": "市场处于冰点期，涨停稀少，不符合信号触发条件",
-        "高潮": "市场虽处高潮但可能已到尾声，策略在等待确认",
-        "发酵": "市场在发酵初期，尚未形成明确趋势",
+        "退潮": "市场处于下跌期（退潮）——这个相位实测是能做的，没出信号说明"
+                "当天没有符合条件的高标",
+        "冰点": "市场处于低迷期（冰点），连板高度太低，不产观察标的",
+        "高潮": "市场虽处狂热期（高潮），但当天的高标多半是一字板或换手不够",
+        "发酵": "市场在上升期（发酵）初期，还没有走出来的唯一高标",
     }
     if phase in phase_explain:
         reasons.append(phase_explain[phase])
 
-    # 买入窗口
-    bw = market.get("buy_window", "NONE")
-    if bw == "NONE":
-        reasons.append("当前买入窗口关闭（buy_window=NONE）")
-
-    # 强制清仓
-    if market.get("force_liquidate"):
-        reasons.append("触发强制清仓条件（force_liquidate）")
+    # 情绪档：只有冰点（或高位分歧降级）才会是低迷
+    if market.get("buy_window", "NONE") == "NONE":
+        reasons.append("情绪档低迷：冰点不产观察标的，或高位分歧降级（新插队档不参与）")
 
     if not reasons:
-        reasons.append("策略过滤条件较严（五条件 checklist + 生态评级）")
+        reasons.append("当天没有唯一换手高标（梯队断层，或高板全是一字板）")
 
     return "；".join(reasons) + "。"
 

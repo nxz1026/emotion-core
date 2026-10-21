@@ -57,7 +57,7 @@ class TestRun:
                             lambda d, s: None)
         with caplog.at_level(logging.INFO, logger="emotion_core.signal_service"):
             signal_service.run(date(2026, 9, 25))
-        assert any("无信号" in r.getMessage() for r in caplog.records)
+        assert any("无观察记录" in r.getMessage() for r in caplog.records)
 
 
 class TestR58_4BuyWebhookHook:

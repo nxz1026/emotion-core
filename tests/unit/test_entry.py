@@ -73,7 +73,8 @@ class RichCand:
 class TestConditions:
     def test_all_pass_standard(self):
         rows = [fn(cand(), ctx()) for fn, _, _ in entry._CONDITIONS]
-        assert all(ok for ok, _ in rows), rows
+        # W2′：c3 恒 None（身份说明，不否决）→ 判「没有 False」而非「全 True」
+        assert all(ok is not False for ok, _ in rows), rows
 
     def test_c1_rejects_non_sole(self):
         ok, _ = entry.c1_uniqueness(cand(), ctx(sole_code="000001"))
@@ -246,9 +247,12 @@ class TestAggregators:
 
 def patch_io(monkeypatch, *, today: list[LadderDay], prev: list[LadderDay],
              window: str | None = "STANDARD", survivors: set[str] | None = None,
-             quality: dict[str, Any] | None = None) -> dict[str, Any]:
-    """桩掉 entry 的全部 IO：ladder.build / y_survivors / buy_window 读 / 质量预取 / 事务。
+             quality: dict[str, Any] | None = None, phase: str = "高潮",
+             diverge: bool = False) -> dict[str, Any]:
+    """桩掉 entry 的全部 IO：ladder.build / y_survivors / market_stat 读 / 质量预取 / 事务。
 
+    window=None 表示 market_stat 无当日行（→ 按 NONE 处理）。phase/diverge（W7′）
+    决定仓位档：phase="冰点" → 观望；phase="高潮"+diverge 且新插队 → 观望。
     返回记录器：{"sql": [(sql, params)]}——落库语句与参数可直接断言。
     """
     calls: dict[str, Any] = {"sql": []}
@@ -259,7 +263,8 @@ def patch_io(monkeypatch, *, today: list[LadderDay], prev: list[LadderDay],
     monkeypatch.setattr(entry, "prev_trading_day", lambda d: PREV)
     monkeypatch.setattr(entry, "today_sh", lambda: D)
     monkeypatch.setattr(entry, "_candidate_view", lambda c: dict(quality or {}))
-    monkeypatch.setattr(entry, "_read_window", lambda d: window)
+    monkeypatch.setattr(entry, "_read_stat", lambda d: None if window is None else {
+        "window": window, "phase": phase, "diverge": diverge})
 
     @contextmanager
     def fake_transaction() -> Iterator[Any]:
@@ -299,7 +304,8 @@ class TestCurrentWindow:
 class TestCheckSignal:
     def test_all_pass_persists_buy(self, monkeypatch):
         calls = patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
-                         prev=_prev_rows(), window="STANDARD", survivors={"600001"})
+                         prev=_prev_rows(), window="STANDARD", survivors={"600001"},
+                         quality={"name": "测试龙", "close": 10.0})
         sig = check_signal(D)
         assert sig is not None
         assert (sig.code, sig.date, sig.action, sig.status) == \
@@ -308,18 +314,25 @@ class TestCheckSignal:
         assert sig.checklist.passed is True
         sql, params = calls["sql"][0]
         assert "ON CONFLICT (confirm_date, code, action)" in sql
-        assert params[:4] == (D, "600001", "BUY", "STANDARD")
+        # A 止血后参数布局：(date, code, action, window, rows, ver, source, hash)
+        # —— reason 恒写 NULL（SQL 字面量），不再有第 4 个位置参数。
+        assert params[:3] == (D, "600001", "BUY")
+        assert params[3] == "STANDARD"
+        assert "NULL" in sql.split("VALUES")[1]
         rows = json.loads(params[4])
         assert [r[0] for r in rows] == ["c1 唯一换手高标", "c2 换手板非一字",
-                                        "c3 淘汰赛身份", "c4 最低板数门槛",
+                                        "c3 身份档（不否决）", "c4 最低板数门槛",
                                         "c5 强度与分歧补偿", "W1 同身位扎堆"]
-        assert [r[1] for r in rows] == [True] * 6      # W1 恒 True（说明里写扎堆与否）
+        # c3 恒 None（不否决），其余 True，W1 恒 True
+        assert [r[1] for r in rows] == [True, True, None, True, True, True]
+        assert "身份" in rows[2][2]
         # §9 第 10/7 条：落库带 source 与 config_hash，且 source 保留首个来源
         assert "source" in sql and "config_hash" in sql
         assert params[5] == entry.CONFIG.STRATEGY_VERSION
         assert params[6] == "live"
         assert params[7] == config_hash() and len(params[7]) == 12
         assert "COALESCE(signal.source, EXCLUDED.source)" in sql
+        assert "COALESCE(EXCLUDED.reason, signal.reason)" in sql
 
     def test_source_marked_replay(self, monkeypatch):
         calls = patch_io(monkeypatch, today=[cand(cont=4, code="600001")],
@@ -354,11 +367,12 @@ class TestCheckSignal:
                             lambda d, source=None: tried.append(d) or None)
         assert check_signal(D) is not None and tried == []
 
-    def test_main_rejected_falls_through_to_secondary(self, monkeypatch):
-        """主未全过（c3：候选不在昨日最高组）→ 尝试次级。"""
+    def test_c5_fail_falls_through_to_secondary(self, monkeypatch):
+        """主未全过（ENHANCED 换手 1.0% < 5.0% 阈值 → c5 False）→ 尝试次级。"""
         tried: list[date] = []
-        patch_io(monkeypatch, today=[cand(cont=4, code="000017")], prev=_prev_rows(),
-                 survivors={"000017"})
+        patch_io(monkeypatch, today=[cand(cont=4, code="600001")], prev=_prev_rows(),
+                 survivors={"600001"}, window="ENHANCED",
+                 quality={"turnover_rate": 1.0, "bomb_times": 0, "close": 10.0})
         monkeypatch.setattr(entry, "check_secondary_signal",
                             lambda d, source=None: tried.append(d) or None)
         assert check_signal(D) is None
@@ -377,7 +391,7 @@ class TestCheckRecommendSignal:
         sig = entry.check_recommend_signal(D)
         assert sig is not None and sig.action is Action.RECOMMEND
         sql, params = calls["sql"][0]
-        assert params[:4] == (D, "600001", "RECOMMEND", "NONE")
+        assert params[:3] == (D, "600001", "RECOMMEND") and params[3] == "NONE"
 
     def test_dual_survivor_passes_when_main_fails(self, monkeypatch):
         """R58-4：双幸存场景主版 c3 拒、c3_loose 过 → RECOMMEND 落库。"""
@@ -389,7 +403,7 @@ class TestCheckRecommendSignal:
         # c3_loose 接受双幸存 + 候选 ∈ 幸存集 → 通过
         assert sig is not None and sig.action is Action.RECOMMEND
         sql, params = calls["sql"][0]
-        assert params[:4] == (D, "600001", "RECOMMEND", "STANDARD")
+        assert params[:3] == (D, "600001", "RECOMMEND") and params[3] == "STANDARD"
 
     def test_signal_carries_name_and_cont_days(self, monkeypatch):
         """R58-4：Signal 内存字段 name/cont_days 在 RECOMMEND 也填充。"""
@@ -424,7 +438,7 @@ class TestCheckRecommendSignal:
 
 
 class TestChainOrder:
-    """R58-4：BUY → RECOMMEND → SECONDARY 的链路优先级。"""
+    """链路优先级：BUY → SECONDARY（RECOMMEND 档随 c3 解否决而实质不可达）。"""
 
     def test_buy_persists_skips_recommend_and_secondary(self, monkeypatch):
         """主 BUY 通过 → RECOMMEND/SECONDARY 都不跑。"""
@@ -440,34 +454,31 @@ class TestChainOrder:
         assert sig is not None and sig.action is Action.BUY
         assert rec_called == [] and sec_called == []
 
-    def test_buy_fails_recommend_passes_returns_recommend(self, monkeypatch):
-        """主 BUY 未过 → RECOMMEND 通过 → 返回 RECOMMEND（不再尝试 SECONDARY）。"""
+    def test_buy_fails_falls_through_to_secondary(self, monkeypatch):
+        """主 BUY 未过（ENHANCED 换手不足 → c5 False）→ 只尝试 SECONDARY。"""
         sec_called: list[date] = []
-        patch_io(monkeypatch, today=[cand(cont=4, code="000017")], prev=_prev_rows(),
-                 survivors={"000017", "600001"})  # 双幸存 → 主版 c3 拒
-        # RECOMMEND 用宽松 c3：构造一个 mock 替 _evaluate 在 RECOMMEND 路径里返回过
-        rec_pass = entry.Checklist(c1_uniqueness=True, c2_exchange=True,
-                                    c3_elimination=True, c4_min_days=True,
-                                    c5_strength_diverge=True, w1_crowding=True)
-        rec_rows = [(lbl, True, "ok") for fn, _, lbl in entry._RECOMMEND_CONDITIONS] + \
-                   [("W1 同身位扎堆", True, "无同身位扎堆")]
+        patch_io(monkeypatch, today=[cand(cont=4, code="600001")], prev=_prev_rows(),
+                 survivors={"600001"}, window="ENHANCED",
+                 quality={"turnover_rate": 1.0, "bomb_times": 0})
         monkeypatch.setattr(entry, "check_secondary_signal",
                             lambda d, source=None: sec_called.append(d) or None)
-        # patch _evaluate: 主版(主评估路径) 走原逻辑失败，RECOMMEND 路径走宽松版通过
-        original = entry._evaluate
-        def fake_evaluate(cand, window, **kw):
-            conds = kw.get("conditions", entry._CONDITIONS)
-            if conds is entry._RECOMMEND_CONDITIONS:
-                return rec_pass, rec_rows
-            return original(cand, window, **kw)
-        monkeypatch.setattr(entry, "_evaluate", fake_evaluate)
-        sig = check_signal(D)
-        assert sig is not None and sig.action is Action.RECOMMEND
-        # RECOMMEND 通过时 SECONDARY 不应被调用
-        assert sec_called == []
+        assert check_signal(D) is None
+        assert sec_called == [D]
 
-    def test_buy_and_recommend_both_fail_falls_through_to_secondary(self, monkeypatch):
-        """BUY 失败 + RECOMMEND 也失败 → 落 SECONDARY。"""
+    def test_unreachable_recommend_tier_is_not_entered(self, monkeypatch):
+        """c3 不否决后 BUY 与 RECOMMEND 条件集只差 c3 ⇒ 链路不再进 RECOMMEND。"""
+        rec_called: list[date] = []
+        patch_io(monkeypatch, today=[cand(cont=4, code="600001")], prev=_prev_rows(),
+                 survivors={"600001"}, window="ENHANCED",
+                 quality={"turnover_rate": 1.0, "bomb_times": 0})
+        monkeypatch.setattr(entry, "check_recommend_signal",
+                            lambda d, source=None: rec_called.append(d) or None)
+        monkeypatch.setattr(entry, "check_secondary_signal",
+                            lambda d, source=None: None)
+        assert check_signal(D) is None and rec_called == []
+
+    def test_no_candidate_falls_through_to_secondary(self, monkeypatch):
+        """无 4 板候选 → BUY 无候选，SECONDARY（3 板起）仍尝试。"""
         sec_called: list[date] = []
         patch_io(monkeypatch, today=[cand(cont=3, code="000017")], prev=_prev_rows())
         monkeypatch.setattr(entry, "check_secondary_signal",
@@ -476,18 +487,18 @@ class TestChainOrder:
         assert sig is None
         assert sec_called == [D]
 
-    def test_none_window_tries_recommend_and_secondary(self, monkeypatch):
-        """禁买日 → RECOMMEND 与 SECONDARY 都尝试（沿用 V14.1 观察纪律）。"""
+    def test_none_window_tries_secondary_only(self, monkeypatch):
+        """禁买日（冰点）→ 只跑 SECONDARY 观察档。"""
         rec_called: list[date] = []
         sec_called: list[date] = []
         patch_io(monkeypatch, today=[cand(cont=4, code="000017")], prev=_prev_rows(),
-                 window="NONE", survivors={"000017"})
+                 window="NONE", survivors={"000017"}, phase="冰点")
         monkeypatch.setattr(entry, "check_recommend_signal",
                             lambda d, source=None: rec_called.append(d) or None)
         monkeypatch.setattr(entry, "check_secondary_signal",
                             lambda d, source=None: sec_called.append(d) or None)
         assert check_signal(D) is None
-        assert rec_called == [D] and sec_called == [D]
+        assert rec_called == [] and sec_called == [D]
 
 
 class TestCheckSecondarySignal:
@@ -499,7 +510,7 @@ class TestCheckSecondarySignal:
         sig = check_secondary_signal(D)
         assert sig is not None and sig.action is Action.SECONDARY
         sql, params = calls["sql"][0]
-        assert params[:4] == (D, "000017", "SECONDARY", "NONE")
+        assert params[:3] == (D, "000017", "SECONDARY") and params[3] == "NONE"
         rows = json.loads(params[4])
         assert rows[2][0] == "c3 淘汰赛身份" and "次级降档" in rows[2][2]
         assert [r[1] for r in rows] == [True] * 6
@@ -533,7 +544,8 @@ class TestChecklistProjection:
         patch_io(monkeypatch, today=[cand(cont=4, code="600001")], prev=_prev_rows(),
                  survivors={"600001"})
         cl = checklist(cand(cont=4, code="600001"), "STANDARD")
-        assert cl == Checklist(True, True, True, True, True, True)
+        # W2′：c3 恒 None（身份说明，不否决）——不再参与 passed 聚合
+        assert cl == Checklist(True, True, None, True, True, True)
         assert cl.passed is True
 
     def test_min_days_override_flows_into_projection(self, monkeypatch):

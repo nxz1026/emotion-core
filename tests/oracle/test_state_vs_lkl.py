@@ -44,7 +44,10 @@ def test_window_of():
     assert window_of("发酵") == ("STANDARD", False)
     assert window_of("高潮") == ("ENHANCED", False)
     assert window_of("冰点") == ("NONE", False)
-    assert window_of("退潮") == ("NONE", True)
+    # W7′ 有意偏离 lkl 原口径：退潮解禁（实测定档 _audit/2026-10-21-修正方案-实测定档.md）。
+    # lkl 原文 ("NONE", True) 的依据是「退潮=亏钱效应」，但口径B 实测退潮日每信号期望
+    # +2.31%/胜率 77%（优于高潮 ENHANCED +1.48%/68%），该前提不成立。
+    assert window_of("退潮") == ("STANDARD", False)
 
 
 def test_classify_series_basic():

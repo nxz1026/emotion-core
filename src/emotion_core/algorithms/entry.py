@@ -1,10 +1,23 @@
-"""T5 买入信号（PLAN §1.5）：五条件 AND + 1 警告；逐项核对产出 checklist。
+"""T5 买入信号：四条件 AND + 2 项不否决（c3 身份档 / W1 扎堆）；逐项核对产出 checklist。
 
-语义逐字照搬 lkl/services/entry.py（docs/07 §2.4），判定规则零改动：
-- c1 唯一换手高标 / c2 换手板非一字 / c3 淘汰赛身份（严格版：幸存集合 == {候选}）
-  / c4 最低板数门槛（默认 MIN_LEADER_DAYS=4）/ c5 强度与分歧补偿（仅 ENHANCED 窗口）；
-  W1 同身位扎堆只警告不否决（奎爷拍板）。
-- 主信号 buy_window=NONE（禁买）日恒不落库；次级（SECONDARY）在禁买日仍生成观察记录，
+W2′ 改版（2026-10-21 实测定档，_audit/2026-10-21-修正方案-实测定档.md）：
+- **c3 不再否决，只定仓位档**。旧 c3（要求「昨日最高组≥2 只、今日幸存恰 1 只、且幸存者
+  就是候选」）全史只有约 27 天可能满足，而唯一换手高标有 427 天 —— 一票否决掉 94% 的
+  机会。实测（口径B T+1封板价买→T+2开盘卖，费后）三档每信号期望：
+  严格胜出 +1.37%~+3.28%、身位延续 +1.54%~+2.45%、新插队 +0.15%~+2.44%（按相位不同）。
+  故 `c3_identity` 恒返回 UNKNOWN（None）只写身份与竞争实况，仓位由
+  `position_tier(phase, diverge, tier)` 三档矩阵决定。
+- 三档定义（`c3_tier`）：严格胜出 = 昨日最高组 g≥2 且今日幸存 s==1 且候选在昨日组内；
+  身位延续 = 候选在昨日最高组内（非严格）；新插队 = 候选不在昨日最高组内。
+- **A 止血（2026-10-21 奎爷拍板）：本模块不再产出买点 / 卖点 / 仓位。** 口径B 的
+  成交假设已被证伪（`_audit/probe_fill.py`）：真实打板在**触及涨停那一刻**成交，之后
+  炸板撤不回，而旧探针用「次日收盘封住」当成交＝事后视角。同批 375 个信号按「触及即
+  成交」实测**每信号 −1.26%**（成交后 −2.01%、胜率 50%、炸板占成交 30% 且均亏 15%）。
+  故本模块只产**观察记录**：硬条件全过即落库（action 仍为 BUY = 历史 schema 值，
+  语义改为「观察名单」），`signal.reason` 回到 NULL；仓位矩阵只保留**过滤**用途
+  （观望档不落记录），不再作为操作建议出现在任何输出里。
+- 主信号 buy_window=NONE（= 冰点，唯一禁买相位）日仍不落库；退潮已解禁
+  （state.window_of 改 STANDARD），次级（SECONDARY）在禁买日仍生成观察记录，
   且不进入交易导出（SECONDARY_EXPORT_ENABLED 默认关）。
 - passed_of 是唯一聚合器：filter None 然后 all()（UNKNOWN 不否决），实现落在
   domain.Checklist.passed——实盘/回放/报告共用同一规则（P1-1）。
@@ -37,8 +50,8 @@
    - `_candidate_view`：loader 无 ladder 候选质量列查询（lkl ladder.build 的 daily_bar +
      limit_pool_em join）。
 7. domain.Signal 无 reason / buy_window 字段：`_persist` 显式收 window（禁买日次级存
-   NONE，不伪装成可执行窗口）；reason 不写（展示层文案由 translate/report 生成），
-   冲突时不覆写历史 reason。
+   NONE，不伪装成可执行窗口）。reason 在 A 止血后不再写（恒 NULL，回归 lkl 原状）；
+   ON CONFLICT 仍用 COALESCE(EXCLUDED.reason, signal.reason)，传 None 保留历史。
 
 对账：tests/unit/test_entry.py（逐条件行为，不连库）；另有真实库差分对账——同一候选/窗口
 分别调 lkl.services.entry.checklist 与本模块，逐项比对 ok/None。
@@ -168,6 +181,134 @@ def c3_loose(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
     return True, f"昨日最高板组{g}只→幸存{s}只，候选在其中（不要求唯一幸存）"
 
 
+# ---- W2′ c3 三档身份（不否决，只定仓位） -----------------------------------
+TIER_STRICT = "严格胜出"      # 昨日最高组 g≥2 且今日幸存 s==1 且候选在昨日组内
+TIER_INHERIT = "身位延续"     # 候选在昨日最高组内（非严格胜出）
+TIER_NEWCOMER = "新插队"      # 候选不在昨日最高组内
+
+
+def c3_tier(cand: Cand, ctx: Ctx) -> str:
+    """候选的 c3 身份档（纯函数，无 IO）。
+
+    档位定义与实测口径逐字一致（_audit/2026-10-21-修正方案-实测定档.md）：
+    「严格胜出 = 昨日最高组 g≥2 且今日幸存 s==1 且 in_y_top==1」。
+    注意 s==1 ∧ in_y_top 已隐含「唯一幸存者就是候选」——候选今日仍是换手板时
+    必在 y_survivors 里，故与旧 c3 的集合等值校验等价，但败者不再出局。
+    """
+    g, s = ctx.get("y_comp", (0, 0))
+    y_codes, _survivors = ctx.get("y_surv", (set(), set()))
+    in_y = cand.code in y_codes
+    if in_y and g >= 2 and s == 1:
+        return TIER_STRICT
+    return TIER_INHERIT if in_y else TIER_NEWCOMER
+
+
+def c3_identity(cand: Cand, ctx: Ctx) -> tuple[None, str]:
+    """主信号 c3 行：恒 UNKNOWN（None，不计入通过/否决），只陈述身份与竞争实况。
+
+    返回 None 是刻意的：`Checklist.passed` 只把 True/False 当表态（None 被过滤），
+    所以这一行永远不会否决信号——仓位由 position_tier 决定，不由 c3 投票。
+    """
+    tier = c3_tier(cand, ctx)
+    g, s = ctx.get("y_comp", (0, 0))
+    name = _field(cand, ctx, "name", "")
+    if tier == TIER_STRICT:
+        note = f"身份 {TIER_STRICT}：昨日最高组{g}只→今日仅候选1只幸存"
+    elif tier == TIER_INHERIT:
+        note = f"身份 {TIER_INHERIT}：候选在昨日最高组内（昨{g}只→今幸存{s}只）"
+    else:
+        note = f"身份 {TIER_NEWCOMER}：不在昨日最高组内（昨{g}只）；{name}是新插队高标"
+    return None, note
+
+
+@dataclass(frozen=True)
+class PositionTier:
+    """观察档（phase × c3 身份 × 分歧降级 → 权重）。weight: 1.0/0.5/0.0。
+
+    A 止血后**不再表示仓位**：标签是观察优先级（优先/次选/不参与），
+    weight 只当过滤器用（0.0 不进观察名单）。旧标签「满仓/半仓/观望」已废弃
+    ——系统不出买入建议，谈仓位就是暗示。
+    """
+    tier: str          # 严格胜出 / 身位延续 / 新插队
+    label: str         # 优先 / 次选 / 不参与
+    weight: float      # 1.0 / 0.5 / 0.0（仅作过滤）
+    expectancy: str    # 该格实测每信号期望（口径B，费后）
+    phase: str
+    diverge: bool
+
+    @property
+    def reason(self) -> str:
+        """一句话依据（给报告/推送用，避免再算一遍）。"""
+        tail = "·分歧降级" if self.diverge else ""
+        return f"{self.phase}{tail}×{self.tier}→{self.label}（实测每信号 {self.expectancy}）"
+
+
+# 实测每信号期望（口径B T+1封板价买→T+2开盘卖，双边费 0.15%）：
+# 键 = (phase, diverge, tier)。数字出处见 _audit/2026-10-21-修正方案-实测定档.md
+_EXPECT: dict[tuple[str, bool, str], str] = {
+    ("退潮", False, TIER_INHERIT): "+2.45%",
+    ("退潮", False, TIER_NEWCOMER): "+2.44%",
+    ("退潮", False, TIER_STRICT): "+1.37%",
+    ("高潮", False, TIER_STRICT): "+1.84%",
+    ("高潮", False, TIER_INHERIT): "+1.54%",
+    ("高潮", False, TIER_NEWCOMER): "+1.02%",
+    ("高潮", True, TIER_STRICT): "+3.28%",
+    ("高潮", True, TIER_INHERIT): "+2.15%",
+    ("高潮", True, TIER_NEWCOMER): "+0.15%",
+    ("发酵", False, TIER_INHERIT): "+2.20%",
+    ("发酵", False, TIER_NEWCOMER): "+1.28%",
+    ("冰点", False, TIER_INHERIT): "0.00%",
+    ("冰点", False, TIER_NEWCOMER): "0.00%",
+    ("冰点", False, TIER_STRICT): "0.00%",
+}
+
+_WEIGHT_FULL, _WEIGHT_HALF = 1.0, 0.5
+
+
+def _base_weight(phase: str, tier: str) -> float:
+    """未降级时的基础权重（定档矩阵）。"""
+    if phase == "退潮":
+        return _WEIGHT_HALF if tier == TIER_STRICT else _WEIGHT_FULL
+    if phase == "高潮":
+        return _WEIGHT_HALF if tier == TIER_NEWCOMER else _WEIGHT_FULL
+    if phase == "发酵":
+        return _WEIGHT_HALF
+    return 0.0  # 冰点：禁买（实测 n=3、封板率 0%）
+
+
+def position_tier(phase: str, diverge: bool, tier: str) -> PositionTier:
+    """phase × c3 身份 × 分歧降级 → 观察档（定档矩阵的唯一实现）。
+
+    降级日（高潮且 diverge）整体降一档，其中新插队期望 ≈ +0.15%/胜率 50% → 不参与。
+    A 止血后这只是**过滤/排序**用：weight 0.0 的格子不进观察名单，不做仓位建议。
+    """
+    w = _base_weight(phase, tier)
+    dg = bool(diverge) and phase == "高潮"
+    if dg and w > 0:
+        w = 0.0 if tier == TIER_NEWCOMER else _WEIGHT_HALF
+    label = {1.0: "优先", 0.5: "次选", 0.0: "不参与"}[w]
+    exp = _EXPECT.get((phase, dg, tier), "未测")
+    return PositionTier(tier=tier, label=label, weight=w,
+                        expectancy=exp, phase=phase, diverge=dg)
+
+
+def tier_of(cand: Cand, window: str, *, as_of: date | None = None) -> PositionTier:
+    """候选 → PositionTier（读当日 market_stat 的 phase/diverge + 梯队竞争实况）。
+
+    报告/诊断专用：与 check_signal 落库时的判断同源，避免报告自己再算一遍仓位档。
+    """
+    stat = _read_stat(cand.date) or {}
+    ctx = _ctx(cand, window, min_days=MIN_LEADER_DAYS,
+               diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of)
+    return position_tier(stat.get("phase") or "", bool(stat.get("diverge")),
+                         c3_tier(cand, ctx))
+
+
+# A 止血（2026-10-21）：`buy_point` / `plan_text` 已删除。口径B 打板的成交假设被证伪
+# （触及即成交 → 每信号 −1.26%），任何「买点 + 仓位」文案都是负期望的操作建议。
+# 涨停价换算仍在 `utils/price.limit_up_price_cents`，研究脚本直接用那个函数。
+
+
 def c4_min_days(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
     md = ctx.get("min_days", MIN_LEADER_DAYS)
     return cand.cont_days >= md, f"{cand.cont_days}板 >= 门槛{md}"
@@ -207,7 +348,8 @@ def c5_strength_diverge(cand: Cand, ctx: Ctx) -> tuple[bool | None, str]:
 _CONDITIONS: tuple[tuple[Cond, str, str], ...] = (
     (c1_uniqueness, "c1_uniqueness", "c1 唯一换手高标"),
     (c2_exchange, "c2_exchange", "c2 换手板非一字"),
-    (c3_elimination, "c3_elimination", "c3 淘汰赛身份"),
+    # W2′：c3 从「否决条件」降级为「身份说明」——恒 None，不参与 passed 聚合
+    (c3_identity, "c3_elimination", "c3 身份档（不否决）"),
     (c4_min_days, "c4_min_days", "c4 最低板数门槛"),
     (c5_strength_diverge, "c5_strength_diverge", "c5 强度与分歧补偿"),
 )
@@ -255,8 +397,10 @@ _WARNINGS: tuple[tuple[Cond, str, str], ...] = (
     (w1_crowding, "w1_crowding", "W1 同身位扎堆"),
 )
 
+# 三套条件集的标签都映射到同一 Checklist 字段（c3 三档共用 c3_elimination 槽位）
 _FIELD_OF: dict[str, str] = {label: field
-                             for _, field, label in _CONDITIONS + _WARNINGS}
+                             for _, field, label in (_CONDITIONS + _SECONDARY_CONDITIONS
+                                                     + _RECOMMEND_CONDITIONS + _WARNINGS)}
 
 
 @dataclass(frozen=True)
@@ -273,7 +417,8 @@ class WarningOnly:
 _VIEW_SQL = """
 SELECT s.name,
        COALESCE(p.turnover_rate, b.turnover_rate) AS turnover_rate,
-       p.bomb_times
+       p.bomb_times,
+       b.close
 FROM stock_basic s
 LEFT JOIN daily_bar b ON b.code = s.code AND b.date = %(d)s
 LEFT JOIN limit_pool_em p ON p.code = s.code AND p.date = %(d)s
@@ -295,7 +440,9 @@ def _candidate_view(cand: Cand) -> dict[str, Any]:
         return {}
     return {"name": row[0] or "",
             "turnover_rate": None if row[1] is None else float(row[1]),
-            "bomb_times": None if row[2] is None else int(row[2])}
+            "bomb_times": None if row[2] is None else int(row[2]),
+            # W3′：T 日收盘 → 买点（T+1 涨停价）唯一输入
+            "close": None if row[3] is None else float(row[3])}
 
 
 def _ctx(cand: Cand, window: str, *, min_days: int, diverge_min: float,
@@ -342,15 +489,26 @@ def _to_checklist(rows: list[Row]) -> Checklist:
     return Checklist(**{_FIELD_OF[label]: ok for label, ok, _ in rows})
 
 
+def _evaluate_ctx(cand: Cand, window: str, *, min_days: int, diverge_min: float,
+                  as_of: date | None = None,
+                  conditions: tuple[tuple[Cond, str, str], ...] = _CONDITIONS,
+                  include_peer: bool = False) -> tuple[Checklist, list[Row], Ctx]:
+    """评估并**同时交出 ctx**（W2′：仓位档要用 ctx 里的 y_comp / y_surv）。"""
+    ctx = _ctx(cand, window, min_days=min_days, diverge_min=diverge_min,
+               as_of=as_of, include_peer=include_peer)
+    rows = _rows(cand, ctx, conditions)
+    return _to_checklist(rows), rows, ctx
+
+
 def _evaluate(cand: Cand, window: str, *, min_days: int, diverge_min: float,
               as_of: date | None = None,
               conditions: tuple[tuple[Cond, str, str], ...] = _CONDITIONS,
               include_peer: bool = False) -> tuple[Checklist, list[Row]]:
     """一次评估同时产出 Checklist（判定用）与行（落库/报告用），ctx 只建一次。"""
-    ctx = _ctx(cand, window, min_days=min_days, diverge_min=diverge_min,
-               as_of=as_of, include_peer=include_peer)
-    rows = _rows(cand, ctx, conditions)
-    return _to_checklist(rows), rows
+    cl, rows, _ = _evaluate_ctx(cand, window, min_days=min_days,
+                                diverge_min=diverge_min, as_of=as_of,
+                                conditions=conditions, include_peer=include_peer)
+    return cl, rows
 
 
 def checklist(cand: Cand, window: str, min_days: int | None = None,
@@ -421,19 +579,31 @@ def split_checklist(cl: Checklist) -> tuple[Checklist, WarningOnly]:
     return replace(cl, w1_crowding=None), WarningOnly(w1_crowding=cl.w1_crowding)
 
 
-_WINDOW_SQL = "SELECT buy_window FROM market_stat WHERE date = %s"
+_STAT_SQL = ("SELECT buy_window, phase, diverge"
+             " FROM market_stat WHERE date = %s")
 
 
-def _read_window(trade_date: date) -> str | None:
-    """当日 buy_window 原文（market_stat 无该日行 → None）。
+def _read_stat(trade_date: date) -> dict[str, Any] | None:
+    """当日市场状态三列（market_stat 无该日行 → None）。
+
+    W7′：窗口之外还要 phase（档位矩阵的行）与 diverge（降级日降一档），故一次取回；
+    缺列（老库）按 None 容错，phase 缺 → 空串（position_tier 落到冰点档=不参与）。
 
     自持 SQL：data.loader.load_market_stat 与 domain.MarketStat 构造不匹配
     （传 bomb_rate / max_limit_days，契约里是 bomb_count / max_height），调用即
     TypeError（已实测）——与 `_persist` 同因（见模块文档 §6）。
     """
     with connect() as conn:
-        row = conn.execute(_WINDOW_SQL, (trade_date,)).fetchone()
-    return None if row is None else row[0]
+        row = conn.execute(_STAT_SQL, (trade_date,)).fetchone()
+    if row is None:
+        return None
+    return {"window": row[0], "phase": row[1] or "", "diverge": bool(row[2])}
+
+
+def _read_window(trade_date: date) -> str | None:
+    """当日 buy_window 原文（兼容入口；实现见 _read_stat）。"""
+    st = _read_stat(trade_date)
+    return None if st is None else st["window"]
 
 
 def current_window(trade_date: date) -> str:
@@ -446,52 +616,58 @@ def current_window(trade_date: date) -> str:
 
 def check_signal(trade_date: date,
                  source: SignalSource = SignalSource.LIVE) -> Signal | None:
-    """当日买入信号：窗口非NONE + 唯一最高板候选 + 五条件全过 → 落库。
+    """当日**观察记录**：窗口非NONE + 唯一最高板候选 + 条件全过 + 档位非「不参与」→ 落库。
 
-    buy_window=NONE（禁买）日主信号恒不落库；但次级观察记录仍生成
-    （check_secondary_signal 内已豁免 NONE 守卫）——见其次级 docstring。
-    source 供 replay_service 回填打标（S3/R7），默认 live。
+    A 止血（2026-10-21）：返回值与落库行都**不含买点 / 卖点 / 仓位**。`action=BUY` 是
+    schema 历史值，语义已改为「观察名单成员」（硬条件全过），不构成买入建议。
+    passed 只看 c1/c2/c4/c5（c3 恒 UNKNOWN 不否决）；档位由
+    `position_tier(phase, diverge, c3_tier)` 算出后**只当过滤器**：不参与档
+    （高潮分歧降级 × 新插队，实测每信号 +0.15%/胜率 50%）不落记录。
 
-    R58-4 链路优先级：BUY → RECOMMEND（c3 放宽） → SECONDARY。
-    - BUY 严格路径完全不动（_CONDITIONS 五条件全过）；
-    - BUY 未过时先尝试 RECOMMEND（仅放宽 c3 为「候选 ∈ 幸存集」）；
-    - RECOMMEND 也未过时再尝试 SECONDARY（同时放宽 c3 与 c4/c5 阈值）；
-    - 每档只在前一档失败时尝试，同一 confirm_date 不会同时落 BUY + RECOMMEND
-      或 RECOMMEND + SECONDARY——主推荐已落即代表更优，回退终止。
+    buy_window=NONE（= 冰点，唯一禁买相位）日主信号恒不落库；次级观察记录仍生成
+    （check_secondary_signal 内已豁免 NONE 守卫）。source 供 replay_service 打标。
+
+    链路优先级：BUY → SECONDARY（c3/c4/c5 降档观察档）。
+    RECOMMEND 档（原链路的中间档，只放宽 c3）已**实质不可达**：c3 不再否决后，
+    BUY 与 RECOMMEND 的条件集只差 c3，BUY 败 ⇔ c1/c2/c4/c5 败 ⇔ RECOMMEND 也败。
+    故链路不再进 RECOMMEND（函数保留供回放/诊断直接调用，历史 RECOMMEND 行仍可读）。
     """
-    window = current_window(trade_date)
+    stat = _read_stat(trade_date) or {}
+    window = stat.get("window") or "NONE"
+    phase = stat.get("phase") or ""
+    diverge = bool(stat.get("diverge"))
     if window == "NONE":
-        log.info("%s buy_window=NONE，禁买（主信号）", trade_date)
-        # 禁买日仍留观察线索（不导出）：RECOMMEND 与 SECONDARY 都跑
-        check_recommend_signal(trade_date, source)
+        log.info("%s buy_window=NONE（%s），禁买（主信号）", trade_date, phase or "?")
+        # 禁买日仍留观察线索（不导出）：SECONDARY 观察档照跑
         check_secondary_signal(trade_date, source)
         return None
     cand = ladder.sole_top(ladder.build(trade_date))
     if cand is None:
         log.info("%s 无唯一最高板候选", trade_date)
-        # 无候选 → RECOMMEND/SECONDARY 都没意义，但跑一遍不抛错（无候选即返回 None）
-        check_recommend_signal(trade_date, source)
+        # 无 4 板候选 → 无 BUY；SECONDARY（3 板起）仍可能成观察记录
         check_secondary_signal(trade_date, source)
         return None
-    cl, rows = _evaluate(cand, window, min_days=MIN_LEADER_DAYS,
-                         diverge_min=DIVERGE_MIN_TURNOVER)
+    cl, rows, ctx = _evaluate_ctx(cand, window, min_days=MIN_LEADER_DAYS,
+                                  diverge_min=DIVERGE_MIN_TURNOVER)
     # R58-4：name 仅 BUY 推送需要——直接走 _candidate_view 复用同 IO（与
     # c1/c5 同源）；缺数按 None 落空（推送模板照「code()」也好看）。
     cand_view = _candidate_view(cand)
     sig = Signal(code=cand.code, date=trade_date, action=Action.BUY,
                  checklist=cl, source=source,
                  name=cand_view.get("name") or None,
-                 cont_days=cand.cont_days)   # R58-4：BUY 即时推送用
+                 cont_days=cand.cont_days)   # 仅内存展示（推送/诊断用，不入库）
     if passed_of(cl):        # P1-1：与回测同一聚合器（UNKNOWN 不否决）
+        pt = position_tier(phase, diverge, c3_tier(cand, ctx))
+        if pt.weight <= 0:
+            log.info("%s 候选 %s 通过但档位=不参与（%s）→ 不落记录",
+                     trade_date, cand.code, pt.reason)
+            check_secondary_signal(trade_date, source)
+            return None
         _persist(sig, window, rows)
         return sig
     log.info("%s 候选 %s 未全过: %s", trade_date, cand.code,
-             [n for n, ok, _ in rows if not ok])
-    # 主信号未通过：先尝试 RECOMMEND（仅放宽 c3）——比 SECONDARY 门槛高一档
-    rec_sig = check_recommend_signal(trade_date, source)
-    if rec_sig is not None:
-        return rec_sig
-    # RECOMMEND 也未过：再尝试 SECONDARY（同时放宽 c3 与 c4/c5 阈值）
+             [n for n, ok, _ in rows if ok is False])
+    # 主信号未通过 → SECONDARY（放宽 c3 与 c4/c5 阈值的观察档；不导出、不推送）
     check_secondary_signal(trade_date, source)
     return None
 
@@ -501,6 +677,7 @@ INSERT INTO signal (confirm_date, code, action, reason, buy_window, checklist,
                     strategy_version, status, source, config_hash)
 VALUES (%s, %s, %s, NULL, %s, %s::jsonb, %s, 'SUGGESTED', %s, %s)
 ON CONFLICT (confirm_date, code, action) DO UPDATE SET
+  reason           = COALESCE(EXCLUDED.reason, signal.reason),
   buy_window       = EXCLUDED.buy_window,
   checklist        = EXCLUDED.checklist,
   strategy_version = COALESCE(EXCLUDED.strategy_version, signal.strategy_version),
@@ -512,17 +689,17 @@ ON CONFLICT (confirm_date, code, action) DO UPDATE SET
 def _persist(sig: Signal, window: str, rows: list[Row]) -> None:
     """落库（lkl 原语句：按 (confirm_date, code, action) upsert，同事务）。
 
-    reason / strategy_version：reason 不在 domain.Signal 契约内 → 写 NULL 且冲突时
-    不覆写历史 reason；strategy_version 取 CONFIG.STRATEGY_VERSION，缺键写 NULL 且
-    冲突时保留库内旧值（COALESCE——不做有损覆写）。
+    reason 恒写 NULL（A 止血：不再有买点/卖点/仓位文案，见模块文档）；冲突时
+    COALESCE(NULL, signal.reason) 保留库内历史文本，即新跑不会抹掉旧记录。
+    strategy_version 取 CONFIG.STRATEGY_VERSION，缺键写 NULL 且冲突时保留库内旧值。
     checklist 存的是逐项行 (标签, ok, 说明)——与 lkl 存量 signal.checklist 同形。
     source（审核文档 §9 第 10 条）：写 live / replay，冲突时**保留库内首个来源**
     （COALESCE——回放不得把实盘信号改标成 replay，反之亦然；历史 NULL 行顺带补全）。
     config_hash：本次产出的策略版本指纹，冲突时按最后一次运行覆盖。
     """
     with transaction() as conn:
-        conn.execute(_INSERT_SQL, (sig.date, sig.code, sig.action.value, window,
-                                   json.dumps(rows, ensure_ascii=False),
+        conn.execute(_INSERT_SQL, (sig.date, sig.code, sig.action.value,
+                                   window, json.dumps(rows, ensure_ascii=False),
                                    _cfg("STRATEGY_VERSION", None),
                                    sig.source.value, config_hash()))
 

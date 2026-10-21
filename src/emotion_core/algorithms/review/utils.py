@@ -62,21 +62,51 @@ def _delta_of(cur, prev, label: str, suffix: str = "") -> str:
     return f"- {label}：{prev}{suffix} → {cur}{suffix}"
 
 
+def _int(v) -> str:
+    """整数指标；None/NaN → '—'（F6 不显示 0）。"""
+    return "—" if v is None or pd.isna(v) else f"{int(v)}"
+
+
 def _fmt_stat(cur: dict | None, prev: dict | None) -> str:
-    """指标表：双口径高度并列 + 均值/中位数对照，★ 标出当前判据列（§2.2/§4.2）。"""
-    star = lambda name: " ★判据" if _EMOTION_PERF_BASIS == name else ""
-    keys = [("limit_up_count", "涨停家数"), ("bomb_rate", "炸板率"),
-            ("zt_performance_mean", "昨涨停表现·均值%" + star("mean")),
-            ("zt_performance_median", "昨涨停表现·中位%" + star("median")),
-            ("max_limit_days", "名义最高板"), ("tradable_max_days", "可交易最高板"),
-            ("oneword_ratio", "一字占比"), ("limit_down_count", "跌停家数")]
+    """指标表：双口径高度并列 + 均值/中位数对照，★ 标出当前判据列（§2.2/§4.2）。
+
+    W11′（说人话）：比率类指标按百分数显示（库里存 0.3678 这种小数，直接印出来
+    读者要自己乘 100）；家数类强制整数。缺数一律 '—'，不补 0。
+    """
+    star = lambda name: "（当前判据）" if _EMOTION_PERF_BASIS == name else ""
+    keys = [("limit_up_count", "涨停家数", _int), ("bomb_rate", "炸板率", _pct),
+            ("zt_performance_mean", "昨天涨停的票今天平均涨" + star("mean"), _pctv),
+            ("zt_performance_median", "昨天涨停的票今天涨幅中位" + star("median"), _pctv),
+            ("max_limit_days", "名义最高板（含一字）", _int),
+            ("tradable_max_days", "能买到的最高板", _int),
+            ("oneword_ratio", "一字板占比", _pct),
+            ("limit_down_count", "跌停家数", _int)]
     lines = ["| 指标 | 今日 | 昨日 |", "|---|---|---|"]
-    for k, label in keys:
+    for k, label, fmt in keys:
         c = cur.get(k) if cur else None
         p = prev.get(k) if prev else None
-        lines.append(f"| {label} | {c if c is not None else '—'} "
-                     f"| {p if p is not None else '—'} |")
+        lines.append(f"| {label} | {fmt(c)} | {fmt(p)} |")
     return "\n".join(lines)
+
+
+# ── 条件行人话标签（W11′：报告不再出现 c1..c5 内部代号） ────────────
+
+# 键 = entry.py 里的落库行标签（评审段落按标签查表，改标签必须同步改这里）
+_HUMAN_COND: dict[str, str] = {
+    "c1 唯一换手高标": "是不是当日唯一的最强连板股",
+    "c2 换手板非一字": "今天是否正常换手（一字板不算）",
+    "c3 身份档（不否决）": "它的身位（昨天在不在最强组里）",
+    "c4 最低板数门槛": "连板高度够不够",
+    "c5 强度与分歧补偿": "换手强度够不够",
+    "c3 淘汰赛身份": "它的身位（昨天在不在最强组里）",
+    "c3 身位（次级口径）": "它的身位（次级放宽口径）",
+    "W1 同身位扎堆": "同高度是不是扎堆了",
+}
+
+
+def _human_cond(label: str) -> str:
+    """行标签 → 人话；未登记的标签原样返回（不吞信息）。"""
+    return _HUMAN_COND.get(label, label)
 
 
 # ── 生态评级 ────────────────────────────────────────────────

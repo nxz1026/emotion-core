@@ -1,14 +1,20 @@
-"""对账测试：exit Rust vs Python 同输入同输出。
+"""对账测试：exit Rust vs Python —— **只剩信号构造器同口径**（W3′ 后有意分叉）。
 
-覆盖 3 个纯逻辑函数 + 1 个编排函数：
-- sell_signal(code, when, reason, buy_window) — 信号构造（exec_hint 恒 CLOSE_ALL）
-- sell(pos, stat, day) — 退潮(b) / 断板(a) / 无建议(c) 判定
-- suggestions(trade_date, stat, positions, bars) — 组合路径（退潮优先 / 逐仓断板）
+W3′（奎爷 2026-10-21 批准）把卖出规则从「退潮清仓 / 断板卖出」重写为口径B
+「T+2 开盘无条件卖 / 跌停封死顺延 / T+3 强制了结」，理由见 algorithms/exit.py
+模块文档（持有到断板 mean −1.90%/胜率 38.1%；T+2 开盘卖 +3.54%/68%）。
 
-Python 参考：emotion_core/algorithms/exit.py 的 _sell_signal / _sell / suggestions
-（suggestions 的 SQL 取数用 monkeypatch 桩掉，与 tests/unit/test_exit.py 同法）。
-Rust 侧 SQL 取数同样不在对账范围：suggestions 的 stat / positions / bars 由
-调用方注入（对应 Python 的 _stat / _open_positions / _derived 结果）。
+Rust `core/src/exit.rs` 停在旧规则、**不再同步**：
+- 它是「参考实现 + 对账基准」，生产走 Python（services/ 只 import Python）；
+- 新规则需要交易日历（held_days），而 Rust 侧刻意只接收基本类型入参（同
+  accelerate.rs 先例），把日历搬进 Rust 只为一个不再上线的实现，不值得。
+
+因此本文件保留 `sell_signal` 的逐字段对账（该构造器与规则无关，仍应一致），
+并用 `test_rust_exit_frozen_at_repealed_rule` 把这个**有意分叉**钉在源码上：
+Rust 若哪天同步了口径B，该测试会失败并提醒删除本条豁免。
+
+Python 参考：emotion_core/algorithms/exit.py 的 _sell_signal / _sell（判定见
+tests/unit/test_exit.py，逐分支覆盖口径B）。
 """
 from __future__ import annotations
 
@@ -106,103 +112,26 @@ def test_sell_signal(code, when, reason, buy_window):
     assert rust_sig.status == "SUGGESTED"
 
 
-# ────────────────────────── sell ──────────────────────────
+# ────────────────────── 有意分叉：Rust 停在被废止的规则上 ──────────────────────
 
-@pytest.mark.parametrize("stat,day_kwargs,expected", [
-    # (stat, day 参数, 期望：None 或 (reason 关键字, date, buy_window))
-    (None, None, None),                                             # 缺行 = 缺数，无建议（F6）
-    (None, dict(up=True), None),                                    # 涨停继续持有
-    (None, dict(up=True, one_word=True), None),                     # 一字涨停也持有
-    (None, dict(up=False, cont=0), ("断板", BAR_DATE, "")),          # 0 板：reason 不留数字
-    (None, dict(up=False, cont=6), ("断板", BAR_DATE, "")),
-    (None, dict(up=False, cont=1, one_word=True), ("断板", BAR_DATE, "")),  # 一字今日未封=断板
-    (STAT_EBB, None, ("清仓", POS_DATE, "NONE")),                   # 退潮：date=开仓日
-    (STAT_EBB, dict(up=True), ("清仓", POS_DATE, "NONE")),          # 退潮优先：封板也清
-    (STAT_EBB, dict(up=False, cont=3), ("清仓", POS_DATE, "NONE")),  # 退潮优先于断板
-    ({"force_liquidate": False}, None, None),                       # 非退潮 + 缺行 → 无建议
-    ({"force_liquidate": False}, dict(up=False, cont=2), ("断板", BAR_DATE, "")),
-    ({"force_liquidate": False}, dict(up=True), None),
-])
-def test_sell(stat, day_kwargs, expected):
-    py_day = day(**day_kwargs) if day_kwargs is not None else None
-    py_sig = _sell(pos(), stat, py_day)
-    rust_sig = rust.sell(rust.Holding("000017", str(POS_DATE)),
-                         rust_stat(stat["force_liquidate"]) if stat else None,
-                         rust_day(py_day))
-    if expected is None:
-        assert py_sig is None and rust_sig is None
-    else:
-        assert py_sig is not None and rust_sig is not None
-        assert_same_signal(rust_sig, py_sig)
-        reason_key, d, bw = expected
-        assert reason_key in rust_sig.reason
-        assert rust_sig.date == str(d)
-        assert rust_sig.buy_window == bw
+def test_rust_exit_frozen_at_repealed_rule():
+    """Rust exit.rs 仍是旧规则（退潮清仓/断板卖出），W3′ 未同步——有意为之。
+
+    同步条件：Rust 若重新上线卖出判定，必须同时同步口径B（含 held_days 的
+    交易日历入参），届时删除本条并恢复 sell/suggestions 对账。
+    """
+    from pathlib import Path
+    src = Path("src/emotion_core/core/src/exit.rs").read_text(encoding="utf-8")
+    assert "force_liquidate" in src           # 旧退潮清仓分支仍在
+    assert "断板建议" in src                   # 旧断板分支仍在
+    assert "held_days" not in src             # 口径B 的持有天数未进 Rust
+    assert "T+2" not in src                   # 口径B 的卖点文案未进 Rust
 
 
-# ────────────────────────── suggestions ──────────────────────────
-
-def patch_io(monkeypatch, *, stat, positions, bars) -> dict[str, Any]:
-    calls: dict[str, Any] = {"derived": []}
-
-    def fake_derived(d: date, code: str) -> DerivedBar | None:
-        calls["derived"].append((d, code))
-        return bars.get(code)
-
-    monkeypatch.setattr(exit, "_stat", lambda d: stat)
-    monkeypatch.setattr(exit, "_open_positions", lambda: list(positions))
-    monkeypatch.setattr(exit, "_derived", fake_derived)
-    return calls
-
-
-@pytest.mark.parametrize("stat,positions,bars,expected_codes", [
-    # 退潮：全部清仓，date=建议日，不读判据行
-    (STAT_EBB, [pos("601988"), pos("000001")], {}, ["601988", "000001"]),
-    # 退潮：即使判据行是涨停也清仓（退潮不读判据）
-    (STAT_EBB, [pos("601988")], {"601988": day(up=True, code="601988")}, ["601988"]),
-    # 非退潮：逐仓断板检查，只出断板
-    (STAT_CLIMAX, [pos("601988"), pos("000001")],
-     {"601988": day(up=True, code="601988"),
-      "000001": day(up=False, cont=0, code="000001")}, ["000001"]),
-    # stat=None：退化断板检查
-    (None, [pos("000001")], {"000001": day(up=False, cont=2, code="000001")}, ["000001"]),
-    # 缺判据行 = 缺数，不当断板（F6）
-    (STAT_CLIMAX, [pos("000001")], {"000001": None}, []),
-    # bars 缺 code：同缺行
-    (STAT_CLIMAX, [pos("000001")], {}, []),
-    # 空持仓
-    (STAT_EBB, [], {}, []),
-    # 多持仓全断板
-    (STAT_CLIMAX, [pos("601988"), pos("000001")],
-     {"601988": day(up=False, cont=1, code="601988"),
-      "000001": day(up=False, cont=4, code="000001")}, ["601988", "000001"]),
-])
-def test_suggestions(monkeypatch, stat, positions, bars, expected_codes):
-    calls = patch_io(monkeypatch, stat=stat, positions=positions, bars=bars)
-    py_sigs = exit.suggestions(D)
-    rust_sigs = rust.suggestions(
-        str(D),
-        rust_stat(stat["force_liquidate"]) if stat else None,
-        [rust.Holding(p.code, str(p.entry_date)) for p in positions],
-        {c: rust_day(b) for c, b in bars.items()},
-    )
-    assert [s.code for s in py_sigs] == expected_codes
-    assert [s.code for s in rust_sigs] == expected_codes
-    for r, p in zip(rust_sigs, py_sigs):
-        assert_same_signal(r, p)
-    # 调用轨迹：退潮不读判据行；非退潮逐仓读（含最终无建议的持仓）
-    if stat and stat["force_liquidate"]:
-        assert calls["derived"] == []
-    else:
-        assert calls["derived"] == [(D, p.code) for p in positions]
-
-
-def test_suggestions_liquidate_date_rewrite(monkeypatch):
-    """退潮建议日期 = 建议日（不是开仓日）：replace(s, date=trade_date) 语义。"""
-    patch_io(monkeypatch, stat=STAT_EBB, positions=[pos("601988", entry=POS_DATE)], bars={})
-    py_sigs = exit.suggestions(D)
-    rust_sigs = rust.suggestions(str(D), rust_stat(True),
-                                 [rust.Holding("601988", str(POS_DATE))], {})
-    assert len(py_sigs) == len(rust_sigs) == 1
-    assert py_sigs[0].date == D and rust_sigs[0].date == str(D)
-    assert_same_signal(rust_sigs[0], py_sigs[0])
+def test_python_exit_rule_is_caliber_b():
+    """Python 侧已切到口径B：源码里能查到卖点与强制了结两个分支。"""
+    from pathlib import Path
+    src = Path("src/emotion_core/algorithms/exit.py").read_text(encoding="utf-8")
+    assert "SELL_AFTER_DAYS = 1" in src and "FORCE_AFTER_DAYS = 2" in src
+    assert "T+2 {hit}" in src and "强制了结" in src
+    assert "force_liquidate" not in src        # 相位清仓已彻底移除

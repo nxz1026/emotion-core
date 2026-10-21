@@ -20,6 +20,9 @@
 - 缺数一律 `None` + `reasons[kind="degrade"]`，**不猜**（F6）。停牌 `close<=0` 视作 `no_bar`。
 - CPT 结论只**并排展示**（`facts.cpt_*` / payload `cpt`），**不参与**方向判定（D7）。
 - 本层**不产出交易决策**：不改 `presentation/trade_api.py` 的 `volume: 100`（另一个工单）。
+- **A 止血（2026-10-21）**：观察视角（无成本）不再给买点/数量——口径B 打板的成交
+  假设被证伪（触及即成交 → 每信号 −1.26%）；持仓视角只保留「建仓后第 N 个交易日
+  开盘卖」的时间退出。
 """
 from __future__ import annotations
 
@@ -31,6 +34,7 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Any, Final
 
+from emotion_core.algorithms import exit as exit_svc
 from emotion_core.algorithms.levels import (
     BI_LOOKBACK,
     BUY_BUFFER,
@@ -228,42 +232,65 @@ def _market(trade_date: date) -> dict[str, Any] | None:
 def _decide_action(
     *, stat: dict[str, Any] | None, drv: dict[str, Any] | None,
     cost: float | None, close: float, levels: Levels,
+    held: int | None = None, locked: bool = False,
 ) -> tuple[str, dict[str, Any]]:
-    """从上往下第一个命中即返回 `(action, reason)`；判据全部是已有确定性事实。"""
-    if stat and stat["force_liquidate"]:
+    """两视角分离：有成本＝持仓视角（时间退出），无成本＝观察视角（只判断在不在名单）。
+
+    旧规则「退潮清仓 → 止损 → 断板减仓 → 目标减仓 → 到买点加仓」已废止：它把
+    「有没有持仓」混进了方向语义（同一只票，填了成本就叫清仓、不填就叫加仓），
+    且三条触发都建在被证伪的前提上（退潮日次日 +3.53%/73%；持有到断板 −1.90%/38%；
+    结构位×0.95 的「止损」在涨停股 T+1 根本对应不上可成交价）。
+
+    现在：
+    - 持仓视角：只按**建仓后经过的交易日数**退出（见 algorithms/exit.py）；
+    - 观察视角（A 止血 2026-10-21）：**不再给买点**。口径B 打板的成交假设被证伪
+      （触及即成交 → 每信号 −1.26%，炸板占成交 30% 且均亏 15%），这个视角只回答
+      「今天它在不在观察名单里」，永远返回 HOLD，不返回 ADD、不给价格。
+    """
+    if cost is not None:
+        if held is None:
+            # 有成本但查不到建仓日（position 无 OPEN 记录且调用方没给）→ 算不出
+            # 「建仓后第几个交易日」，时间退出就无从判定。不许猜。
+            return "HOLD", {
+                "kind": "degrade",
+                "text": ("有成本但查不到建仓日（position 无 OPEN 记录）→ 算不出持有"
+                         "交易日数，不给卖出指令；请补 entry_date"),
+                "src": "caliber_b / exit.held_days"}
+        n = held
+        if n <= 0:
+            return "HOLD", {
+                "kind": "verdict",
+                "text": "今天刚建仓（口径B：建仓当日不卖，明天开盘再卖）",
+                "src": "caliber_b / exit.py"}
+        if n >= exit_svc.FORCE_AFTER_DAYS:
+            return "EXIT", {
+                "kind": "verdict",
+                "text": f"强制了结（口径B：已持有 {n} 个交易日，超过 T+3）",
+                "src": "caliber_b / exit.py"}
+        if locked:
+            return "HOLD", {
+                "kind": "verdict",
+                "text": "开盘跌停封死，今天卖不掉 → 顺延到下一交易日（届时强制了结）",
+                "src": "caliber_b / exit.py"}
         return "EXIT", {
-            "kind": "verdict", "text": "退潮期（force_liquidate）→ 清仓建议",
-            "src": "market_stat.force_liquidate / exit.py:130"}
-    if cost is not None and levels.stop_price is not None and close <= levels.stop_price:
-        return "EXIT", {
             "kind": "verdict",
-            "text": f"现价 {close:.2f} ≤ 止损 {levels.stop_price:.2f} → 清仓",
-            "src": "§6.2"}
-    if drv is not None and not drv["is_limit_up"]:
-        return "TRIM", {
-            "kind": "verdict",
-            "text": f"断板（原{drv['cont_days']}连板今日未封）→ 减仓",
-            "src": "exit.py:130"}
-    if cost is not None and levels.target_price is not None and close >= levels.target_price:
-        return "TRIM", {
-            "kind": "verdict",
-            "text": f"现价 {close:.2f} ≥ 目标 {levels.target_price:.2f} → 减仓",
-            "src": "§6.2"}
+            "text": "T+2 开盘卖出（口径B：alpha 全在隔夜，持有越久越亏）",
+            "src": "caliber_b / exit.py"}
+    # ── 观察视角（无成本）：只回答「在不在观察名单」，不给买点 ──
     if drv is None:
         return "HOLD", {
-            "kind": "verdict", "text": "当日无判据行（缺数）→ 持有观察",
-            "src": "F6：缺数不当作断板"}
-    if stat and stat["dragon_env"] == "UNFAVORABLE" and stat["buy_window"] == "NONE":
+            "kind": "verdict", "text": "当日无判据行（缺数）→ 不评估",
+            "src": "F6：缺数不当断板"}
+    if drv["is_limit_up"]:
         return "HOLD", {
             "kind": "verdict",
-            "text": "市场环境 UNFAVORABLE 且 buy_window=NONE → 持有观察",
-            "src": "market_stat"}
-    if cost is None and levels.buy_reference is not None and close <= levels.buy_reference:
-        return "ADD", {
-            "kind": "verdict",
-            "text": f"未持仓且现价 {close:.2f} ≤ 买参考 {levels.buy_reference:.2f} → 加仓",
-            "src": "§6.2"}
-    return "HOLD", {"kind": "verdict", "text": "无触发条件 → 持有观察", "src": "§7.2 第 8 条"}
+            "text": (f"已封板 {close:.2f}（{drv['cont_days']} 板）→ 进观察名单，"
+                     "但本系统不出买入建议（口径B 打板实测 −1.26%/信号）"),
+            "src": "A 止血 / ADR 0002 复核"}
+    return "HOLD", {
+        "kind": "verdict",
+        "text": "今天没封板 → 不在观察名单",
+        "src": "A 止血 / ADR 0002 复核"}
 
 
 # ── 分档（docs/17 §7.3 + §6.5） ─────────────────────────────────────
@@ -375,17 +402,17 @@ def decide(
     assert close is not None  # _bar 已保证 > 0
 
     # 4) 成本/数量缺省时回落到 position 表（analyze_holdings 场景由调用方先填）。
-    if cost is None or shares is None:
-        pos = holding_store.holding_for(norm)
-        if pos is not None:
-            if cost is None:
-                cost = pos.cost
-            if shares is None:
-                shares = pos.shares
-            inputs["cost"], inputs["shares"] = cost, shares
-            reasons.append({"kind": "input",
-                            "text": f"成本/数量取自 position 在仓快照（{pos.entry_date}）",
-                            "src": "position.status='OPEN'"})
+    #    W10′：无论填不填成本都取一次在仓快照——持仓视角要靠 entry_date 数持有天数。
+    pos = holding_store.holding_for(norm)
+    if pos is not None and (cost is None or shares is None):
+        if cost is None:
+            cost = pos.cost
+        if shares is None:
+            shares = pos.shares
+        inputs["cost"], inputs["shares"] = cost, shares
+        reasons.append({"kind": "input",
+                        "text": f"成本/数量取自 position 在仓快照（{pos.entry_date}）",
+                        "src": "position.status='OPEN'"})
 
     # 4.5) R4 sizing 参数化校验（docs/18 §7.3/§7.4）。
     resolved_sizing, sizing_problems = _resolve_sizing_params(sizing_params)
@@ -434,24 +461,43 @@ def decide(
                         "src": "docs/17 §6.1"})
 
     # 6) 价位 → 7) 数量（R4 sizing 参数化，docs/18 §7.4）。
-    levels = structure_levels(overlays, price_ratio, close=close)
-    reasons.append({"kind": "structure", "text": levels.detail,
-                    "src": f"levels.basis={levels.basis}"})
-    sizing = plan_shares(
-        capital=capital, entry=levels.buy_reference or close,
-        stop=levels.stop_price, amount=amount, board=_sizing_board(norm),
-        risk_pct=resolved_sizing.get("risk_pct", RISK_PCT),
-        liq_pct=resolved_sizing.get("liq_pct", LIQ_PCT),
-        max_position_pct=resolved_sizing.get("max_position_pct", MAX_POSITION_PCT),
-    )
-    if sizing.detail:
-        reasons.append({"kind": "sizing", "text": sizing.detail, "src": f"method={sizing.method}"})
-    if capital is None:
-        reasons.append({"kind": "degrade", "text": "未给总资金 → 只给仓位比例，不给绝对股数",
-                        "src": "docs/17 D2"})
+    #    A 止血（2026-10-21）：**观察视角（无成本）不再算价位与数量**——口径B 打板
+    #    的成交假设被证伪（触及即成交 → 每信号 −1.26%），给出「买点 + 数量」就是
+    #    负期望的操作建议。观察视角只回档位与是否在观察名单，levels/sizing 留空。
+    if cost is not None:
+        levels = structure_levels(overlays, price_ratio, close=close)
+        reasons.append({"kind": "structure", "text": levels.detail,
+                        "src": f"levels.basis={levels.basis}"})
+        sizing = plan_shares(
+            capital=capital, entry=levels.buy_reference or close,
+            stop=levels.stop_price, amount=amount, board=_sizing_board(norm),
+            risk_pct=resolved_sizing.get("risk_pct", RISK_PCT),
+            liq_pct=resolved_sizing.get("liq_pct", LIQ_PCT),
+            max_position_pct=resolved_sizing.get("max_position_pct", MAX_POSITION_PCT),
+        )
+        if sizing.detail:
+            reasons.append({"kind": "sizing", "text": sizing.detail,
+                            "src": f"method={sizing.method}"})
+        if capital is None:
+            reasons.append({"kind": "degrade",
+                            "text": "未给总资金 → 只给仓位比例，不给绝对股数",
+                            "src": "docs/17 D2"})
+    else:
+        levels = _NO_LEVELS
+        sizing = _NO_SIZING
+        reasons.append({
+            "kind": "degrade",
+            "text": ("观察视角不给买点/数量（A 止血：口径B 打板按触及即成交实测"
+                     "每信号 −1.26%，成交后 −2.01%、胜率 50%）"),
+            "src": "ADR 0002 复核 / _audit/probe_fill.py"})
 
-    # 8) 方向
-    action, verdict = _decide_action(stat=stat, drv=drv, cost=cost, close=close, levels=levels)
+    # 8) 方向（W10′：持仓视角看持有天数 + 开盘是否跌停封死；观察视角看当日是否封板）
+    held = (exit_svc.held_days(pos.entry_date, trade_date)
+            if pos is not None and getattr(pos, "entry_date", None) is not None else None)
+    locked = exit_svc.open_locked_limit_down(trade_date, norm)
+    action, verdict = _decide_action(
+        stat=stat, drv=drv, cost=cost, close=close, levels=levels,
+        held=held, locked=locked)
     reasons.insert(0, verdict)
     if stat:
         reasons.append({"kind": "market",
@@ -491,10 +537,18 @@ def decide(
         "cpt_price_ratio": price_ratio,
         "levels_basis": levels.basis,
         "cpt_ensure_used": cpt_ensure_used,
+        # 两视角可审计——持仓视角给持有天数/是否卖不掉；观察视角只给名单状态
+        "view": "position" if cost is not None else "watch",
+        "held_days": held,
+        "open_locked": locked,
+        "advice": cost is not None,   # A 止血：观察视角不发任何买卖指令
     }
     d = Decision(
         code=norm, trade_date=trade_date, action=action,
-        action_label=ACTION_LABELS.get(action, action),
+        action_label=(
+            # 观察视角（无持仓）：动作恒为 HOLD，标签说明「不出建议」
+            "只观察（不出建议）" if cost is None
+            else ACTION_LABELS.get(action, action)),
         market_price=close, pnl_pct=pnl_pct, levels=levels, sizing=sizing,
         ladder=ladder, reasons=tuple(reasons), facts=facts, inputs=inputs,
         cpt_status=(cpt_view or {}).get("status"),

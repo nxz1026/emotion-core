@@ -146,7 +146,7 @@ def test_inherit_yesterday_without_rule_hit():
 
 
 def test_priority_ebb_over_climax():
-    """退潮优先级 > 高潮；退潮 → 窗口 NONE + 清仓。"""
+    """退潮优先级 > 高潮；W7′ 起退潮只影响相位与仓位档，不再禁买/清仓。"""
     series = [_day(date=_D, limit_up_count=85, max_limit_days=6, top_broke=True,
                    bomb_rate=0.1, bomb_threshold=0.3),
               _day(date=_D + timedelta(days=1), limit_up_count=85,
@@ -155,7 +155,7 @@ def test_priority_ebb_over_climax():
     out = emotion.classify(series)
     assert out[0].phase == "高潮"           # 首日 y=None：two_day 分支不成立
     assert out[1].phase == "退潮"           # 断板连两日优先于高潮
-    assert out[1].buy_window == "NONE" and out[1].force_liquidate is True
+    assert out[1].buy_window == "STANDARD" and out[1].force_liquidate is False
 
 
 def test_ferment_uses_two_day_history():
@@ -187,7 +187,7 @@ def test_ice_tags_reversal_and_no_candidate():
 
 
 def test_climax_diverge_downgrade():
-    """高潮 + 负反馈 nb≥3 → 窗口降级 NONE（禁买不清仓），并记 diverge。"""
+    """高潮 + 负反馈 nb≥3 → 只打 diverge 标记（降仓位档），窗口不再压 NONE。"""
     series = [_day(date=_D, limit_up_count=90, max_limit_days=6, bomb_rate=0.2,
                    bomb_threshold=0.3, zt_performance=1.0, limit_down_count=2),
               _day(date=_D + timedelta(days=1), limit_up_count=90,
@@ -195,8 +195,8 @@ def test_climax_diverge_downgrade():
                    zt_performance=0.5, limit_down_count=5, top_broke=True)]
     _, t = emotion.classify(series)
     assert t.phase == "高潮" and t.neg_feedback == 5     # 断板/高度降/炸升/表现降/跌停升
-    assert t.diverge is True and t.buy_window == "NONE"
-    assert t.force_liquidate is False                    # 分歧降级≠退潮清仓
+    assert t.diverge is True and t.buy_window == "ENHANCED"   # W7′：窗口不降，降的是仓位
+    assert t.force_liquidate is False
     assert "高位分歧降级(nb=5)" in t.reason
 
 

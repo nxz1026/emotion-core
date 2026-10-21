@@ -21,9 +21,10 @@ class TestTranslatePhase:
 
 class TestTranslateWindow:
     def test_known_windows(self):
-        assert translate_window("ENHANCED") == "可买入（强度高）"
-        assert translate_window("STANDARD") == "可买入"
-        assert translate_window("NONE") == "禁买"
+        # A 止血：这列只表情绪强度，不再说「可买入 / 禁买」
+        assert translate_window("ENHANCED") == "活跃"
+        assert translate_window("STANDARD") == "一般"
+        assert translate_window("NONE") == "低迷"
 
     def test_unknown_returns_original(self):
         assert translate_window("unknown") == "unknown"

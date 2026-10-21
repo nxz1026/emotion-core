@@ -6,6 +6,76 @@
 
 ## [Unreleased]
 
+### 变更 · 2026-10-21 A 止血：买点/卖点从产品面移除（ADR 0002「复核」+「A 止血」）
+
+> 起因：口径 B 的成交假设复核证伪——`_audit/probe_exec.py` 用「次日收盘仍封住涨停」
+> 当「买到了」，是事后视角；真实打板在**触及涨停那一刻**成交，之后炸板撤不回。
+> 按「触及即成交」重算同一批 375 个信号（同买入价、费后 0.15%）：**每信号 −1.26%**、
+> 成交后 −2.01%、胜率 50%、最差 −34.03%，炸板桶 71 条均亏 15.04%。
+> ⇒ 「盘后决策 + 仅日线」没有正期望的可执行买点。奎爷拍板「先 A 止血，再 B+C」。
+
+- **删除买点产出**（`algorithms/entry.py`）：`buy_point()`、`plan_text()` 及其 `utils.price` 导入；
+  `_INSERT_SQL` 的 `reason` 改 SQL 字面量 `NULL`，参数 9→8；`_persist(sig, window, rows)` 去掉 `reason`。
+- **档位语义降级**：`PositionTier` 标签 满仓/半仓/观望 → **优先/次选/不参与**，`weight` 仅作过滤器
+  （`weight <= 0` 不落记录），不再对用户表达仓位。
+- **内存操作卡**：`domain/signal.py` 删除 `Signal.plan`。
+- **报告**（`algorithms/review/__init__.py`）：⓪ 顶部卡改「市场 / 观察 / 次日验证点」三行并引用
+  −1.26% 实测；⑥ 段「买入信号」→「观察名单」，结论改「只进观察名单；本系统不出买入建议」，
+  删除「卖出建议」逐条渲染；`_sec_trend`/`_sec_overview` 的「能不能买」→「情绪档」；
+  「买入窗口」全库改「情绪档」（`wording.WINDOW_MAP` → 活跃/一般/低迷）。
+- **推送**（`services/notify.py`、`services/signal_service.py`）：`push_buy_signal` **默认关闭**
+  （`EMOTION_PUSH_BUY=1` 才推）；标题「今日观察记录（不出买入建议）」，正文禁买点/卖点/仓位；
+  `_HUMANIZE_BUY_PROMPT` 禁止写成「可以买入」；仅 `action=BUY` 触发推送。
+- **持仓**（`services/holding_service.py`）：观察视角（无成本）恒 `HOLD`「只观察（不出建议）」，
+  `levels=_NO_LEVELS`/`sizing=_NO_SIZING`/`ladder=()`，新增 `facts.advice=False`；
+  持仓视角（有成本）的时间退出（T+2 开盘卖、T+3 强制了结）**保留**。
+- **展示层**：`stock.html`「买点参考」→「打板价（口径B · 已证伪，仅供复盘对照）」、
+  `intuitive.html`「当日推荐」→「当日观察名单」、「买入窗口」→「情绪档」；
+  `stock_service`/`odds_service` 的 disclaimer 与 docstring 标注已证伪；
+  `server._explain_no_buy`、`diagnose_service._WINDOW_TEXT` 同步。
+- **数据**：`signal.reason` 377 行置空（备份 `_audit/pre_cleanup_signal_reason_20261021.csv`）。
+- 测试：2824 passed / 2 skipped；新增守卫 `test_buy_point_and_plan_text_removed`、
+  `test_disabled_by_default`、`test_sealed_board_is_watch_only`。
+
+---
+
+### 变更 · 2026-10-21 策略口径修正（ADR 0002）：退潮解禁 + c3 改身份档 + 买卖点改口径 B
+
+> 起因：奎爷「效果不满意——要给明确的买卖点和时间」。落成可复现数字后发现三处判定与
+> 真实可执行路径脱节，不是阈值松紧问题。实证底稿 `_audit/2026-10-21-修正方案-实测定档.md`，
+> 裁决 `docs/decisions/0002-策略口径修正-退潮解禁与c3定档.md`。
+
+**一、买点/卖点（`algorithms/entry.py`、`algorithms/exit.py`）**
+- 新增 `entry.buy_point(close, code)` = T 日收盘 × 板比（走 `utils/price.limit_up_price_cents` 唯一实现），`entry.plan_text()` 输出「买点 X（T+1 涨停价，盘中封板才成交）；卖点 T+2 开盘无条件卖出…；仓位 …」，并首次写入 `signal.reason`（此前恒 NULL）。
+- `exit.py` 整文件改为口径 B 时间退出：`held_days` / `SELL_AFTER_DAYS=1` / `FORCE_AFTER_DAYS=2`；开盘跌停封死（开盘=收盘=跌停）顺延，T+3 强制了结。**删除** `force_liquidate` 清仓与「断板减仓」两条卖因（实测持有到断板 −1.90%/胜率 38.1%）。
+- 口径依据：T+1 封板价买 → T+2 开盘卖 = **+3.54%/胜率 68%**（n=183，费后 0.15%）；而「T+1 开盘买」是 **−0.71%** 负期望，「T 日收盘买」在盘后买不到（幻觉口径）。
+
+**二、相位（`state.py`、`emotion.py`）**
+- `window_of("退潮")` 由 `("NONE", True)` 改为 `("STANDARD", False)`；`force_liquidate` 恒 False；冰点是唯一禁买相位。
+- 高潮 + 高位分歧**不再把窗口压成 NONE**，只打 `diverge=True` 交给仓位档降级。
+- 依据：退潮日候选每信号期望 +2.31%、封板后胜率 77%（n=169），优于高潮 ENHANCED +1.48%/68%；退潮次日连板高度延续率 0.647 为四相位最高。
+
+**三、c3（`entry.py`、`domain/signal.py`）**
+- `_CONDITIONS` 的 c3 槽位改挂 `c3_identity`（恒 None = 不否决），新增 `c3_tier`（严格胜出/身位延续/新插队）、`position_tier`（仓位矩阵）、`tier_of`（报告与落库同源）。
+- `Signal` 新增内存字段 `plan`（操作卡原文，不入库）。
+- 依据：旧 c3 在 427 个唯一高标日里只有 27 天可能满足，可买日漏斗里 160/181 天被它单独否掉，而 passed=True/False 两组次日涨停率 40.0% vs 42.2%（无信息量）。
+- **BUY 失败后不再进 RECOMMEND 档**（c3 不否决后它与 BUY 等价，实质不可达）；`check_recommend_signal` 保留供直接调用。
+
+**四、报告与推送（`algorithms/review/`、`services/notify.py`）**
+- ⓪ 段顶部新增**操作卡**：市场一行、买一行（代码+票名+绝对买点+卖点时间+仓位档）、卖一行。
+- ①⑫ 段相位/窗口翻人话（新 `algorithms/review/wording.py`，`presentation/translate.py` 转为 re-export 以守住分层）；⑥ 段判据行改人话、取消 c1..c5 代号；`_no_signal_reason` 按相位给原因（冰点/分歧降级/退潮未重算各有各的说法）。
+- BUY 即时推送改走 LLM 改写（`_HUMANIZE_BUY_PROMPT`）：保留代码/票名/价格/仓位档/板数，禁止收益承诺，禁止把「盘中封板才成交」改写成「一定买得到」。
+
+**五、持仓决策两视角（`services/holding_service.py`）**
+- 持仓视角（有成本）只按口径 B 时间退出；查不到建仓日 → 明确说「算不出持有交易日数」，不猜。
+- 观察视角（无成本）买点 = 打板价，当日已封板才 `ADD`（`action_label` 写「打板买入（观察视角）」），分档压成单一档；`price_basis` 新值 `caliber_b_buy_point`。
+- 依据：旧规则「退潮清仓→止损→断板减仓→目标减仓→到买点加仓」把「有没有持仓」混进了方向语义（同一只票填成本叫清仓、不填叫加仓）。
+
+**六、测试与数据**
+- 全量 **2829 passed / 2 skipped**（新增 `tests/caliber/test_c3_identity_semantics.py` 31 例；`test_exit.py` 重写 26 例；`test_holding_service.py` 57 例）。
+- Rust 参考实现（`core/src/{entry,exit,state}.rs`）**有意冻结在旧口径**，由 oracle 测试显式钉住。
+- 数据侧已执行：`emotion.run_range(2026-09-10, 2026-10-20)`（刷新 23 行 `buy_window`）、`replay_service.run(2026-09-25, 2026-10-20)`（3 个新口径信号）、`review.publish` 重出 09-30 与 10-20 报告。**历史全量重算未执行**（需重写 675 行 market_stat + 165 行旧口径 signal，等奎爷发话）。
+
 ### 修复 · 2026-10-19 REA 分析回填：Rust 孪生四处对齐 + `.so` 重建（消除 09-30 漂移）+ 五模块补对账
 
 > 起因：用 REA（`rea-agents@6.5.0`）逆向分析本仓找缺陷，产出 `_audit/2026-10-19-REA分析报告.md`。REA 对 Python 主体无覆盖（无 Python 分析面），但给出 `.so` 身份（sha256 / mtime / 架构 / rustc commit），顺线挖出三处缺陷，用户拍板全部修复。**勘误：初版报告称「本机无 `cargo`/`rustc`」是错的——工具链在 `~/.cargo/bin`，只是不在 `PATH`。**

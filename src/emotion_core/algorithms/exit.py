@@ -1,56 +1,56 @@
-"""T6 卖出建议（PLAN §1.6）：退潮清仓(b) > 断板卖出(a)；高潮/分歧期无建议。
+"""T6 卖出建议（W3′ 口径B）：**T+2 开盘无条件卖**，跌停封死顺延 T+3 强制了结。
 
-语义逐字照搬 lkl/services/exit.py @ eb53a46（docs/07 §3.2 第 4 层，54 行），判定逻辑
-零改动：
-- b 退潮（market_stat.force_liquidate=True）：全部 OPEN 持仓无条件出清仓建议，优先级
-  最高——此分支**不读**当日判据行（退潮当天仍封板的持仓也清）；
-- a 断板：当日 derived_bar 行存在且 is_limit_up=False → 卖出建议（今日未封住）；
-- c 其余（涨停 / 一字 / 当日无判据行）→ 无建议。缺行 = 缺数，**不**当作断板（F6）；
-- 无 market_stat 行（stat=None）→ 不走退潮分支，退化为逐仓断板检查（lkl 同）。
+裁决来源：`_audit/2026-10-21-修正方案-实测定档.md`（奎爷 2026-10-21 批准）。
+旧规则「退潮清仓(b) > 断板卖出(a)」已废止，两条都被实测证伪：
 
-执行语义（契约 v2，lkl REQUIREMENTS §exec）：SELL 恒 exec_hint=CLOSE_ALL =
-「清仓全部持仓」；buy_window 只是**买入口径的市场标签**（退潮期为 NONE），与卖出无关，
-执行器不得以 buy_window=NONE 为由拒单。BUY 侧恒 OPEN_POS（entry 侧）。
+- 退潮清仓：退潮日次日隔夜 +3.53%/胜率 73%（n=168），「退潮→次日」是四个相位里
+  最好的持仓环境（`_audit/probe_phase2.py`）。按相位清仓等于在最好的时候卖。
+- 断板卖出：持有到断板 mean **−1.90%**/胜率 38.1%（n=181，中位持有 1 天），
+  而 T+1 封板买入、T+2 开盘卖出 mean **+3.54%**/胜率 68%（n=183）。
+  alpha 全在隔夜，**持有越久越亏**：T+3 开盘 +2.69%/55%、T+4 开盘 +1.32%/48%
+  （`_audit/probe_exec2.py`）。
 
-与 lkl 的差异（全部是契约/IO 适配，不涉判定规则）：
-1. domain.Signal 是买入口径契约（code/date/action/checklist/source/status），lkl Signal
-   的 reason / buy_window / exec_hint 三列无对应字段；且 SELL 建议**不落库**（signal 表
-   无 exec_hint 列；lkl 的 trade/export、review、dashboard 也是现算现用）。故本模块在
-   算法层补 `SellSignal(Signal)` 子类承载这三列——`isinstance(sig, Signal)` 成立，
-   返回类型仍是 `list[Signal]`；domain/signal.py 补齐卖出契约后即下沉。
-2. 持仓来源：lkl 用 services/position.current()；emotion-core 的 data/loader.py 无
-   position 查询、domain/ 无 Position 类型，本模块自持 SQL + 局部投影 `Holding`
-   （exit 判定只读 code / entry_date 两列）。与 entry._persist / promotion._fetch_pairs
-   同先例：待 loader 补齐后下沉（本次范围限 exit.py + test_exit.py 两文件）。
-3. market_stat：loader.load_market_stat 向 domain.MarketStat 传 bomb_rate /
-   max_limit_days（契约字段是 bomb_count / max_height），调用即 TypeError → 自持 SQL
-   （与 entry.current_window 同因）。返回 dict 而非 MarketStat：本模块只读三列，
-   lkl 亦为 dict（df.iloc[0].to_dict()）。
-4. derived_bar：loader 只有 load_derived_bars（**全日** ~5000 行/次），且其构造对
-   amplitude IS NULL 的行（存量 15 行，全为 688xxx）调 float(None) 即崩；本模块按
-   (date, code) 单行取（lkl 原语句同款粒度），amplitude 缺数留 None（F6 不补 0）。
-5. frozen dataclass：lkl 在 suggestions 里原地改 s.confirm_date，本实现用
-   dataclasses.replace 等价改写——「退潮分支先填开仓日 → suggestions 统一改写为建议日」
-   两步语义逐字保留（单独调 _sell 时 date=开仓日，与 lkl 一致）。
+判定（逐持仓，按 entry_date 之后经过的交易日数 n）：
+- n = 0（建仓当日）→ 无建议（当日买当日不卖）；
+- n = 1（T+2）→ 开盘卖出；若开盘即跌停且全天封死（low == open）→ 顺延，无建议；
+- n ≥ 2（T+3 及以后）→ **强制了结**（原定 T+2 开盘卖，跌停封死顺延后到了结日）；
+- entry_date 无行情（停牌等）→ 按经过的交易日推进，不因缺数跳过规则（F6 只用于判据）。
 
-对账：tests/unit/test_exit.py 逐组合（涨停/断板/一字/退潮/缺行，不连库）；
-真实库差分见交付记录：同 trade_date 与 lkl.services.exit.suggestions 逐字段一致。
+执行语义（契约 v2）：SELL 恒 exec_hint=CLOSE_ALL =「清仓该持仓」；buy_window 与卖出
+无关，执行器不得以 buy_window=NONE 为由拒单。
+
+与 lkl 的差异（全部是契约/IO 适配，判定规则已按 W3′ 重写）：
+1. domain.Signal 无 reason / buy_window / exec_hint 三列，故本模块补 `SellSignal(Signal)`
+   子类承载；SELL 不落库（signal 表无 exec_hint 列），review/dashboard 现算现用。
+2. 持仓来源自持 SQL + 局部投影 `Holding`（只读 code / entry_date 两列）。
+3. market_stat 自持 SQL（loader.load_market_stat 字段不匹配，见 entry.current_window 同因）。
+4. derived_bar 按 (date, code) 单行取（loader 只有全日 ~5000 行接口）。
+5. frozen dataclass：lkl 原地改 s.confirm_date，本实现用 dataclasses.replace。
+
+对账：tests/unit/test_exit.py 逐组合（T+2 卖 / 跌停顺延 / T+3 强制 / 建仓当日 / 缺行，
+不连库）；真实库差分见交付记录。
 """
 
-# ✅ 已有 Rust 实现：src/emotion_core/core/src/exit.rs
-# 本文件保留作为参考实现和对账基准，不删除。
+# ✅ Rust 孪生：src/emotion_core/core/src/exit.rs（旧规则参考实现，生产走本文件）
+# Rust 侧未同步 W3′，oracle 对账范围见 tests/oracle/test_exit_rust_vs_python.py。
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, timedelta
 
 from emotion_core.domain.bar import DerivedBar
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
+from emotion_core.utils.dates import trading_days
 from emotion_core.utils.db import connect_ro
+from emotion_core.utils.price import limit_down_price_cents
 
 # 执行语义常量（契约 v2：SELL=CLOSE_ALL 清仓，BUY=OPEN_POS 开仓）
 EXEC_CLOSE_ALL = "CLOSE_ALL"
+
+# 口径B 持有窗口：建仓日之后第 1 个交易日开盘卖，第 2 个交易日强制了结
+SELL_AFTER_DAYS = 1
+FORCE_AFTER_DAYS = 2
 
 _DERIVED_SQL = """
 SELECT code, date, is_limit_up, is_limit_down, is_one_word, is_exchange,
@@ -58,53 +58,31 @@ SELECT code, date, is_limit_up, is_limit_down, is_one_word, is_exchange,
 FROM derived_bar WHERE date = %s AND code = %s
 """
 
-_STAT_SQL = ("SELECT phase, buy_window, force_liquidate"
-             " FROM market_stat WHERE date = %s")
+_OPEN_SQL = ("SELECT open, low, pre_close, close"
+             " FROM daily_bar WHERE date = %s AND code = %s")
 
 _POSITION_SQL = ("SELECT code, entry_date FROM position"
                  " WHERE status = 'OPEN' ORDER BY entry_date")
 
 # SELL 建议不参与 checklist 判定（lkl 的 SELL 行 checklist 为空）：六项 UNKNOWN。
-# 与 loader.load_signal_history 对历史行的处理同形；Checklist.passed（滤 None 后 all）
-# 空真——只表示「无否决条件」，不代表卖出被任何条件核验过。
+# Checklist.passed（滤 None 后 all）空真——只表示「无否决条件」，不代表卖出被核验过。
 _NO_CHECKLIST = Checklist(c1_uniqueness=None, c2_exchange=None, c3_elimination=None,
                           c4_min_days=None, c5_strength_diverge=None, w1_crowding=None)
 
 
 @dataclass(frozen=True)
 class Holding:
-    """持仓最小投影：exit 判定只读 code / entry_date。
-
-    lkl 用 models.Position（连 entry_price/shares/note 一并取），emotion-core 契约层
-    尚无 Position 类型；domain/position.py 补齐后本类即删。
-    """
+    """持仓最小投影：exit 判定只读 code / entry_date。"""
     code: str
     entry_date: date
 
 
 @dataclass(frozen=True)
 class SellSignal(Signal):
-    """SELL 信号 = domain.Signal + 卖出契约三列（reason / buy_window / exec_hint）。
-
-    domain.Signal 无这三列（见模块文档 §1）；不落库，只供 trade/export（decisions.json
-    的 reason / window / exec）、日报、dashboard 现算现用。
-    """
+    """SELL 信号 = domain.Signal + 卖出契约三列（reason / buy_window / exec_hint）。"""
     reason: str = ""
     buy_window: str = ""
     exec_hint: str = EXEC_CLOSE_ALL
-
-
-def _stat(trade_date: date) -> dict | None:
-    """当日市场状态行（无行 → None）：phase / buy_window / force_liquidate。
-
-    force_liquidate 统一 bool()：lkl 走 pandas 时 NULL 得 None（假值），bool(None)=False
-    与之等价；三列均无 NULL 存量行（实测 661 行）。
-    """
-    with connect_ro() as conn:
-        row = conn.execute(_STAT_SQL, (trade_date,)).fetchone()
-    if row is None:
-        return None
-    return {"phase": row[0], "buy_window": row[1], "force_liquidate": bool(row[2])}
 
 
 def _derived(trade_date: date, code: str) -> DerivedBar | None:
@@ -118,6 +96,33 @@ def _derived(trade_date: date, code: str) -> DerivedBar | None:
                       is_exchange=bool(r[5]), is_bomb=bool(r[6]),
                       touched_limit=bool(r[7]), cont_days=int(r[8]),
                       amplitude=None if r[9] is None else float(r[9]))
+
+
+def _open_bar(trade_date: date, code: str) -> tuple[float, float, float | None, float] | None:
+    """当日 (open, low, pre_close, close)；无行 → None。pre_close 缺数留 None（不补算）。"""
+    with connect_ro() as conn:
+        r = conn.execute(_OPEN_SQL, (trade_date, code)).fetchone()
+    if r is None:
+        return None
+    return (float(r[0]), float(r[1]),
+            None if r[2] is None else float(r[2]), float(r[3]))
+
+
+def _open_locked_limit_down(trade_date: date, code: str) -> bool:
+    """开盘即跌停且**收盘仍在跌停**（全天封死）→ 卖不掉。
+
+    只看开盘不够：开盘跌停后盘中撬开是有成交的，开盘价卖得掉。判「封死」要求
+    开盘价与收盘价都在跌停价（low ≤ open 恒成立，不提供额外信息）。
+    缺数按「卖得掉」处理（保守：宁可给卖出建议，不静默顺延）。
+    """
+    bar = _open_bar(trade_date, code)
+    if bar is None:
+        return False
+    op, _low, pre_close, close = bar
+    if pre_close is None or pre_close <= 0:
+        return False
+    ld = limit_down_price_cents(int(round(pre_close * 100)), code) / 100
+    return op <= ld + 1e-9 and close <= ld + 1e-9
 
 
 def _open_positions() -> list[Holding]:
@@ -135,26 +140,44 @@ def _sell_signal(code: str, when: date, reason: str, buy_window: str) -> SellSig
                       exec_hint=EXEC_CLOSE_ALL)
 
 
-def _sell(pos: Holding, stat: dict | None, day: DerivedBar | None) -> SellSignal | None:
-    """退潮(b) 或 断板(a) 卖出建议；c 规则=无建议。
+def held_days(entry_date: date, trade_date: date) -> int:
+    """entry_date 之后到 trade_date（含）经过的交易日数；trade_date ≤ entry_date → 0。
 
-    exec_hint=CLOSE_ALL（契约 v2）：SELL 语义=清仓全部持仓，执行器
-    不得再以 window=NONE 为由拒单——window 是买入口径，与卖出无关。
+    n=1 即口径B 的 T+2 卖出日，n≥2 是强制了结日。
     """
-    if stat and stat["force_liquidate"]:
-        return _sell_signal(pos.code, pos.entry_date, "退潮期清仓建议", "NONE")
-    if day is not None and not day.is_limit_up:
-        return _sell_signal(pos.code, day.date,
-                            f"断板建议（原{day.cont_days or ''}连板今日未封）", "")
-    return None
+    if trade_date <= entry_date:
+        return 0
+    days = trading_days(entry_date + timedelta(days=1), trade_date)
+    return len(days)
+
+
+def open_locked_limit_down(trade_date: date, code: str) -> bool:
+    """公开入口：当日开盘跌停封死（卖不掉）。与持仓卖出建议共用同一判据。
+
+    holding_service 的持仓视角也要回答「今天能不能卖」，必须同源，否则
+    报告说「顺延」而持仓面板说「卖出」，两边打架。
+    """
+    return _open_locked_limit_down(trade_date, code)
+
+
+def _sell(pos: Holding, trade_date: date) -> SellSignal | None:
+    """口径B 卖出建议：T+2 开盘卖 / 跌停封死顺延 / T+3 强制了结。"""
+    n = held_days(pos.entry_date, trade_date)
+    if n <= 0:
+        return None
+    if n >= FORCE_AFTER_DAYS:
+        return _sell_signal(
+            pos.code, trade_date,
+            f"强制了结（口径B：原定建仓后第{SELL_AFTER_DAYS}个交易日开盘卖，"
+            f"已持有{n}个交易日）", "")
+    if _open_locked_limit_down(trade_date, pos.code):
+        return None          # 开盘跌停封死，卖不掉 → 顺延到下一交易日（届时强制了结）
+    day = _derived(trade_date, pos.code)
+    hit = "开盘卖出" if day is None or not day.is_limit_up else "开盘卖出（昨日封板也照卖）"
+    return _sell_signal(pos.code, trade_date,
+                        f"T+2 {hit}（口径B：隔夜 alpha 收敛，不持有到断板）", "")
 
 
 def suggestions(trade_date: date) -> list[Signal]:
-    """当日全部卖出建议：退潮优先，否则逐仓断板检查。"""
-    stat = _stat(trade_date)
-    open_pos = _open_positions()
-    if stat and stat["force_liquidate"]:
-        out = [s for p in open_pos if (s := _sell(p, stat, None))]
-        # lkl：s.confirm_date = trade_date —— 退潮建议的日期是建议日，不是开仓日
-        return [replace(s, date=trade_date) for s in out]
-    return [s for p in open_pos if (s := _sell(p, None, _derived(trade_date, p.code)))]
+    """当日全部卖出建议：逐持仓按口径B 的持有天数判定。"""
+    return [s for p in _open_positions() if (s := _sell(p, trade_date))]
