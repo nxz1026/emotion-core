@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 import jinja2
 
+from emotion_core.lab import cpt_watch
 from emotion_core.lab import db as labdb
 
 log = logging.getLogger(__name__)
@@ -98,7 +99,11 @@ def _proposals(conn: Any) -> list[dict[str, Any]]:
     return [] if df.empty else df.to_dict("records")
 
 
-def _alarms(base: dict[str, Any] | None, variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _alarms(
+    base: dict[str, Any] | None,
+    variants: list[dict[str, Any]],
+    watch: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """退化报警：只用能算的事实，不编阈值。"""
     out: list[dict[str, Any]] = []
     if not base:
@@ -157,6 +162,32 @@ def _alarms(base: dict[str, Any] | None, variants: list[dict[str, Any]]) -> list
                 "detail": "这些格子只看方向，不看数字：" + "、".join(sorted(thin)[:6]),
             }
         )
+    if watch is not None and not watch.get("ready"):
+        streak = watch.get("streak") or 0
+        required = watch.get("required") or 0
+        recent = [d for d in (watch.get("days") or [])[-3:]]
+        detail = "；".join(
+            f"{d['day']} ok {d['ok']}/error {d['error']}/skipped {d['skipped']}"
+            for d in recent
+        )
+        out.append(
+            {
+                "level": "warn",
+                "title": f"CPT 盘中采集观察期未满：连续干净 {streak}/{required} 个交易日",
+                "detail": (
+                    "闸门未过 → 本仓不建 intraday_quote/trigger_log、不起采集器。"
+                    f"最近几天：{detail}。口径：当日无 error 且成功轮数达标才算干净。"
+                ),
+            }
+        )
+    if watch is not None and watch.get("ready"):
+        out.append(
+            {
+                "level": "ok",
+                "title": f"CPT 盘中采集观察期已满：连续 {watch.get('streak')} 个交易日干净",
+                "detail": "ADR 0003 §D10 闸门通过，可以进入建表 + 起采集器那一步（需另一次拍板）。",
+            }
+        )
     stale = [v for v in variants if v.get("variant_id") != BASELINE_ID and v.get("status") == "active"]
     if stale:
         out.append(
@@ -169,12 +200,22 @@ def _alarms(base: dict[str, Any] | None, variants: list[dict[str, Any]]) -> list
     return out
 
 
+def _cpt_watch(conn: Any) -> dict[str, Any] | None:
+    """CPT 盘中采集观察期（ADR 0003 §D10 闸门）。取不到就返回 None，不编。"""
+    try:
+        return cpt_watch.evaluate(conn, with_dashboard=False).as_dict()
+    except Exception as exc:  # noqa: BLE001 - 监控失败不该拖垮整页
+        log.warning("CPT 观察期监控失败：%s", exc)
+        return None
+
+
 def _ctx() -> dict[str, Any]:
     conn = labdb.connect_lab()
     try:
         base = _row_score(conn, BASELINE_ID)
         variants = _all_variants(conn)
         proposals = _proposals(conn)
+        watch = _cpt_watch(conn)
     finally:
         conn.close()
     return {
@@ -182,7 +223,8 @@ def _ctx() -> dict[str, Any]:
         "base": base,
         "variants": variants,
         "proposals": proposals,
-        "alarms": _alarms(base, variants),
+        "alarms": _alarms(base, variants, watch),
+        "watch": watch,
         "min_n": MIN_N,
         "stat_label": _STAT_LABEL,
     }

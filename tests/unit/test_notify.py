@@ -439,12 +439,15 @@ class TestPushBuySignal:
         posted = []
         monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
+        # 关掉 LLM 改写：格式化器输出的是「0 板」（带空格），改写后空格取决于模型 ⇒
+        # 断言会随模型变而变。这里只验格式化层，板数渲染由它负责。
+        monkeypatch.setattr(notify, "_humanize_alert", lambda t, kind="daily": t)
         notify.reset_buy_dedup()
 
         notify.push_buy_signal("000017", "测试龙", 0, "STANDARD",
                                 self._cl(), date(2026, 10, 10))
         body = posted[0]["kw"]["json"]["content"]["text"]
-        assert "0板" in body
+        assert "0 板" in body or "0板" in body
 
 
 class TestHumanizeAlert:

@@ -49,6 +49,29 @@
 {% endif %}
 
 <h2>② 退化与风险</h2>
+{% if watch %}
+<div class="lab-sub">
+  <span>观察期闸门：<strong>连续干净 {{ watch.streak }}/{{ watch.required }} 个交易日</strong> → {% if watch.ready %}已过，可以开工{% else %}未过，本仓不建表不起进程{% endif %}</span>
+  <span>日志：<code>{{ watch.log_path }}</code></span>
+</div>
+<table class="data-table">
+  <thead><tr><th>日期</th><th>轮次</th><th>ok</th><th>empty</th><th>error</th><th>skipped</th><th>干净</th></tr></thead>
+  <tbody>
+  {% for d in watch.days|reverse %}
+    <tr class="{% if not d.clean %}dim{% endif %}">
+      <td>{{ d.day }}</td>
+      <td class="num">{{ d.rounds }}</td>
+      <td class="num">{{ d.ok }}</td>
+      <td class="num">{{ d.empty }}</td>
+      <td class="num {% if d.error %}neg{% endif %}">{{ d.error }}</td>
+      <td class="num">{{ d.skipped }}</td>
+      <td>{{ "是" if d.clean else "否" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">口径：当日无 error 且成功轮数 ≥10 才算干净；empty 不算失败；skipped 计入「没采到」但不算失败。交易日以 trade_calendar.is_open 为准（不看 daily_bar —— 日线盘后才写，盘中看它必然以为今天休市）。</p>
+{% endif %}
 <ul class="lab-alarms">
   {% for a in alarms %}
     <li class="lab-alarm {{ a.level }}">

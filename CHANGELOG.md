@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+### 功能 · 2026-10-22 CPT 观察期可观测化（ADR 0003 §D10 条件②）
+
+- 原口径「盘中定时任务连续 5 个交易日无失败」不可观测（只能人肉翻日志数 error），
+  且太松 —— 采集器每轮 `skipped` 时同样「一条 error 都没有」但一天没采到东西
+  （2026-10-22 实测 CPT 侧真踩了：第一版 `trading_day()` 读 `max(date) FROM daily_bar`，
+  而日线盘后才写 ⇒ 盘中恒判休市；CPT 侧已修为读 `trade_calendar.is_open`）。
+- 新增 `src/emotion_core/lab/cpt_watch.py`（只读）：按「交易日 × 轮次」判定，
+  交易日看 `trade_calendar.is_open`；当日 `error`=0 且 `ok` 轮数 ≥10 才算干净；
+  `empty` 不算失败；今天盘中未收盘不计入连续串。
+  CLI `python -m emotion_core.lab.cpt_watch`（退出码 0 = 闸门已过）；Lab 页 :8091
+  加观察期小节与逐日表；单测 `tests/unit/test_lab_cpt_watch.py`（16 例）。
+- ADR 0003 §D10 就地改写「② 的可观测化」小节，头部状态同步。
+
 ### 修复 · 2026-10-22 盘中判据板比（跨仓对账查出真 bug）
 
 - `algorithms/intraday.py::board_pct_limit` 判定顺序改为「创业板/科创 → 北交所 → 主板ST → 其余」：
