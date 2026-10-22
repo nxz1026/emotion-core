@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-22 盘中判据板比（跨仓对账查出真 bug）
+
+- `algorithms/intraday.py::board_pct_limit` 判定顺序改为「创业板/科创 → 北交所 → 主板ST → 其余」：
+  原先 ST 判定在最前，北交所 ST 落到 20%，会算出**偏低的涨停价** ⇒ 「已经封板」被误判成
+  「还没到板」（方向比漏报更糟）。跨仓 probe 实测 `limit_price` 不一致 40 条、`is_at_limit`
+  不一致 60 条，全部是 `920xxx` + ST 名组合。已加 `tests/oracle/test_intraday_rules_vs_cpt.py` 逐条钉住。
+
+### 功能 · 2026-10-22 盘中 provider 第一层（CPT 接入）
+
+- 新增 `data/providers/sina_quote.py`：纯 stdlib 批量五档（新浪），与 CPT
+  `SinaQuoteClient.fetch_quotes` 逐字段对账（`tests/oracle/test_intraday_quote_vs_cpt.py`），
+  作对照 + CPT 采集器上线前的生产路径。
+- 新增 `data/providers/cpt_intraday.py`：读 CPT 落库表的预留口，**表不存在返回 `None` 不炸**
+  （表还没建是正常状态）。
+- ADR 0003 更新：§D10 的「CPT 稳定」改成可验证标准（连续 5 个交易日 `cpt-dashboard` 无 error
+  + 盘中定时任务无失败）；新增 §F 记录第一层落地与「本层没做什么」。
+
+
 ### 功能 · 2026-10-21 Lab P2 上线（参数化 + 搜索 + 七道门禁）
 
 - `algorithms/state.py` 新增 `StateRules`(frozen) / `DEFAULT_RULES`，四个规则函数与
