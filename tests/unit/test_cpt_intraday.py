@@ -1,7 +1,12 @@
 """`cpt_intraday` provider 单测：读 CPT 的封板结论表（ADR 0003 §H）。
 
 表是 `public.intraday_seal_snapshot`（5 列：at / code / sealed / bid1_lots /
-limit_price），不是 §G 里的 13 列 `intraday_quote`。
+limit_price），不是 §G 里的 13 列 `intraday_quote`。读表三条铁律见
+`Chan_Pattern_Trader/docs/intraday-seal-contract.md` §3：
+
+1. 没行 = 判不了，不是「没封板」
+2. `sealed=False` 是采到了且这轮没封，要和「没采到」分开
+3. 按 `at` 取最新一轮，不按 code 单点查最新
 """
 
 from __future__ import annotations
@@ -114,6 +119,48 @@ class TestRows:
         assert out is not None
         assert set(out) == {"000002"}
 
+    def test_round_at_survives_code_filter(self, monkeypatch):
+        """过滤不该抹掉「这一轮存在」—— `round_at` 仍要给出。"""
+        at = "2026-10-22 09:20:36+00:00"
+        rows = [(at, "600293", True, 100.0, 10.19)]
+        monkeypatch.setattr(ci, "connect_ro", _fake_conn(rows, list(ci._COLUMNS)))
+        got = ci.fetch_round_from_cpt(["999999"])
+        assert got == (at, {})
+
+
+class TestSealedState:
+    """契约 §3 第 1、2 条 + §7 最后一行的三态判定。"""
+
+    def test_no_row_is_unknown_not_false(self):
+        """没行 = 判不了，**不是**没封板。"""
+        assert ci.sealed_state(None) is None
+
+    def test_sealed_true(self):
+        assert ci.sealed_state({"sealed": True, "bid1_lots": 100.0}) is True
+
+    def test_sealed_false_with_bid_is_real_open(self):
+        """采到了、这轮没封，且档位在 → 是真开板证据。"""
+        assert ci.sealed_state({"sealed": False, "bid1_lots": 5.0}) is False
+
+    def test_sealed_false_without_bid_is_unknown(self):
+        """停牌 / 缺档位：`sealed=False` 且 `bid1_lots` 为 NULL → 判不了。"""
+        assert ci.sealed_state({"sealed": False, "bid1_lots": None}) is None
+
+    def test_missing_sealed_is_unknown(self):
+        assert ci.sealed_state({"bid1_lots": 5.0}) is None
+
+
+class TestBid1VolumeUnit:
+    def test_lots_to_shares(self):
+        assert ci.bid1_vol_shares({"bid1_lots": 847522.54}) == pytest.approx(84752254.0)
+
+    def test_missing_is_none_not_zero(self):
+        assert ci.bid1_vol_shares({"bid1_lots": None}) is None
+        assert ci.bid1_vol_shares(None) is None
+
+    def test_shares_per_lot_constant(self):
+        assert ci.SHARES_PER_LOT == 100
+
 
 def test_select_sql_only_takes_latest_round():
     """SQL 必须按 `at = max(at)` 取整轮 —— 不能按 code 单点查最新（§H.3 第 3 条）。"""
@@ -123,9 +170,17 @@ def test_select_sql_only_takes_latest_round():
 
 
 def test_columns_match_h2_ddl():
-    """列清单必须与 ADR §H.2 的表结构逐字对齐。"""
+    """列清单必须与 ADR §H.2 / 契约 §1 的表结构逐字对齐（只有 5 列）。"""
     assert ci._COLUMNS == ("at", "code", "sealed", "bid1_lots", "limit_price")
     assert ci.CPT_INTRADAY_TABLE == "intraday_seal_snapshot"
+
+
+def test_docstring_states_three_reading_rules():
+    """三条读表铁律必须写在模块 docstring 里（改代码时别把它删了）。"""
+    doc = ci.__doc__ or ""
+    assert "没行 = 判不了" in doc
+    assert "sealed=False` 是采到了且这一轮没封" in doc
+    assert "按 `at` 分组取最新一轮" in doc
 
 
 if __name__ == "__main__":  # pragma: no cover
