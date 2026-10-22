@@ -20,6 +20,7 @@ class TestSchema:
             "ref_limit_state", "ref_limit_state_run",
             "ref_security_status_event", "ref_security_status_window",
             "ops_raw_manifest", "ops_quota_ledger",
+            "trigger_log",
         }
         assert set(schema.DDL.keys()) == expected
 
@@ -40,6 +41,15 @@ class TestSchema:
 
     def test_daily_bar_pk(self):
         assert "PRIMARY KEY (CODE, DATE)" in schema.DDL["daily_bar"].upper()
+
+    def test_trigger_log_pk_and_columns(self):
+        """ADR 0003 §D2：盘中台账 15 列，主键 (date, code)。"""
+        ddl = schema.DDL["trigger_log"].upper()
+        assert "PRIMARY KEY (DATE, CODE)" in ddl
+        for col in ("FIRST_SEAL_TS", "TRIGGER_PRICE", "SEAL_BID1_VOL", "BROKE_TS",
+                    "CLOSED_SEALED", "PREV_DAYS", "ENTRY_PX", "EXIT_PX", "ROLLED",
+                    "RET_PCT", "SETTLED_AT"):
+            assert col in ddl, f"trigger_log 缺列 {col}"
 
     def test_stock_basic_pk(self):
         assert "CODE         TEXT PRIMARY KEY" in schema.DDL["stock_basic"].upper()

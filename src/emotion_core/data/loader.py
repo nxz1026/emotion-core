@@ -107,7 +107,7 @@ def load_signal_history(limit: int = 200) -> list[Signal]:
 def load_ladder_candidates(d: date) -> list[tuple[str, int, bool]]:
     """梯队候选行 (code, cont_days, is_exchange)：主板 + 剔 ST + cont_days>=2。
 
-    口径 = lkl/services/ladder.py build() 的 WHERE 子句：主板 7 前缀（R3）、
+    口径 = lkl/services/ladder.py build() 的 WHERE 子句：主板 8 前缀（R3 + 2026-10-22 补 003）、
     次新剔除（W2，first_bar_date 缺失也剔）、整体剔 ST（C5）。
     """
     ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
@@ -315,3 +315,65 @@ def upsert_market_stat(stat: MarketStat) -> int:
              stat.bomb_count, stat.limit_down_count, stat.max_height,
              stat.force_liquidate, stat.bomb_threshold, stat.has_candidate),
         ).rowcount
+
+
+# ── 盘中触发台账（trigger_log，ADR 0003 §D2/§D6）────────────────────────────
+# 写入口径：首次触发为准（ON CONFLICT DO NOTHING）。同一只票当天可能被多轮
+# 扫描命中，但「第一次封板的时刻与价格」是事实，后到的轮次不能覆盖它 ——
+# 否则台账会变成「最后一次扫描时它还封着吗」，那是另一件事（由结算列表达）。
+
+_TRIGGER_INSERT_SQL = """
+    INSERT INTO trigger_log
+      (date, code, name, first_seal_ts, trigger_price, seal_bid1_vol, prev_days, entry_px)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (date, code) DO NOTHING
+"""
+
+_TRIGGER_SETTLE_SQL = """
+    UPDATE trigger_log SET
+      broke=%s, broke_ts=%s, closed_sealed=%s,
+      exit_px=%s, rolled=%s, ret_pct=%s, settled_at=now()
+    WHERE date=%s AND code=%s
+"""
+
+
+def insert_triggers(rows: list[dict]) -> int:
+    """写入盘中触发行（幂等：已存在的 (date, code) 不覆盖）。返回写入行数。
+
+    每行键：date/code/name/first_seal_ts/trigger_price/seal_bid1_vol/prev_days/entry_px。
+    `entry_px` 与 `trigger_price` 目前都等于封板价——分开存是为了将来若有
+    「触发价 ≠ 成交价」（例如排队没成交）时不用改表。
+    """
+    if not rows:
+        return 0
+    data = [(r["date"], r["code"], r.get("name"), r.get("first_seal_ts"),
+             r.get("trigger_price"), r.get("seal_bid1_vol"), r.get("prev_days"),
+             r.get("entry_px")) for r in rows]
+    with transaction() as conn, conn.cursor() as cur:
+        cur.executemany(_TRIGGER_INSERT_SQL, data)
+        return cur.rowcount
+
+
+def load_triggers(d: date, *, unsettled_only: bool = False) -> list[dict]:
+    """读某日触发台账（settle 与报告共用）。"""
+    sql = ("SELECT date, code, name, first_seal_ts, trigger_price, seal_bid1_vol,"
+           " broke, broke_ts, closed_sealed, prev_days, entry_px, exit_px,"
+           " rolled, ret_pct, settled_at FROM trigger_log WHERE date = %s")
+    if unsettled_only:
+        sql += " AND settled_at IS NULL"
+    sql += " ORDER BY code"
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(sql, (d,))
+        cols = [c.name for c in cur.description]
+        return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
+
+
+def save_settlements(rows: list[dict]) -> int:
+    """回填结算列（broke/closed_sealed/exit_px/rolled/ret_pct/settled_at）。"""
+    if not rows:
+        return 0
+    data = [(r["broke"], r.get("broke_ts"), r["closed_sealed"], r.get("exit_px"),
+             r.get("rolled"), r.get("ret_pct"), r["date"], r["code"]) for r in rows]
+    with transaction() as conn, conn.cursor() as cur:
+        cur.executemany(_TRIGGER_SETTLE_SQL, data)
+        return cur.rowcount

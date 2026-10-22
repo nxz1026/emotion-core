@@ -20,7 +20,11 @@ class Config:
 
     # ── 标的池（lkl config.py BOARD_PREFIXES / NEW_ISSUER_FILTER）──
     # D1/R3：梯队与龙头限主板 10%；情绪计数仍走全市场（不在本文件控制）。
-    BOARD_PREFIXES: tuple[str, ...] = ("600", "601", "603", "605", "000", "001", "002")
+    # 2026-10-22 补 "003"（深市主板新号段）：库内 42 只、664 根涨停 bar，
+    # 此前被整体漏在候选池外。改值会让 config_hash() 换代（新写入的
+    # signal/pipeline_state 带新指纹，历史行保留旧值），历史口径需重跑。
+    BOARD_PREFIXES: tuple[str, ...] = (
+        "600", "601", "603", "605", "000", "001", "002", "003")
     LIMIT_RATIO: float = 0.10
     LIMIT_PCT_BY_PREFIX: dict[str, int] = field(
         default_factory=lambda: {"68": 120, "30": 120})

@@ -9,6 +9,7 @@
 - 判据：`derived_bar` `limit_pool_em`
 - 市场：`market_stat` `promotion_day` `ladder_day` `trade_calendar`
 - 信号：`signal` `signal_outcome` `strategy_signal`
+- 盘中：`trigger_log`（ADR 0003，盘中触发台账 + 收盘结算）
 - 交易：`position` `trade_event` `holding_decision`（R3 持仓决策快照，见 docs/17）
 - 报告：`review_report` `eval_result`
 - 题材：`theme_tag` `theme_group` `theme_spot`
@@ -272,6 +273,28 @@ DDL: dict[str, str] = {
             source       text NOT NULL DEFAULT 'sina_concept',
             PRIMARY KEY (date, node)
         )""",
+    # ADR 0003 §D2：盘中触发台账（常驻采集器写；--settle 收盘回填结算列）。
+    # 与 CPT 的 `intraday_seal_snapshot` 分工：那张归 CPT（只存封板结论），
+    # 这张归本仓（存本仓判据算出的触发 + 事后结算）。两张表都由建表方手工初始化。
+    "trigger_log": """
+        CREATE TABLE IF NOT EXISTS trigger_log (
+            date           date     NOT NULL,
+            code           text     NOT NULL,
+            name           text,
+            first_seal_ts  time,
+            trigger_price  numeric(12,2),
+            seal_bid1_vol  bigint,
+            broke          boolean,
+            broke_ts       time,
+            closed_sealed  boolean,
+            prev_days      integer,
+            entry_px       numeric(12,2),
+            exit_px        numeric(12,2),
+            rolled         boolean,
+            ret_pct        numeric(8,3),
+            settled_at     timestamp,
+            PRIMARY KEY (date, code)
+        )""",
     "strategy_signal": """
         CREATE TABLE IF NOT EXISTS strategy_signal (
             trade_date   date NOT NULL,
@@ -502,6 +525,7 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_derived_bar_limit ON derived_bar (date, is_limit_up)",
     "CREATE INDEX IF NOT EXISTS idx_ladder_day_date ON ladder_day (date)",
     "CREATE INDEX IF NOT EXISTS idx_signal_date ON signal (confirm_date)",
+    "CREATE INDEX IF NOT EXISTS idx_trigger_log_date ON trigger_log (date)",
     "CREATE INDEX IF NOT EXISTS idx_theme_group_date ON theme_group (date)",
     "CREATE INDEX IF NOT EXISTS idx_theme_spot_date ON theme_spot (date)",
     "CREATE INDEX IF NOT EXISTS idx_strategy_signal_date ON strategy_signal (trade_date)",

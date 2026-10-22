@@ -52,7 +52,10 @@ def test_board_prefixes_are_mainboard_only():
     for p in ("4", "8", "92", "bj"):
         assert not any(x.startswith(p) for x in CONFIG.BOARD_PREFIXES), (
             f"最高板/梯队口径混入北交所前缀 {p}")
-    assert len(CONFIG.BOARD_PREFIXES) == 7
+    # 2026-10-22 补深市主板 003 号段（此前整段漏在候选池外，见 docs/15「003 补录」）。
+    # 钉成显式元组而不是 == 7，是为了让「加主板号段」必须改这一行 —— 北交所仍进不来。
+    assert CONFIG.BOARD_PREFIXES == ("600", "601", "603", "605",
+                                     "000", "001", "002", "003")
 
 
 def test_counts_maxh_limited_to_mainboard_and_reads_derived_bar(monkeypatch):

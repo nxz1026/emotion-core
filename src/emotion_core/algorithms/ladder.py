@@ -5,7 +5,8 @@
 SQL 住 data/loader.py（架构纪律：SQL 唯一住所，docs/11 §4、loader 模块文档）。
 
 口径：
-- 标的池 = 主板 7 前缀 + 次新剔除 + 整体剔 ST（CONFIG.BOARD_PREFIXES / NEW_ISSUER_*，
+- 标的池 = 主板 8 前缀 + 次新剔除 + 整体剔 ST（CONFIG.BOARD_PREFIXES / NEW_ISSUER_*，
+  「003」为 2026-10-22 补入的深市主板新号段；
   R3/C5/W2）。不能简化成「全市场 cont_days>=2」：实测 lkl 661 天历史里 417 天会多出
   创业板/科创板/北交所行，另 32 天会多出未过 90 自然日的次新。
 - is_top = 换手板（is_exchange）最高身位组成员；一字缩量板不进最高层竞争

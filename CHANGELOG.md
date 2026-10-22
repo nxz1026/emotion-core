@@ -6,6 +6,28 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-23 补录深市主板 003 号段（含全量重算）
+
+`CONFIG.BOARD_PREFIXES` 从 7 个前缀补到 8 个（`+ "003"`）。此前 003 开头的深市主板票
+**整段没进候选池**：42 只票、28,411 根日线、664 根涨停 bar 从未参与过梯队与情绪判定。
+
+- `algorithms/promotion.py` 里复制的一份 7 前缀硬编码改为 `tuple(CONFIG.BOARD_PREFIXES)`（单一来源）
+- 全量重算：`ladder_day` 8810 → 8965 行（+155）、`signal` BUY 377 → **380**、`signal_outcome` complete 447
+- 新增 3 条 BUY 全来自 003；2026-10-20 的结论从「今天没有符合条件的连板龙头」变成
+  `003029 吉大正元 —— 硬条件全过`
+- `config_hash` 换代 → `fdbd6541cbc4`（历史行保留旧指纹，属预期）
+
+### 功能 · 2026-10-23 盘中台账 `trigger_log` + 收盘结算 `--settle`
+
+ADR 0003 第二层的前半截（建表 + 结算），常驻采集器仍不建。
+
+- `data/schema.py` 新增 `trigger_log`（十五列，PK `(date, code)`，索引 `idx_trigger_log_date`），库里已建（15 列 / 0 行）
+- `data/loader.py`：`insert_triggers`（`ON CONFLICT DO NOTHING`，首次触发为准）、`load_triggers`、`save_settlements`
+- `services/intraday_watch.py`：`--settle` 按口径 B 结算 —— 卖点 T+1 开盘、跌停封死顺延 T+2（`rolled`）、
+  两天都封死不写 `exit_px`、`ret_pct` 扣双边费 0.15%
+- 常驻单元 `emotion-intraday.service` 暂不创建：CPT 交付只有 5 列，缺 `price/prev_close/chg_pct/name`，
+  本仓判据算不了（ADR 0003 §H.3 缺口①）
+
 ### 变更 · 2026-10-22 盘中 provider 改读 CPT 实际交付表（ADR 0003 §H.4）
 
 - CPT 实际交付的不是 §G 的 13 列 `intraday_quote`，而是 5 列结论表

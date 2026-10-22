@@ -37,8 +37,9 @@ from emotion_core.utils.db import connect
 
 log = logging.getLogger(__name__)
 
-# 标的池：主板（R1/R3 梯队限主板，与 lkl config.BOARD_PREFIXES 一致）
-BOARD_PREFIXES: tuple[str, ...] = ("600", "601", "603", "605", "000", "001", "002")
+# 标的池：主板（R1/R3 梯队限主板）。**单一来源 = CONFIG.BOARD_PREFIXES**
+# （2026-10-22 去掉本文件里的副本：副本漏了 003，会让 Promotion 与梯队不同池）
+BOARD_PREFIXES: tuple[str, ...] = tuple(CONFIG.BOARD_PREFIXES)
 
 # 层定义：(标签, 昨日板数下限, 昨日板数上限 None=不封顶)
 PROMOTION_LAYERS: tuple[tuple[str, int, int | None], ...] = (
