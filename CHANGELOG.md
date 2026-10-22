@@ -18,6 +18,10 @@
 - `bid1_lots` 单位是**手**，本仓 `SEAL_BID1_VOL_MIN` 是股，比较前须 ×100（写进模块 docstring 与单测）。
 - `tests/unit/test_cpt_intraday.py` 按新表结构重写（7 例，含「SQL 必须是 `at = max(at)`」与
   「列清单与 §H.2 逐字对齐」两条防回归）。
+- 当日 23:30 按 CPT 的 `docs/intraday-seal-contract.md` §3 定稿（该文件现为读表口径的权威来源）：
+  新增 `sealed_state()` 三态判定（**没行 = 判不了**，`sealed=False` 且 `bid1_lots` 为 NULL
+  也是判不了，都不许当开板证据）、`bid1_vol_shares()` + `SHARES_PER_LOT = 100`（手→股）、
+  修 `round_at` 被 code 过滤抹成 `None` 的缺陷；单测扩到 17 例。
 - `trigger_log` 仍未建（数据源已就位，等拍板后与 `--settle`、常驻单元一组动作落地）。
 
 ### 功能 · 2026-10-22 CPT 观察期可观测化（ADR 0003 §D10 条件②）
