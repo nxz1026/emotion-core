@@ -50,3 +50,9 @@ target/
 
 # Lab 实验缓存（面板/回放产物，本地重建）
 var/
+
+# 探针产物：CSV / 标准输出 / 运行日志都是脚本跑出来的，可由 `_audit/*.py` 重跑。
+# 只忽略生成物，探针脚本本身入库（ADR 里每个数字都指得回某个 probe）。
+_audit/*.csv
+_audit/*.out
+_audit/*.log
