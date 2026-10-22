@@ -62,6 +62,16 @@ def _fake_conn(rows, names):
 
     return factory
 
+    def test_sentinel_rows_are_excluded(self):
+        """契约 §9：哨兵行（code 以 0x01 开头）必须在两处都排除。
+
+        只在主查询过滤是不够的 —— `max(at)` 子查询若不过滤，哨兵行会把最新一轮
+        的 at 顶掉，整轮真票被遮蔽（CPT R91 实测）。
+        """
+        flat = " ".join(ci._SELECT_SQL.split()).lower()
+        assert flat.count("code not like e'\\x01%'") == 2
+        assert "select max(at) from intraday_seal_snapshot where code not like" in flat
+
 
 class TestTableMissing:
     def test_returns_none_when_table_absent(self, monkeypatch):
@@ -165,8 +175,8 @@ class TestBid1VolumeUnit:
 def test_select_sql_only_takes_latest_round():
     """SQL 必须按 `at = max(at)` 取整轮 —— 不能按 code 单点查最新（§H.3 第 3 条）。"""
     sql = " ".join(ci._SELECT_SQL.split()).lower()
-    assert "at = (select max(at)" in sql
-    assert "order by code" in sql
+    assert "at = ( select max(at)" in sql
+    assert sql.endswith("order by code")
 
 
 def test_columns_match_h2_ddl():

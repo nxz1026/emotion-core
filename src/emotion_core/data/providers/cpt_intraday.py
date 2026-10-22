@@ -30,6 +30,10 @@ limit_price double precision 本轮用的涨停价（存下来自证口径）
 补充：`at` 是 UTC，**算「当天」一律按北京日切**（分界 UTC 16:00 = 北京次日 00:00）；
 单轮 HTTP 失败 = 这一轮没行，**轮次缺失 ≠ 开板**。
 
+再补充（契约 §9）：表里可能出现**哨兵行**（`code` 以 `0x01` 开头，测试直接写真库的残留）。
+本文件的 `_SELECT_SQL` 已在子查询与主查询两处排除；自己写裸 SQL 读这张表时必须照做，
+否则 `max(at)` 只会读到那一行假的，整轮真票被遮蔽。
+
 ## 本 provider 只做「读」
 
 - **封板与否由 CPT 判**，本仓不再用 `algorithms/intraday.py` 重算 CPT 来的数据
@@ -74,10 +78,19 @@ _COLUMNS: Final[tuple[str, ...]] = ("at", "code", "sealed", "bid1_lots", "limit_
 SHARES_PER_LOT: Final[int] = 100
 
 #: 只取最新一轮：`at` 是整轮的时间戳，同一轮内所有 code 共享同一个值。
+# 契约 §9：生产表里可能出现哨兵行（测试直接写真库时留下的 `code` 以 0x01 开头）。
+# 裸 SQL 读方必须自己排除 —— 否则 `SELECT max(at)` 只会读到那 1 行假的，
+# 整轮 33 只真实票被遮蔽（CPT R91 实测过）。子查询与主查询都得过滤。
+_SENTINEL_PATTERN: Final[str] = r"E'\x01%'"
+
 _SELECT_SQL: Final[str] = f"""
 SELECT {", ".join(_COLUMNS)}
 FROM {CPT_INTRADAY_TABLE}
-WHERE at = (SELECT max(at) FROM {CPT_INTRADAY_TABLE})
+WHERE at = (
+    SELECT max(at) FROM {CPT_INTRADAY_TABLE}
+     WHERE code NOT LIKE {_SENTINEL_PATTERN}
+)
+  AND code NOT LIKE {_SENTINEL_PATTERN}
 ORDER BY code
 """
 
