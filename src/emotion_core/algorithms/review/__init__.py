@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from emotion_core.algorithms import entry, exit as exit_svc, ladder, reconcile
+from emotion_core.algorithms import (caliber_b, entry, exit as exit_svc, ladder,
+                                      phase_persistence, reconcile)
 from emotion_core.algorithms import theme as theme_svc
 from emotion_core.algorithms.review.utils import (
     _CHECKS, _MARK, _atomic_write, _counter_items, _delta_of,
@@ -567,6 +568,15 @@ def _orphan_adoptions() -> list[dict]:
     return df.to_dict("records") if not df.empty else []
 
 
+def _phase_persistence_line(d: dict) -> str:
+    """相位持续性一句话；算不出来返回空串（这一句是锦上添花，不能拖垮 ① 段）。"""
+    try:
+        res = phase_persistence.persistence(d["date"])
+    except Exception:  # noqa: BLE001 — 展示失败不许影响报告
+        return ""
+    return phase_persistence.line(res)
+
+
 def _sec_emotion(d: dict) -> str:
     """① 情绪面板：指标 + 阶段（R2：区分当日触发/历史延续）+ 加速横幅。"""
     if not d["stat"]:
@@ -588,7 +598,9 @@ def _sec_emotion(d: dict) -> str:
             + f"\n\n{tail}"
             + ("\n\n⚠ **退潮清仓信号生效**" if s["force_liquidate"] else "")
             + banner
-            + f"\n\n**为什么这么判**：{_human_state_reason(s)}\n")
+            + f"\n\n**为什么这么判**：{_human_state_reason(s)}"
+            + (f"\n\n**这个相位还能撑多久**：{_phase_persistence_line(d)}" if _phase_persistence_line(d) else "")
+            + "\n")
 
 
 #: 市场相位触发词 → 人话（`market_stat.reason` 括号里那句话）。
@@ -864,11 +876,60 @@ def _sec_advice(d: dict) -> str:
     lines += _sec_secondary_block(d.get("secondary_signal"))
     # A 止血：不再给卖出指令。口径B 的买入前提已废（打板成交即负期望），
     # 按口径B 排出来的「T+2 开盘卖」就失去依据；持仓明细仍由 ⑩/对账段如实列出。
+    lines += _sec_review(d)
     if d["positions"]:
         lines.append("**持仓**：本系统不再给买卖指令（口径B 复核证伪，见 ADR 0002）。"
                      "若你仍按旧口径在建仓后第 1 个交易日开盘离场，那是你自己的纪律，"
                      "不在本报告的建议范围内。")
     return "\n".join(lines) + _hot_of(d) + _sec_reconcile_pos(d) + "\n"
+
+
+_REVIEW_SIGNALS = 30
+"""⑥ 段「事后对照」取最近多少条观察记录（= 最近 N 条 BUY 行，不是 N 个自然日）。"""
+
+
+def _fmt_signed(v: float | None, unit: str = "%") -> str:
+    """带符号的数值；缺数给 —（不填 0）。"""
+    if v is None:
+        return "—"
+    return f"{v:+.2f}{unit}"
+
+
+def _sec_review(d: dict) -> list[str]:
+    """⑥ 段尾部：把最近 N 条观察记录按口径B 重算一遍（事后对照，不给建议）。"""
+    try:
+        df = caliber_b.evaluate(_REVIEW_SIGNALS)
+        summary = caliber_b.summarize(df)
+    except Exception as exc:  # noqa: BLE001 — 度量失败不许拖垮报告
+        return ["", f"**事后对照**：这轮算不出来（{type(exc).__name__}: {exc}）"]
+    if not summary["n"]:
+        return ["", "**事后对照**：`signal` 表里还没有可评估的观察记录"]
+
+    groups = summary["groups"]
+    base = next((g for g in groups if g["group"] == "全部"), None)
+    if base is None:
+        return ["", "**事后对照**：这轮算不出来（没有分组结果）"]
+    filled_n = sum(1 for x in df["filled"].tolist() if x is True)
+    out = ["", f"**事后对照（口径B）**：最近 {summary['n']} 条观察记录，"
+               f"按「当时真打板买入」重算一遍（买点=次日涨停价、触及即成交、"
+               f"T+2 开盘卖、费后 0.15%）——{summary['n']} 条里 {filled_n} 条能买到，"
+               f"每信号 {_fmt_signed(base['mean'])}，买到后 {_fmt_signed(base['mean_filled'])}"]
+    keep = ["全部"] + [g["group"] for g in groups
+                       if g["group"] in ("退潮", "高潮", "发酵", "冰点",
+                                         "严格胜出", "身位延续", "新插队")]
+    rows = [g for name in keep for g in groups if g["group"] == name]
+    if rows:
+        out += ["", "| 分组 | 条数 | 成交率 | 每信号 | 成交后 | 成交胜率 |",
+                "|---|---|---|---|---|---|"]
+        for g in rows:
+            out.append(f"| {g['group']} | {g['n']} | {g['fill_rate']:.0f}% | "
+                       f"{_fmt_signed(g['mean'])} | {_fmt_signed(g['mean_filled'])} | "
+                       f"{g['win_rate_filled'] if g['win_rate_filled'] is not None else '—'}% |")
+        out.append("")
+        out.append("> 口径B 的成交假设是「T+1 盘中触及涨停即成交」——炸板撤不回，"
+                   "所以这是真实可执行的算法，也是它必然为负的原因（ADR 0002）。"
+                   "未成交的条目按 0 计入「每信号」，同时单列成交率。")
+    return out
 
 
 def _sec_secondary_block(sec: dict | None) -> list[str]:

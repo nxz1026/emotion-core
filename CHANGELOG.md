@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### 功能 · 2026-10-23 观察记录的事后对照（口径B）+ 相位持续性
+
+报告 ⑥ 段新增「事后对照（口径B）」：把最近 30 条观察记录按「当时真打板买入」重算一遍，
+给成交率、每信号期望、成交后期望与分组表（全部/相位/身份档）。全史 379 条：成交率 62.8%、
+每信号 −1.251%、成交后 −1.992%，与 Lab 基线同向同量级。
+
+- 新增 `algorithms/caliber_b.py`（触及即成交、T+2 开盘卖、跌停封死顺延、费 0.15%、右截断单列）
+- 新增 `algorithms/phase_persistence.py`：① 段末尾加「退潮已连续 4 天；历史上第 4 天的退潮，次日仍退潮 24/28 次（86%）」
+- **口径修正**：`presentation/server.py::_load_negative_expectation()` 原读 `signal_outcome.rule_ret_a`（断板卖，已废止口径，≈ −4.28%）→ 改口径B（≈ −1.25%）
+- 单测 22 例（`tests/unit/test_caliber_b.py`、`tests/unit/test_phase_persistence.py`）
+
 ### 修复 · 2026-10-23 补录深市主板 003 号段（含全量重算）
 
 `CONFIG.BOARD_PREFIXES` 从 7 个前缀补到 8 个（`+ "003"`）。此前 003 开头的深市主板票

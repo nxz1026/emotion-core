@@ -457,36 +457,30 @@ def _load_intuitive_data(trade_date=None) -> dict:
 
 
 def _load_negative_expectation() -> dict:
-    """从 signal_outcome 聚合历史负期望数据（P1-2 审计修复）。
+    """历史负期望（口径B）：所有观察记录按「当时真打板买入」重算的结果。
 
     返回 {"mean": float|None, "median": float|None, "n": int, "hit_rate": float|None}。
     数据不足时各字段为 None，模板侧自行降级。
+
+    A 止血后**不再用 `signal_outcome.rule_ret_a`**（那是已废止的「断板次日开盘卖」
+    口径），改用 `algorithms.caliber_b`：买点=次日涨停价、触及即成交、T+2 开盘卖、
+    费后 0.15%。两者差得很大（rule_ret_a ≈ −4.28%，口径B ≈ −1.25%），用旧数字
+    会让人以为系统比实际更差——同样不能用。
     """
-    from emotion_core.utils.db import query_df
-    df = query_df(
-        "SELECT count(*) AS n, "
-        "avg(rule_ret_a) AS mean_a, "
-        "percentile_cont(0.5) WITHIN GROUP (ORDER BY rule_ret_a) AS median_a "
-        "FROM signal_outcome WHERE rule_ret_a IS NOT NULL"
-    )
-    if df.empty:
+    from emotion_core.algorithms import caliber_b
+    try:
+        summary = caliber_b.summarize(caliber_b.evaluate(None))
+    except Exception as exc:  # noqa: BLE001 — 页面不许因为度量失败而 500
+        log.warning("负期望聚合失败：%s: %s", type(exc).__name__, exc)
         return {"mean": None, "median": None, "n": 0, "hit_rate": None}
-    row = df.iloc[0]
-    n = int(row["n"])
-    if n == 0:
+    groups = summary.get("groups") or []
+    base = next((g for g in groups if g["group"] == "全部"), None)
+    if not base or not base["n"]:
         return {"mean": None, "median": None, "n": 0, "hit_rate": None}
-    mean_a = round(float(row["mean_a"]), 2) if row["mean_a"] is not None else None
-    median_a = round(float(row["median_a"]), 2) if row["median_a"] is not None else None
-    # 胜率：rule_ret_a > 0 的占比
-    hit_df = query_df(
-        "SELECT count(*) AS pos FROM signal_outcome "
-        "WHERE rule_ret_a IS NOT NULL AND rule_ret_a > 0"
-    )
-    if not hit_df.empty and n > 0:
-        hit_rate = round(int(hit_df.iloc[0]["pos"]) / n * 100, 1)
-    else:
-        hit_rate = None
-    return {"mean": mean_a, "median": median_a, "n": n, "hit_rate": hit_rate}
+    # mean 是「每信号」（未成交算 0），median/hit_rate 用「成交后」——
+    # 每信号的中位恒为 0（六成信号买不到），摆出来会读成「不赚不赔」。
+    return {"mean": base["mean"], "median": base.get("median_filled"),
+            "n": base["n"], "hit_rate": base.get("win_rate_filled")}
 
 
 def _explain_no_buy(phase: str, market: dict, signal_counts: dict) -> str:
