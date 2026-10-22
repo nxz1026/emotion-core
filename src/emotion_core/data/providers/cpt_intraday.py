@@ -33,23 +33,30 @@ log = logging.getLogger("emotion_core.data.providers.cpt_intraday")
 
 __all__ = ["CPT_INTRADAY_TABLE", "CptIntradayProvider", "fetch_quotes_from_cpt"]
 
-#: CPT 落表名（ADR 0003 D2）。**表还没建** —— 读不到就返回 None。
+#: CPT 落表名（ADR 0003 D2/G）。**表还没建** —— 读不到就返回 None。
+#: ⚠️ CPT 建表时**必须按 ADR 0003 §D2 的 DDL 建**（列名/单位/可空性），
+#: 否则这里读不到列。列清单见 `_COLUMNS`。
 CPT_INTRADAY_TABLE: Final[str] = "intraday_quote"
 
 #: 一次取多少行（取最近若干帧的同一批票）。
 DEFAULT_LIMIT: Final[int] = 500
 
 #: 读取列。缺列 → 返回 None 并记 warning（CPT 改表是它的事，本仓不猜）。
+#: 读取列。**必须与 ADR 0003 §D2 的 DDL 对齐** —— CPT 落表时按那张表建。
 _COLUMNS: Final[tuple[str, ...]] = (
-    "code",
+    "date",
     "ts",
-    "last",
-    "prev_close",
-    "bid1_price",
-    "bid1_vol",
-    "ask1_price",
-    "ask1_vol",
+    "code",
     "name",
+    "price",
+    "prev_close",
+    "chg_pct",
+    "bid1",
+    "bid1_vol",
+    "ask1",
+    "ask1_vol",
+    "at_limit",
+    "src",
 )
 
 _SELECT_SQL: Final[str] = f"""

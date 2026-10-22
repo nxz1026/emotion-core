@@ -29,19 +29,23 @@ class TestTableMissing:
 class TestRows:
     def test_latest_frame_wins(self, monkeypatch):
         rows = [
-            ("600519", "2026-10-21 10:00:00", 1300.0, 1301.0, 1299.0, 100.0, 1301.0, 50.0, "茅台"),
-            ("600519", "2026-10-21 09:59:00", 1290.0, 1291.0, 1289.0, 200.0, 1291.0, 60.0, "茅台"),
+            ("2026-10-21", "10:00:00", "600519", "茅台", 1300.0, 1301.0, 0.1,
+             1299.0, 100.0, 1301.0, 50.0, True, "sina"),
+            ("2026-10-21", "09:59:00", "600519", "茅台", 1290.0, 1291.0, 0.1,
+             1289.0, 200.0, 1291.0, 60.0, False, "sina"),
         ]
         names = [d.name for d in _cols()]
         monkeypatch.setattr(ci, "connect_ro", _fake_conn(rows, names))
         out = ci.fetch_quotes_from_cpt(["600519"])
         assert out is not None
-        assert out["600519"]["last"] == 1300.0
+        assert out["600519"]["price"] == 1300.0
 
     def test_filter_by_codes(self, monkeypatch):
         rows = [
-            ("600519", "2026-10-21 10:00:00", 1300.0, 1301.0, 1299.0, 100.0, 1301.0, 50.0, "茅台"),
-            ("000002", "2026-10-21 10:00:00", 3.4, 3.5, 3.4, 10.0, 3.5, 20.0, "万科"),
+            ("2026-10-21", "10:00:00", "600519", "茅台", 1300.0, 1301.0, 0.1,
+             1299.0, 100.0, 1301.0, 50.0, True, "sina"),
+            ("2026-10-21", "10:00:00", "000002", "万科", 3.4, 3.5, 0.1,
+             3.4, 10.0, 3.5, 20.0, False, "sina"),
         ]
         names = [d.name for d in _cols()]
         monkeypatch.setattr(ci, "connect_ro", _fake_conn(rows, names))
