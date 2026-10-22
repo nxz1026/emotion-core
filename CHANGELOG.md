@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+### 变更 · 2026-10-22 盘中 provider 改读 CPT 实际交付表（ADR 0003 §H.4）
+
+- CPT 实际交付的不是 §G 的 13 列 `intraday_quote`，而是 5 列结论表
+  `public.intraday_seal_snapshot`（`at` / `code` / `sealed` / `bid1_lots` / `limit_price`），
+  存的是 CPT 侧 `seal_strength()` 的判定结果。
+- `src/emotion_core/data/providers/cpt_intraday.py` 改读该表：`_SELECT_SQL` 用
+  `WHERE at = (SELECT max(at) ...)` **取整轮**（§H.3 第 3 条：按 code 单点查最新会把
+  「上一轮封着、这一轮开板」读成两只票）；新增 `fetch_round()` 返回 `(round_at, {code: record})`。
+  保留原契约：表不存在 → `None`（不是故障），表在但无轮次 → `{}`。
+- `bid1_lots` 单位是**手**，本仓 `SEAL_BID1_VOL_MIN` 是股，比较前须 ×100（写进模块 docstring 与单测）。
+- `tests/unit/test_cpt_intraday.py` 按新表结构重写（7 例，含「SQL 必须是 `at = max(at)`」与
+  「列清单与 §H.2 逐字对齐」两条防回归）。
+- `trigger_log` 仍未建（数据源已就位，等拍板后与 `--settle`、常驻单元一组动作落地）。
+
 ### 功能 · 2026-10-22 CPT 观察期可观测化（ADR 0003 §D10 条件②）
 
 - 原口径「盘中定时任务连续 5 个交易日无失败」不可观测（只能人肉翻日志数 error），
