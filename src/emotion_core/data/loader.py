@@ -368,6 +368,21 @@ def load_triggers(d: date, *, unsettled_only: bool = False) -> list[dict]:
         return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
 
 
+def pending_trigger_dates(before: date) -> list[date]:
+    """返回 ``before`` 之前还有未结算触发的日期（升序）。
+
+    结算不是「结今天」而是「结所有还欠着的」：D 日盘中触发的卖出价是
+    D+1 的开盘，而 D+1 的日线要等 D+1 盘后 pipeline 才落库 —— 所以
+    结账天然滞后一天。只结「今天」会永远漏掉昨天那批（2026-10-23 实测：
+    5 条触发在 15:05 结 0 条，因为当时 D+1 的日线还不存在）。
+    """
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT date FROM trigger_log "
+            "WHERE settled_at IS NULL AND date < %s ORDER BY date", (before,))
+        return [row[0] for row in cur.fetchall()]
+
+
 def save_settlements(rows: list[dict]) -> int:
     """回填结算列（broke/closed_sealed/exit_px/rolled/ret_pct/settled_at）。"""
     if not rows:

@@ -144,6 +144,21 @@ def settle(d: date, *, dry_run: bool = False) -> dict[str, Any]:
             "pending": len(triggers) - len(rows), "rows": rows}
 
 
+
+def settle_pending(*, as_of: date | None = None, dry_run: bool = False) -> list[dict[str, Any]]:
+    """结算**所有**历史欠账（`as_of` 之前的未结算日期），逐日调 `settle`。
+
+    为什么不是只结今天：D 日盘中触发的卖出价是 D+1 开盘，D+1 的日线要等
+    D+1 盘后才落库，所以结账天然滞后一天。常驻循环每天只结「今天」，昨天
+    那批就永远停在 `settled_at IS NULL`（2026-10-23 实测：5 条触发，15:05
+    结 0 条，且此后不会再被任何一次「结今天」碰到）。
+    """
+    today = as_of or date.today()
+    out: list[dict[str, Any]] = []
+    for d in loader.pending_trigger_dates(today):
+        out.append(settle(d, dry_run=dry_run))
+    return out
+
 #: 北京时区（CPT 的 `at` 是 UTC，交易日/时刻都要先换算再判）
 _BJ = ZoneInfo("Asia/Shanghai")
 
@@ -178,7 +193,9 @@ STALE_MINUTES: Final[int] = 8
 ALARM_GAP_SEC: Final[int] = 1800
 
 #: 收盘后自动结算的时刻（北京）。盘中不结 —— 收盘价都还没定。
-SETTLE_AFTER: Final[time] = time(15, 5)
+#: 自动结算的起跑时刻（北京）。15:05 是错的：D 日触发的卖出价是 D+1 开盘，
+#: 而 D+1 的日线要等 D+1 盘后 pipeline（17:20）才落库 —— 15:05 去结必然是「待定 N 条」。
+SETTLE_AFTER: Final[time] = time(17, 35)
 
 
 def prev_days_of(d: date, codes: Iterable[str]) -> dict[str, int | None]:
@@ -430,8 +447,9 @@ def loop(
       1. **卡死告警**：最新一轮距今超过 `STALE_MINUTES` 分钟就推一条告警
          （同类告警 `ALARM_GAP_SEC` 内不重复）。没有这条，CPT 挂一上午
          本进程只会「读不到就跳过」，台账不长也没人知道。
-      2. **收盘自动结算**：过了 `SETTLE_AFTER` 且当天还没结过 → 跑一次
-         `settle` 并推汇总。没有这条，台账会永远停在 `settled_at IS NULL`。
+      2. **收盘自动结算**：过了 `SETTLE_AFTER`（17:35，等盘后 pipeline 落日线）
+         且当天还没结过 → `settle_pending` 把所有欠账日期一起结掉并推汇总。
+         没有这条，台账会永远停在 `settled_at IS NULL`。
 
     `max_rounds`/`sleep`/`now_fn` 只给单测用（生产由 systemd 常驻）。
     """
@@ -455,12 +473,16 @@ def loop(
         if not active:
             if now.time() >= SETTLE_AFTER and settled != now.date():
                 try:
-                    res = settle(now.date(), dry_run=dry_run)
+                    done_rows = settle_pending(as_of=now.date(), dry_run=dry_run)
                     settled = now.date()
-                    log.info("收盘结算：触发 %d 条，结算 %d 条，待定 %d 条",
-                             res["triggers"], res["settled"], res["pending"])
-                    if res["triggers"]:
-                        _alarm(_settle_text(res))
+                    total = sum(r["triggers"] for r in done_rows)
+                    ok_n = sum(r["settled"] for r in done_rows)
+                    left = sum(r["pending"] for r in done_rows)
+                    log.info("收盘结算：%d 天欠账，触发 %d 条，结算 %d 条，待定 %d 条",
+                             len(done_rows), total, ok_n, left)
+                    if total:
+                        _alarm(f"[emotion-core] 盘中触发结算：{len(done_rows)} 天 / "
+                               f"触发 {total} 条 · 结算 {ok_n} 条 · 待定 {left} 条")
                 except Exception:  # noqa: BLE001 - 结算失败不该让循环退出
                     log.exception("收盘结算失败，明天再试")
             wait(IDLE_SEC)

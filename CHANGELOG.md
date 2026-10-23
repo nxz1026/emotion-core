@@ -6,6 +6,11 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-23 盘中触发结算的时刻与范围
+
+- `SETTLE_AFTER` 15:05 → **17:35**：D 日触发的卖出价是 D+1 开盘，日线要等 D+1 盘后 pipeline 才落库，15:05 结必然「待定」。
+- 新增 `loader.pending_trigger_dates()` 与 `intraday_watch.settle_pending()`：结**所有欠账日期**，不再只结「今天」（只结今天会让昨天的触发永远停在 `settled_at IS NULL`）。
+
 ### 修复 · 2026-10-23 常驻进程的午休假警与开盘前假警
 
 - `SESSION_WINDOWS` 按 CPT 采集窗口拆成 `09:25–11:32` / `12:58–15:05`，午休不扫也不判新鲜度；新增 `ALARM_GRACE_UNTIL = 09:35`（首轮落库前不报）。

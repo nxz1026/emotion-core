@@ -556,46 +556,71 @@ class TestAlarmGrace:
 
 
 class TestLoopSettle:
-    """收盘自动结算：只在过了 SETTLE_AFTER 且当天没结过时跑一次。"""
+    """收盘自动结算：过了 SETTLE_AFTER（17:35）且当天没结过时跑一次欠账结算。"""
 
     def test_settles_once_after_close(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: True)
         calls: list[date] = []
 
-        def fake_settle(d, *, dry_run=False):
-            calls.append(d)
-            return {"date": d, "triggers": 2, "settled": 2, "pending": 0}
+        def fake_pending(*, as_of=None, dry_run=False):
+            calls.append(as_of)
+            return [{"date": as_of, "triggers": 2, "settled": 2, "pending": 0}]
 
-        monkeypatch.setattr(w, "settle", fake_settle)
+        monkeypatch.setattr(w, "settle_pending", fake_pending)
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         tz = ZoneInfo("Asia/Shanghai")
         times = iter([
-            datetime(2026, 10, 23, 15, 30, tzinfo=tz),
-            datetime(2026, 10, 23, 16, 0, tzinfo=tz),
+            datetime(2026, 10, 23, 17, 40, tzinfo=tz),
+            datetime(2026, 10, 23, 18, 10, tzinfo=tz),
         ])
         w.loop(max_rounds=2, sleep=lambda s: None, now_fn=lambda: next(times))
-        assert calls == [date(2026, 10, 23)]
-        assert len(alarms) == 1 and "已结算 2026-10-23" in alarms[0]
+        assert calls == [date(2026, 10, 23)]      # 同一天只结一次
+        assert len(alarms) == 1 and "结算 2 条" in alarms[0]
 
     def test_no_settle_before_close(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: False)
         calls: list[date] = []
-        monkeypatch.setattr(w, "settle", lambda d, **kw: calls.append(d))
+        monkeypatch.setattr(w, "settle_pending",
+                            lambda **kw: calls.append(kw.get("as_of")) or [])
         tz = ZoneInfo("Asia/Shanghai")
         w.loop(max_rounds=1, sleep=lambda s: None,
-               now_fn=lambda: datetime(2026, 10, 23, 15, 0, tzinfo=tz))
+               now_fn=lambda: datetime(2026, 10, 23, 17, 0, tzinfo=tz))
         assert calls == []
 
     def test_no_settle_when_nothing_triggered(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: False)
-        monkeypatch.setattr(w, "settle",
-                            lambda d, **kw: {"date": d, "triggers": 0, "settled": 0, "pending": 0})
+        monkeypatch.setattr(w, "settle_pending", lambda **kw: [])
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         tz = ZoneInfo("Asia/Shanghai")
         w.loop(max_rounds=1, sleep=lambda s: None,
-               now_fn=lambda: datetime(2026, 10, 23, 16, 0, tzinfo=tz))
+               now_fn=lambda: datetime(2026, 10, 23, 18, 0, tzinfo=tz))
         assert alarms == []
+
+
+class TestSettlePending:
+    """结账要结「所有欠账」，不是只结今天。"""
+
+    def test_settles_every_pending_date_in_order(self, monkeypatch):
+        d1, d2 = date(2026, 10, 22), date(2026, 10, 23)
+        monkeypatch.setattr(loader, "pending_trigger_dates", lambda before: [d1, d2])
+        seen: list[date] = []
+
+        def fake_settle(d, *, dry_run=False):
+            seen.append(d)
+            return {"date": d, "triggers": 1, "settled": 1, "pending": 0, "rows": []}
+
+        monkeypatch.setattr(w, "settle", fake_settle)
+        out = w.settle_pending(as_of=date(2026, 10, 26))
+        assert seen == [d1, d2]
+        assert [r["date"] for r in out] == [d1, d2]
+
+    def test_nothing_pending_is_noop(self, monkeypatch):
+        monkeypatch.setattr(loader, "pending_trigger_dates", lambda before: [])
+        monkeypatch.setattr(w, "settle", lambda d, **kw: pytest.fail("不该结算"))
+        assert w.settle_pending(as_of=date(2026, 10, 26)) == []
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
