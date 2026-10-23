@@ -69,13 +69,19 @@ def test_ebb_beats_climax_on_the_same_day():
 
 
 def test_no_hit_inherits_yesterday_and_seed_is_ice():
-    """无命中继承昨日；首日无命中 → 冰点基线；两连炸板才判退潮。"""
+    """无命中继承昨日；首日无命中 → 冰点基线；两连炸板 + 跌停潮才判退潮。"""
     d1 = dm(D0, limit_up_count=90)                     # 高潮
     d2 = dm(D0 + timedelta(days=1))                    # 无命中 → 继承高潮
     d3 = dm(D0 + timedelta(days=2), top_broke=True)    # 首日炸板：two_day 需昨日也炸 → 继承
-    d4 = dm(D0 + timedelta(days=3), top_broke=True)    # 连续两日炸板 → 退潮
+    d4 = dm(D0 + timedelta(days=3), top_broke=True,
+            limit_down_count=20)                       # 两连炸板 + 跌停潮 → 退潮
     out = state.classify_series([d1, d2, d3, d4])
     assert [s.phase for s in out] == ["高潮", "高潮", "高潮", "退潮"]
+
+    # N4：同样两连炸板，但当天跌停只有 5 家 → 不判退潮，继承昨日
+    d5 = dm(D0 + timedelta(days=3), top_broke=True, limit_down_count=5)
+    out2 = state.classify_series([d1, d2, d3, d5])
+    assert out2[-1].phase == "高潮"
     assert out[0].buy_window == "ENHANCED"
     assert out[1].buy_window == "ENHANCED" and out[1].force_liquidate is False
     assert out[2].buy_window == "ENHANCED" and out[2].force_liquidate is False

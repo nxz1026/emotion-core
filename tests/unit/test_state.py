@@ -64,9 +64,16 @@ class TestWindowOf:
 
 class TestRuleEbb:
     def test_two_day_broke(self):
-        t = make_metrics(date(2024, 6, 15), top_broke=True)
-        y = make_metrics(date(2024, 6, 14), top_broke=True)
+        # N4：两连炸板 + 跌停潮（> EBB_LD_MIN=15）才成立
+        t = make_metrics(date(2024, 6, 15), top_broke=True, limit_down_count=20)
+        y = make_metrics(date(2024, 6, 14), top_broke=True, limit_down_count=8)
         assert _rule_ebb(t, y, None) is True
+
+    def test_two_day_broke_without_limit_down_wave(self):
+        """N4：两连炸板但当天跌停没到 15 家 → 不算退潮（旧口径这里会判退潮）。"""
+        t = make_metrics(date(2024, 6, 15), top_broke=True, limit_down_count=8)
+        y = make_metrics(date(2024, 6, 14), top_broke=True, limit_down_count=6)
+        assert _rule_ebb(t, y, None) is False
 
     def test_perf_below_threshold(self):
         # EBB_ZT_PERF = -2.0, so need zt_performance < -2.0

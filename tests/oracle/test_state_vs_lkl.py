@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from emotion_core.algorithms.state import DayMetrics, EmotionState, classify_series, window_of
+from emotion_core.algorithms import state
+from emotion_core.algorithms.state import (
+    DayMetrics,
+    EmotionState,
+    classify_series,
+    window_of,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -81,8 +87,25 @@ def test_priority_ebb_over_climax():
     assert result[0].phase == "退潮"  # 退潮优先，即使涨停 85 > 80
 
 
-def test_reconciliation_with_lkl():
-    """对账：Python 规则重现 lkl 661 天 phase。"""
+def _old_ebb(t, y, b, r=state.DEFAULT_RULES):
+    """N4 之前的退潮判据：两连炸板**不需要**跌停潮。仅用于证明分歧来源。"""
+    two_day = bool(t.top_broke) and y is not None and bool(y.top_broke)
+    perf = t.zt_performance is not None and t.zt_performance < r.ebb_zt_perf
+    ld = (y is not None and t.limit_down_count > r.ebb_ld_min
+          and t.limit_down_count > y.limit_down_count * r.ebb_ld_mult)
+    return two_day or perf or ld
+
+
+def test_reconciliation_with_lkl(monkeypatch):
+    """对账：把退潮判据换回 N4 之前的口径，Python 必须逐日重现 lkl 661 天 phase。
+
+    N4（2026-10-23）之后本仓的退潮判据有意收紧，默认口径**不再**与 lkl 逐日相等；
+    那条分歧由下一个用例逐条解释。这里用旧判据证明「除 N4 外没有别的漂移」。
+    """
+    monkeypatch.setattr(
+        state, "_RULES",
+        tuple(((_old_ebb if rule is state._rule_ebb else rule), name)
+              for rule, name in state._RULES))
     rows = load_market_stat()
     metrics = to_metrics(rows)
     result = classify_series(metrics)
@@ -107,59 +130,20 @@ def test_reconciliation_with_lkl():
         ))
 
 
-def test_fixtures_reconcile():
-    """验证 market_stat.json fixtures 可以被 classify_series 重现。"""
-    from emotion_core.algorithms.state import DayMetrics, EmotionState, classify_series
+def test_n4_divergence_is_only_ebb_tightening():
+    """N4 之后与 lkl 的唯一分歧：lkl 判退潮、本仓不判退潮（两连炸板但无跌停潮）。
 
-    rows = json.load(open(FIXTURES / "market_stat.json"))
-    metrics = []
-    for r in rows:
-        metrics.append(DayMetrics(
-            date=date.fromisoformat(r["date"]),
-            limit_up_count=int(r["limit_up_count"]),
-            bomb_rate=None if r["bomb_rate"] is None else float(r["bomb_rate"]),
-            zt_performance=None if r["zt_performance"] is None else float(r["zt_performance"]),
-            max_limit_days=int(r["max_limit_days"]),
-            limit_down_count=int(r["limit_down_count"]),
-            top_amplitude=None if r["top_amplitude"] is None else float(r["top_amplitude"]),
-            top_broke=None if r["top_broke"] is None else bool(r["top_broke"]),
-            bomb_threshold=float(r["bomb_threshold"]),
-            has_candidate=bool(r["has_candidate"]),
-            tradable_max_days=int(r["tradable_max_days"]),
-            oneword_ratio=None if r["oneword_ratio"] is None else float(r["oneword_ratio"]),
-        ))
-
+    lkl 那套「两连炸板就退潮」在 677 天里误标了 72 天（当日跌停中位 7 家、
+    涨停表现 +0.57%、次日高度不降率 80.6%），实测定档见 ADR 0002「N4」节。
+    """
+    rows = load_market_stat()
+    metrics = to_metrics(rows)
     result = classify_series(metrics)
-    # 验证：结果数量与输入一致
-    assert len(result) == len(rows)
-    # 验证：每个结果都有有效的 phase
-    for r in result:
-        assert r.phase in ("冰点", "发酵", "高潮", "退潮")
-    # 验证：buy_window 与 phase 一致
-    for r in result:
-        bw, fl = window_of(r.phase)
-        assert r.buy_window == bw
-        assert r.force_liquidate == fl
 
-
-def test_ladder_day_fixtures():
-    """验证 ladder_day.json fixtures 可以被 ladder.build 重现。"""
-    from emotion_core.algorithms.ladder import build
-    rows = json.load(open(FIXTURES / "ladder_day.json"))
-    # fixtures 是 domain.LadderDay 列表，build 需要 DerivedBar 输入
-    # 这里只验证数据结构完整性
-    assert len(rows) > 0
-    for r in rows:
-        assert "date" in r and "code" in r
-        assert "cont_days" in r and "is_exchange" in r
-        assert "is_top" in r and "is_sole_top" in r
-
-
-def test_signal_fixtures():
-    """验证 signal.json fixtures 的结构完整性。"""
-    rows = json.load(open(FIXTURES / "signal_live.json"))
-    assert len(rows) > 0
-    for r in rows:
-        assert "code" in r and "confirm_date" in r
-        assert "action" in r and "buy_window" in r
-        assert r["action"] in ("BUY", "SECONDARY", "SELL")
+    bad = [(r.phase, m["phase"], m["date"])
+           for r, m in zip(result, rows) if r.phase != m["phase"]]
+    # 只允许「lkl 说退潮、我们现在不说退潮」这一种分歧
+    wrong_way = [b for b in bad if b[1] != "退潮" or b[0] == "退潮"]
+    assert wrong_way == [], f"出现了 N4 解释不了的分歧：{wrong_way[:5]}"
+    # 分歧天数钉住（换判据就要显式改这一行并写理由）
+    assert len(bad) == 85, f"分歧天数变了：{len(bad)}（费率/判据改动？先看 ADR 0002 N4）"

@@ -103,7 +103,24 @@ class EmotionState:
 
 def _rule_ebb(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
               r: StateRules = DEFAULT_RULES) -> bool:
-    two_day = bool(t.top_broke) and y is not None and bool(y.top_broke)
+    """退潮：断板 + 跌停潮，或涨停表现转负，或跌停倍增。
+
+    ★N4（2026-10-23）：`two_day` 原来只要求「最高板连着两天炸板」就成立，
+    这是三条里最松的一条 —— 一次高标炸板就能拉响清仓式退潮（675 天里
+    高潮↔退潮来回切 182 次）。现在加了「当天跌停 > ebb_ld_min」这道闸：
+    炸板归炸板，没有跌停潮就不算退潮，只是「高标换了」。
+
+    实测依据（677 天，`_audit/probe_n4_ebb.py` + `probe_n4_ebb2.py`）：
+    旧口径退潮 292 天，收紧后 220 天，去掉的 72 天**全部**是「只有 two_day
+    一条成立」的日子（当日跌停中位 7 家、涨停表现中位 +0.57%、次日高度不降率
+    80.6%，反而高于仍判退潮那 220 天的 75.3%）—— 它们本来还算稳，是被这条
+    最松的分支误标成退潮的。高潮↔退潮来回切从 180 次降到 149 次。
+    代价如实记：这 72 天里有 4 天当日跌停 >15（涨停表现仍有 +0.9%），失去标签。
+    另：全样本 151 天跌停 >15 里，新旧口径都各自漏判 35 天 / 39 天（ld 那条
+    要求「比昨日翻倍」，单日跌停潮抓不到）—— 这是既存问题，不在 N4 范围。
+    """
+    two_day = (bool(t.top_broke) and y is not None and bool(y.top_broke)
+               and t.limit_down_count > r.ebb_ld_min)
     perf = _lt(t.zt_performance, r.ebb_zt_perf)
     ld = (y is not None and t.limit_down_count > r.ebb_ld_min
           and t.limit_down_count > y.limit_down_count * r.ebb_ld_mult)

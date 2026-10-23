@@ -147,11 +147,12 @@ def test_inherit_yesterday_without_rule_hit():
 
 def test_priority_ebb_over_climax():
     """退潮优先级 > 高潮；W7′ 起退潮只影响相位与仓位档，不再禁买/清仓。"""
+    # N4：两连炸板之外还要有跌停潮（> EBB_LD_MIN=15），否则只是「高标换了」
     series = [_day(date=_D, limit_up_count=85, max_limit_days=6, top_broke=True,
-                   bomb_rate=0.1, bomb_threshold=0.3),
+                   bomb_rate=0.1, bomb_threshold=0.3, limit_down_count=20),
               _day(date=_D + timedelta(days=1), limit_up_count=85,
                    max_limit_days=6, top_broke=True, bomb_rate=0.1,
-                   bomb_threshold=0.3)]
+                   bomb_threshold=0.3, limit_down_count=20)]
     out = emotion.classify(series)
     assert out[0].phase == "高潮"           # 首日 y=None：two_day 分支不成立
     assert out[1].phase == "退潮"           # 断板连两日优先于高潮
