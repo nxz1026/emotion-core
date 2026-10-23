@@ -1,11 +1,18 @@
-"""盘中触发台账的收盘结算（ADR 0003 §D6；常驻采集器尚未启用，本模块先跑结算）。
+"""盘中触发台账：读 CPT 一轮 → 判触发 → 写 `trigger_log`；收盘后 `--settle` 结算。
 
-**为什么现在只有 `--settle`**
-CPT 交付的 `public.intraday_seal_snapshot` 只有 5 列（`at/code/sealed/bid1_lots/
-limit_price`），没有 `price/prev_close/chg_pct/name` —— 本仓判据（`seal_hit` 要涨幅、
-`seal_weaken` 要现价）算不了，常驻采集器（§D4 `--loop`）因此**暂不创建**（见 ADR 0003
-§H.4 与 §H.3 缺口①）。但结算这一半可以先把路铺好：一旦 `trigger_log` 有行，
-`--settle` 就能把「封没封住、次日开盘卖多少钱」补齐，不必等采集器上线。
+**两个半场**
+- `--round`：读 CPT `public.intraday_seal_snapshot` 的**最新一轮**（R93 起 9 列，
+  `price/prev_close/is_st/limit_price/bid1_lots` 够本仓判据用），逐票判「封住首板」
+  （`algorithms/intraday.seal_hit`：在涨停价 + 昨日非板 + 10:00 前 + 封单 ≥30 万手），
+  命中就写一行 `trigger_log`（`ON CONFLICT DO NOTHING`，首次触发为准）。
+- `--settle`：收盘后把当日触发的「封没封住、次日开盘卖多少钱」补齐。
+
+**为什么是「读一轮」而不是「本仓自己采」**
+ADR 0003 §E2：原始采集归 CPT（它已在跑 `cpt-intraday-collect.timer`），触发判据归本仓。
+两个进程同时采同一批票只会浪费配额、还会给出两份不一致的快照。
+
+**`prev_days` 的取法**：昨日 `derived_bar.cont_days`。缺行（新股/停牌）→ `None`，
+`seal_hit` 对 `None` 判 False —— 不知道昨天是不是板，就不能说今天是首板。
 
 **结算口径**（与 B 轮/C 轮探针一致，逐条可对照）
 - `closed_sealed` = 当日 `derived_bar.is_limit_up`（收盘还封着）
@@ -23,13 +30,16 @@ limit_price`），没有 `price/prev_close/chg_pct/name` —— 本仓判据（`
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, time
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 from emotion_core.algorithms import exit as exit_svc
+from emotion_core.algorithms import intraday
 from emotion_core.data import loader
+from emotion_core.data.providers import cpt_intraday
 from emotion_core.utils.db import connect_ro
-from emotion_core.utils.dates import next_trading_day
+from emotion_core.utils.dates import next_trading_day, prev_trading_day
 
 log = logging.getLogger("emotion_core.intraday_watch")
 
@@ -131,21 +141,138 @@ def settle(d: date, *, dry_run: bool = False) -> dict[str, Any]:
             "pending": len(triggers) - len(rows), "rows": rows}
 
 
+#: 北京时区（CPT 的 `at` 是 UTC，交易日/时刻都要先换算再判）
+_BJ = ZoneInfo("Asia/Shanghai")
+
+
+def prev_days_of(d: date, codes: Iterable[str]) -> dict[str, int | None]:
+    """昨日连板数：`derived_bar.cont_days`（缺行 → None，不补 0）。"""
+    codes = list(codes)
+    if not codes:
+        return {}
+    prev = prev_trading_day(d)
+    if prev is None:
+        return {c: None for c in codes}
+    with connect_ro() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT code, cont_days FROM derived_bar WHERE date = %s AND code = ANY(%s)",
+            (prev, codes))
+        return {r[0]: (int(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+
+
+def _names(codes: Iterable[str]) -> dict[str, str]:
+    """票名（`stock_basic`）；查不到就不给名字，不拿代码充名字。"""
+    codes = list(codes)
+    if not codes:
+        return {}
+    with connect_ro() as conn, conn.cursor() as cur:
+        cur.execute("SELECT code, name FROM stock_basic WHERE code = ANY(%s)", (codes,))
+        return {r[0]: r[1] for r in cur.fetchall() if r[1]}
+
+
+def scan_round(
+    records: dict[str, dict[str, Any]],
+    *,
+    d: date,
+    now: time,
+    prev_days: dict[str, int | None],
+    names: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """判一轮：返回应当写进 `trigger_log` 的行（纯函数，便于单测）。
+
+    Args:
+        records: `cpt_intraday.fetch_round_from_cpt()` 的 `records`（CPT 原始 9 列）。
+        d: 北京日期。
+        now: 北京时刻（判「10:00 前」）。
+        prev_days: 昨日连板数，来自 `prev_days_of`。
+        names: 票名，来自 `_names`。
+
+    Returns:
+        `trigger_log` 行列表；判据缺数据（无 `price`、昨日板数未知、封单 NULL）一律不触发。
+    """
+    names = names or {}
+    rows: list[dict[str, Any]] = []
+    for code in sorted(records):
+        rec = records[code]
+        quote = cpt_intraday.to_quote(rec)
+        if quote is None:
+            continue
+        quote["code"] = code
+        name = names.get(code)
+        if name:
+            quote["name"] = name
+        if not intraday.seal_hit(quote, prev_days.get(code), now, code=code):
+            continue
+        entry = quote.get("limit_price")
+        if entry is None:
+            prev_close = quote.get("prev_close")
+            entry = intraday.limit_price(
+                code, float(prev_close), name=quote.get("name")) if prev_close else None
+        if entry is None:
+            continue
+        rows.append({
+            "date": d,
+            "code": code,
+            "name": name,
+            "first_seal_ts": now.replace(microsecond=0),
+            "trigger_price": round(float(entry), 2),
+            "seal_bid1_vol": int(round(float(quote["bid1_vol"]))),
+            "prev_days": 0,
+            "entry_px": round(float(entry), 2),
+        })
+    return rows
+
+
+def run_round(*, dry_run: bool = False) -> dict[str, Any]:
+    """读 CPT 最新一轮 → 判触发 → 写 `trigger_log`（ingest 一次，幂等）。"""
+    fetched = cpt_intraday.fetch_round_from_cpt()
+    if fetched is None:
+        log.warning("CPT 表不存在或读不到，本轮跳过")
+        return {"round_at": None, "records": 0, "triggers": 0, "written": 0, "rows": []}
+    round_at, records = fetched
+    if not records:
+        return {"round_at": round_at, "records": 0, "triggers": 0, "written": 0, "rows": []}
+    bj = round_at.astimezone(_BJ)
+    d, now = bj.date(), bj.time().replace(microsecond=0)
+    codes = list(records)
+    rows = scan_round(records, d=d, now=now,
+                      prev_days=prev_days_of(d, codes), names=_names(codes))
+    written = 0 if dry_run or not rows else loader.insert_triggers(rows)
+    log.info("round %s（北京 %s）：%d 票 → 触发 %d 条 → 写入 %d 条",
+             round_at.isoformat(), bj.strftime("%H:%M:%S"), len(records), len(rows), written)
+    return {"round_at": round_at, "records": len(records), "triggers": len(rows),
+            "written": written, "rows": rows, "date": d, "now": now}
+
+
 def main(argv: list[str] | None = None) -> int:
-    """CLI：只有 `--settle`；常驻采集器（`--loop`）等 CPT 补齐 5 列缺口后再建。"""
+    """CLI：`--round` 判一轮触发，`--settle` 结算某日。"""
     import argparse
 
     ap = argparse.ArgumentParser(
         prog="python -m emotion_core.services.intraday_watch",
-        description="盘中触发台账的收盘结算（ADR 0003 §D6）")
-    ap.add_argument("--settle", action="store_true", help="结算指定日期的全部未结算触发")
-    ap.add_argument("--date", metavar="YYYY-MM-DD", help="触发日（默认今天）")
+        description="盘中触发台账：判一轮（--round）/ 收盘结算（--settle）（ADR 0003）")
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--round", action="store_true",
+                   help="读 CPT 最新一轮并判触发（写 trigger_log）")
+    g.add_argument("--settle", action="store_true", help="结算指定日期的全部未结算触发")
+    ap.add_argument("--date", metavar="YYYY-MM-DD", help="结算日（默认今天）")
     ap.add_argument("--dry-run", action="store_true", help="只算不写")
     ns = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    if not ns.settle:
-        ap.error("目前只支持 --settle（--loop 等 CPT 补齐 price/prev_close 后再建）")
+    if ns.round:
+        out = run_round(dry_run=ns.dry_run)
+        if out["round_at"] is None:
+            print("CPT 表不存在或读不到，本轮跳过")
+            return 1
+        tag = "（dry-run，未写库）" if ns.dry_run else ""
+        print(f"最新一轮 {out['round_at'].astimezone(_BJ):%Y-%m-%d %H:%M:%S}（北京）· "
+              f"{out['records']} 票 · 触发 {out['triggers']} 条 · 写入 {out['written']} 条{tag}")
+        for row in out["rows"]:
+            print(f"  {row['code']} {row['name'] or ''} 触发价={row['trigger_price']} "
+                  f"封单={row['seal_bid1_vol']} 股 首封={row['first_seal_ts']}")
+        return 0
+
     d = date.fromisoformat(ns.date) if ns.date else date.today()
     out = settle(d, dry_run=ns.dry_run)
     tag = "（dry-run，未写库）" if ns.dry_run else ""

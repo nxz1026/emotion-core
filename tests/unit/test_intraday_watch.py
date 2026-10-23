@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime, time
+
 import pytest
 
 from emotion_core.data import loader
@@ -170,3 +172,126 @@ class TestLoaderSql:
         assert loader.load_triggers(__import__("datetime").date(2026, 10, 22),
                                     unsettled_only=True) == []
         assert "settled_at IS NULL" in captured["sql"]
+
+
+# ---- --round：判一轮（CPT R93 九列 → trigger_log 行） ----
+
+def _rec(**over):
+    """CPT `intraday_seal_snapshot` 的一行（R93 九列）。"""
+    rec = {"at": "2026-10-23T01:35:00+00:00", "code": "600001", "sealed": True,
+           "bid1_lots": 400000.0, "limit_price": 11.0, "price": 11.0,
+           "prev_close": 10.0, "distance_pct": 0.0, "is_st": False}
+    rec.update(over)
+    return rec
+
+
+class TestScanRound:
+    def test_hits_early_first_board(self):
+        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 0},
+                            names={"600001": "测试一号"})
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["code"] == "600001"
+        assert row["name"] == "测试一号"
+        assert row["trigger_price"] == 11.0
+        assert row["entry_px"] == 11.0
+        assert row["seal_bid1_vol"] == 40000000  # 手 → 股
+        assert row["prev_days"] == 0
+        assert row["first_seal_ts"] == time(9, 35)
+
+    def test_not_first_board(self):
+        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 1})
+        assert rows == []
+
+    def test_prev_days_unknown_is_not_first_board(self):
+        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={})
+        assert rows == []
+
+    def test_late_seal_is_skipped(self):
+        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
+                            now=time(10, 5), prev_days={"600001": 0})
+        assert rows == []
+
+    def test_thin_seal_is_skipped(self):
+        rows = w.scan_round({"600001": _rec(bid1_lots=100.0)}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 0})
+        assert rows == []
+
+    def test_below_limit_is_skipped(self):
+        rows = w.scan_round({"600001": _rec(price=10.95)}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 0})
+        assert rows == []
+
+    def test_missing_price_is_skipped(self):
+        rows = w.scan_round({"600001": _rec(price=None)}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 0})
+        assert rows == []
+
+    def test_entry_falls_back_to_prev_close(self):
+        rows = w.scan_round({"600001": _rec(limit_price=None)}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 0})
+        assert len(rows) == 1
+        assert rows[0]["entry_px"] == 11.0  # 10.0 × 1.1
+
+    def test_name_absent_when_unknown(self):
+        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
+                            now=time(9, 35), prev_days={"600001": 0}, names={})
+        assert rows[0]["name"] is None
+
+
+class TestRunRound:
+    def test_missing_table(self, monkeypatch):
+        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt", lambda: None)
+        out = w.run_round(dry_run=True)
+        assert out["round_at"] is None
+        assert out["written"] == 0
+
+    def test_dry_run_does_not_write(self, monkeypatch):
+        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
+                            lambda: (at, {"600001": _rec()}))
+        monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
+        monkeypatch.setattr(w, "_names", lambda codes: {"600001": "测试一号"})
+        monkeypatch.setattr(w.loader, "insert_triggers",
+                            lambda rows: pytest.fail("dry-run 不许写库"))
+        out = w.run_round(dry_run=True)
+        assert out["triggers"] == 1
+        assert out["written"] == 0
+        # UTC 01:35 = 北京 09:35，日期按北京日切
+        assert out["date"] == date(2026, 10, 23)
+        assert out["now"] == time(9, 35)
+
+    def test_writes_trigger(self, monkeypatch):
+        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        seen = {}
+        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
+                            lambda: (at, {"600001": _rec()}))
+        monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
+        monkeypatch.setattr(w, "_names", lambda codes: {"600001": "测试一号"})
+
+        def _insert(rows):
+            seen["rows"] = rows
+            return len(rows)
+
+        monkeypatch.setattr(w.loader, "insert_triggers", _insert)
+        out = w.run_round(dry_run=False)
+        assert out["written"] == 1
+        assert seen["rows"][0]["code"] == "600001"
+
+
+class TestCliRound:
+    def test_round_flag_runs(self, monkeypatch, capsys):
+        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
+                            lambda: (at, {"600001": _rec()}))
+        monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
+        monkeypatch.setattr(w, "_names", lambda codes: {})
+        assert w.main(["--round", "--dry-run"]) == 0
+        assert "触发 1 条" in capsys.readouterr().out
+
+    def test_requires_one_of_round_or_settle(self):
+        with pytest.raises(SystemExit):
+            w.main([])

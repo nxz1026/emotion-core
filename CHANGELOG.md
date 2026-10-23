@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 功能 · 2026-10-23 盘中触发台账 `--round`（读 CPT 一轮判触发）
+
+CPT R93 把 `public.intraday_seal_snapshot` 扩到 9 列后，本仓补上盘中触发能力：
+`services/intraday_watch.py --round` 读最新一轮 → `scan_round()` 判「封住首板」
+（在涨停价 + 昨日非板 + 10:00 前 + 封单 ≥30 万手）→ `trigger_log`（`ON CONFLICT DO NOTHING`）。
+真库验证：13 票 → 5 条触发 → 幂等重跑写 0 条 → `--settle` 正确留 5 条待定（T+1 未到）。
+常驻单元 `emotion-intraday.service` 仍未创建（Step 2，待拍板）。详见 ADR 0003 §H.7。
+
 ### 变更 · 2026-10-23 退潮判据收紧（N4）
 
 「最高板连着两天炸板」不再是退潮的充分条件，还要求当日跌停 >15 家。677 天实测：
