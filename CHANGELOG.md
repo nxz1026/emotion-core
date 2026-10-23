@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+### 变更 · 2026-10-23 常驻进程接管盘中触发（卡死告警 + 收盘自动结算）
+
+- `services/notify.py` 新增 `push_text(text)`：纯文本推送，不走 LLM 改写（告警的价值全在字面准确）。
+- `services/intraday_watch.py`：`--loop` 增加两条自监控 —— ①盘中最新一轮超过 `STALE_MINUTES=8` 分钟没有更新就推告警（同类告警 `ALARM_GAP_SEC=1800` 内不重复）；②过了 `SETTLE_AFTER=15:05` 自动跑一次 `settle` 并推汇总。此前 CPT 采集挂掉只会 `log.warning`，台账不长也没人知道。
+- `run_round(quiet=)`：同一轮次重复读且无写入时降为 DEBUG。
+- `emotion-intraday.service` 启用（`enabled` / `active`），两条盘中 cron 删除。
+
 ### 功能 · 2026-10-23 盘中触发跨轮确认 + `--loop` 常驻（C 轮第二层 Step 2）
 
 - `provider.fetch_rounds(count)` 取最近 N 轮（`DISTINCT at`，禁止按 code 单点查最新）。

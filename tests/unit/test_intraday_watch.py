@@ -424,5 +424,129 @@ class TestLoop:
         assert len(calls) == 3
 
 
+
+class TestRoundAge:
+    """`_round_age_min`：UTC datetime → 距今分钟数。"""
+
+    def test_utc_datetime(self):
+        now = datetime(2026, 10, 23, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        at = datetime(2026, 10, 23, 1, 50, tzinfo=ZoneInfo("UTC"))  # 北京 09:50
+        assert w._round_age_min(at, now) == pytest.approx(10.0)
+
+    def test_naive_datetime_treated_as_utc(self):
+        now = datetime(2026, 10, 23, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        assert w._round_age_min(datetime(2026, 10, 23, 1, 54), now) == pytest.approx(6.0)
+
+    def test_missing_round_gives_none(self):
+        now = datetime(2026, 10, 23, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        assert w._round_age_min(None, now) is None
+
+
+class TestLoopAlarm:
+    """卡死告警：最新一轮太旧或读不到时推一条，同类告警有间隔上限。"""
+
+    def _clock(self, *times):
+        seq = iter(times)
+        return lambda: next(seq)
+
+    def test_alarm_when_round_is_stale(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {
+            "round_at": datetime(2026, 10, 23, 1, 20, tzinfo=ZoneInfo("UTC")),  # 北京 09:20
+        })
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=1, sleep=lambda s: None,
+            now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=ZoneInfo("Asia/Shanghai"))),
+        )
+        assert len(alarms) == 1
+        assert "盘中触发停机" in alarms[0] and "阈值 8 分钟" in alarms[0]
+        assert "09:20" in alarms[0]
+
+    def test_no_alarm_when_round_is_fresh(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {
+            "round_at": datetime(2026, 10, 23, 1, 38, tzinfo=ZoneInfo("UTC")),  # 北京 09:38
+        })
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=1, sleep=lambda s: None,
+            now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=ZoneInfo("Asia/Shanghai"))),
+        )
+        assert alarms == []
+
+    def test_alarm_when_round_missing(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None})
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=1, sleep=lambda s: None,
+            now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=ZoneInfo("Asia/Shanghai"))),
+        )
+        assert len(alarms) == 1
+        assert "读不到 CPT 封板表" in alarms[0]
+
+    def test_alarm_throttled_within_gap(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None})
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        tz = ZoneInfo("Asia/Shanghai")
+        w.loop(
+            max_rounds=3, sleep=lambda s: None,
+            now_fn=self._clock(
+                datetime(2026, 10, 23, 9, 40, tzinfo=tz),
+                datetime(2026, 10, 23, 9, 45, tzinfo=tz),   # 5 分钟后：压住
+                datetime(2026, 10, 23, 10, 15, tzinfo=tz),  # 35 分钟后：再报
+            ),
+        )
+        assert len(alarms) == 2
+
+
+class TestLoopSettle:
+    """收盘自动结算：只在过了 SETTLE_AFTER 且当天没结过时跑一次。"""
+
+    def test_settles_once_after_close(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        calls: list[date] = []
+
+        def fake_settle(d, *, dry_run=False):
+            calls.append(d)
+            return {"date": d, "triggers": 2, "settled": 2, "pending": 0}
+
+        monkeypatch.setattr(w, "settle", fake_settle)
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        tz = ZoneInfo("Asia/Shanghai")
+        times = iter([
+            datetime(2026, 10, 23, 15, 30, tzinfo=tz),
+            datetime(2026, 10, 23, 16, 0, tzinfo=tz),
+        ])
+        w.loop(max_rounds=2, sleep=lambda s: None, now_fn=lambda: next(times))
+        assert calls == [date(2026, 10, 23)]
+        assert len(alarms) == 1 and "已结算 2026-10-23" in alarms[0]
+
+    def test_no_settle_before_close(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: False)
+        calls: list[date] = []
+        monkeypatch.setattr(w, "settle", lambda d, **kw: calls.append(d))
+        tz = ZoneInfo("Asia/Shanghai")
+        w.loop(max_rounds=1, sleep=lambda s: None,
+               now_fn=lambda: datetime(2026, 10, 23, 15, 0, tzinfo=tz))
+        assert calls == []
+
+    def test_no_settle_when_nothing_triggered(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: False)
+        monkeypatch.setattr(w, "settle",
+                            lambda d, **kw: {"date": d, "triggers": 0, "settled": 0, "pending": 0})
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        tz = ZoneInfo("Asia/Shanghai")
+        w.loop(max_rounds=1, sleep=lambda s: None,
+               now_fn=lambda: datetime(2026, 10, 23, 16, 0, tzinfo=tz))
+        assert alarms == []
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

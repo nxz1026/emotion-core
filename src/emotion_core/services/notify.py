@@ -88,6 +88,31 @@ def _resp_ok(channel: str, resp) -> bool:
     return True
 
 
+def push_text(text: str) -> bool:
+    """推一条**纯文本**，不走 LLM 改写。
+
+    给机器事实用（盘中告警、结算摘要）：这些内容不需要润色，也不能被润色 ——
+    改写有可能把「8 分钟没数据」说成别的意思，而告警的价值全在字面准确。
+
+    未配置 webhook / 发送失败都返回 False 且不抛（调用方记日志即可）。
+    """
+    url = _cfg("LKL_WEBHOOK_URL", "")
+    if not url or not text:
+        return False
+    channel = _guess_channel(url)
+    try:
+        import requests
+
+        resp = requests.post(url, json=_payload(channel, text), timeout=10)
+        ok = _resp_ok(channel, resp)
+        if not ok:
+            log.warning("推送失败（%s）：%s", channel, resp.text[:120])
+        return ok
+    except Exception as exc:  # noqa: BLE001 - 推送失败不影响主流程
+        log.warning("推送异常：%s", exc)
+        return False
+
+
 def _summary(md: str, limit: int = 600) -> str:
     """从报告 MD 提取速览段作推送摘要；持仓行剥离。"""
     m = re.search(r"## ⓪ 速览.*?(?=\n## |\Z)", md, re.S)

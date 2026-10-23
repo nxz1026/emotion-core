@@ -155,6 +155,16 @@ SESSION_END: Final[time] = time(15, 5)
 #: 非盘中时的空闲轮询间隔（秒）。不扫表，只等下一次场次判定。
 IDLE_SEC: Final[int] = 120
 
+#: CPT 每 2 分钟落一轮。盘中超过这么多分钟没有新一轮，就当采集卡住并告警 ——
+#: 常驻进程只会「读不到就跳过」，不报警的话 CPT 挂了没人知道。
+STALE_MINUTES: Final[int] = 8
+
+#: 同一类告警的最小间隔（秒）。CPT 挂一上午不该刷一百条。
+ALARM_GAP_SEC: Final[int] = 1800
+
+#: 收盘后自动结算的时刻（北京）。盘中不结 —— 收盘价都还没定。
+SETTLE_AFTER: Final[time] = time(15, 5)
+
 
 def prev_days_of(d: date, codes: Iterable[str]) -> dict[str, int | None]:
     """昨日连板数：`derived_bar.cont_days`（缺行 → None，不补 0）。"""
@@ -267,9 +277,13 @@ def scan_round(
 
 
 def run_round(
-    *, dry_run: bool = False, confirm_ticks: int | None = None
+    *, dry_run: bool = False, confirm_ticks: int | None = None, quiet: bool = False
 ) -> dict[str, Any]:
-    """读 CPT 最近一轮（+ 上一轮做确认）→ 判触发 → 写 `trigger_log`（幂等）。"""
+    """读 CPT 最近一轮（+ 上一轮做确认）→ 判触发 → 写 `trigger_log`（幂等）。
+
+    `quiet=True` 且本轮没写入时，汇总行降到 DEBUG：常驻进程 30 秒一轮、CPT 2 分钟
+    才落一轮，同一条轮次会被读 4 次，INFO 级别下一天能刷出两千多条一样的日志。
+    """
     ticks = intraday.SEAL_CONFIRM_TICKS if confirm_ticks is None else int(confirm_ticks)
     want = max(2, int(ticks)) if ticks >= 2 else 1
     rounds = (
@@ -296,9 +310,10 @@ def run_round(
                       names=_names(codes), prev_round=prev_round,
                       confirm_ticks=ticks)
     written = 0 if dry_run or not rows else loader.insert_triggers(rows)
-    log.info("round %s（北京 %s）：%d 票 → 确认轮数 %d → 触发 %d 条 → 写入 %d 条",
-             round_at.isoformat(), bj.strftime("%H:%M:%S"), len(records),
-             len(rounds), len(rows), written)
+    level = logging.DEBUG if quiet and not written else logging.INFO
+    log.log(level, "round %s（北京 %s）：%d 票 → 确认轮数 %d → 触发 %d 条 → 写入 %d 条",
+            round_at.isoformat(), bj.strftime("%H:%M:%S"), len(records),
+            len(rounds), len(rows), written)
     return {"round_at": round_at, "records": len(records), "triggers": len(rows),
             "written": written, "rows": rows, "date": d, "now": now,
             "rounds": len(rounds)}
@@ -326,6 +341,35 @@ def is_trading_day(d: date) -> bool:
     return bool(row[0]) if row else d.weekday() < 5
 
 
+def _round_age_min(round_at: Any, now_bj: datetime) -> float | None:
+    """最新一轮距今多少分钟。`round_at` 是 UTC datetime；取不到返回 None。"""
+    if not isinstance(round_at, datetime):
+        return None
+    at_bj = round_at if round_at.tzinfo else round_at.replace(tzinfo=ZoneInfo("UTC"))
+    return (now_bj - at_bj.astimezone(_BJ)).total_seconds() / 60.0
+
+
+def _peek_round_at() -> Any:
+    """只看最新一轮的时间戳（判「还是同一轮」用，不读行）。"""
+    try:
+        with connect_ro() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT max(at) FROM {cpt_intraday.CPT_INTRADAY_TABLE} "
+                f"WHERE code NOT LIKE {cpt_intraday._SENTINEL_PATTERN}"
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception:  # noqa: BLE001 - 读不到就当「不知道」，走完整一轮
+        return None
+
+
+def _alarm(text: str) -> bool:
+    """推一条告警（纯文本，不走 LLM 改写 —— 告警的价值全在字面准确）。"""
+    from emotion_core.services import notify
+
+    return notify.push_text(text)
+
+
 def in_session(at_bj: datetime, *, trading_day: bool | None = None) -> bool:
     """此刻该不该扫：工作日 + 场内时段 + 交易日（`trading_day` 可注入，便于单测）。"""
     if at_bj.weekday() >= 5:
@@ -337,34 +381,89 @@ def in_session(at_bj: datetime, *, trading_day: bool | None = None) -> bool:
     return bool(trading_day)
 
 
+def _stale_text(res: dict[str, Any], now_bj: datetime, age: float | None) -> str:
+    """卡死告警正文：说清「现在几点、数据停在哪、去哪里查」。"""
+    tail = ("查：systemctl status cpt-intraday-collect.timer；"
+            "tail -20 /home/ubuntu/logs/intraday-collect.log")
+    if age is None:
+        return (f"⚠ emotion-core 盘中触发停机\n"
+                f"{now_bj:%Y-%m-%d %H:%M}（北京）读不到 CPT 封板表的最新一轮。\n"
+                f"本进程还在跑，但没有数据就不会产生触发记录。\n{tail}")
+    round_at = res.get("round_at")
+    at_bj = round_at.astimezone(_BJ) if isinstance(round_at, datetime) else "?"
+    return (f"⚠ emotion-core 盘中触发停机\n"
+            f"{now_bj:%Y-%m-%d %H:%M}（北京）CPT 最新一轮是 "
+            f"{at_bj:%H:%M}，已 {age:.0f} 分钟没有新轮次"
+            f"（阈值 {STALE_MINUTES} 分钟）。\n{tail}")
+
+
+def _settle_text(res: dict[str, Any]) -> str:
+    """收盘结算摘要正文。"""
+    return (f"emotion-core 盘中台账已结算 {res['date']:%Y-%m-%d}\n"
+            f"触发 {res['triggers']} 条 · 结算 {res['settled']} 条 · "
+            f"待定 {res['pending']} 条")
+
+
 def loop(
     *, dry_run: bool = False, interval: int | None = None,
-    max_rounds: int | None = None, sleep=None,
+    max_rounds: int | None = None, sleep=None, now_fn=None,
 ) -> int:
     """常驻循环：盘中每 `SCAN_INTERVAL_SEC` 判一轮，非盘中待命。
 
-    `max_rounds`/`sleep` 只给单测用（生产由 systemd 常驻）。
-    单轮失败只记日志、不退出 —— 一轮 502 不该让整个交易日停摆。
+    盘中额外做两件事（cron 撤掉后靠它们自监控）：
+      1. **卡死告警**：最新一轮距今超过 `STALE_MINUTES` 分钟就推一条告警
+         （同类告警 `ALARM_GAP_SEC` 内不重复）。没有这条，CPT 挂一上午
+         本进程只会「读不到就跳过」，台账不长也没人知道。
+      2. **收盘自动结算**：过了 `SETTLE_AFTER` 且当天还没结过 → 跑一次
+         `settle` 并推汇总。没有这条，台账会永远停在 `settled_at IS NULL`。
+
+    `max_rounds`/`sleep`/`now_fn` 只给单测用（生产由 systemd 常驻）。
     """
     step = max(5, int(interval if interval is not None else intraday.SCAN_INTERVAL_SEC))
     wait = sleep or time_mod.sleep
+    clock = now_fn or (lambda: datetime.now(_BJ))
     log.info("盘中扫描循环启动：间隔 %ds，场次 %s–%s（北京）",
              step, SESSION_START.strftime("%H:%M"), SESSION_END.strftime("%H:%M"))
     last: bool | None = None
+    last_alarm: datetime | None = None
+    last_round: Any = None
+    settled: date | None = None
     done = 0
     while max_rounds is None or done < max_rounds:
-        now = datetime.now(_BJ)
+        now = clock()
         active = in_session(now)
         if active != last:
             log.info("场次切换：%s（北京 %s）", "进入盘中" if active else "离开盘中",
                      now.strftime("%Y-%m-%d %H:%M:%S"))
             last = active
-        if active:
-            try:
-                run_round(dry_run=dry_run)
-            except Exception:  # noqa: BLE001 - 单轮失败不停摆
-                log.exception("本轮扫描失败，等下一轮")
-        wait(step if active else IDLE_SEC)
+        if not active:
+            if now.time() >= SETTLE_AFTER and settled != now.date():
+                try:
+                    res = settle(now.date(), dry_run=dry_run)
+                    settled = now.date()
+                    log.info("收盘结算：触发 %d 条，结算 %d 条，待定 %d 条",
+                             res["triggers"], res["settled"], res["pending"])
+                    if res["triggers"]:
+                        _alarm(_settle_text(res))
+                except Exception:  # noqa: BLE001 - 结算失败不该让循环退出
+                    log.exception("收盘结算失败，明天再试")
+            wait(IDLE_SEC)
+            done += 1
+            continue
+        res: dict[str, Any] = {}
+        try:
+            same = last_round is not None and last_round == _peek_round_at()
+            res = run_round(dry_run=dry_run, quiet=same) or {}
+            last_round = res.get("round_at")
+        except Exception:  # noqa: BLE001 - 单轮失败不停摆
+            log.exception("本轮扫描失败，等下一轮")
+        age = _round_age_min(res.get("round_at"), now)
+        if age is None or age > STALE_MINUTES:
+            gap = last_alarm is None or (now - last_alarm).total_seconds() >= ALARM_GAP_SEC
+            if gap:
+                _alarm(_stale_text(res, now, age))
+                last_alarm = now
+        wait(step)
         done += 1
     return 0
 
