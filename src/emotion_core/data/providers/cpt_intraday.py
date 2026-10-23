@@ -1,17 +1,33 @@
 """读 CPT 盘中落库表的 provider（契约：CPT `docs/intraday-seal-contract.md`）。
 
-## 表长什么样（CPT R90，2026-10-22）
+## 表长什么样（CPT R93，2026-10-23，9 列）
 
 ADR 0003 §G 原方案是本仓判涨停、CPT 交**原始五档**（`intraday_quote`，13 列）。
-CPT 实际交付的是**每一轮的封板结论** `public.intraday_seal_snapshot`，**只有 5 列**：
+CPT 实际交付的是**每一轮的封板结论** `public.intraday_seal_snapshot`，R90 起 5 列，
+R93 按本仓 N5 需求补到 **9 列**（CPT `docs/n5-reply-to-emotion.md`）：
 
 ```
-at          timestamptz      这一轮采集时刻（UTC 存）
-code        text             6 位纯代码
-sealed      boolean          这一轮是否封在板上
-bid1_lots   double precision 买一量（**手**，不是股；判不了为 NULL）
-limit_price double precision 本轮用的涨停价（存下来自证口径）
+at           timestamptz      这一轮采集时刻（UTC 存、UTC 输出）
+code         text             6 位纯代码
+sealed       boolean          这一轮是否封在板上
+bid1_lots    double precision 买一量（**手**，不是股；判不了为 NULL）
+limit_price  double precision 本轮用的涨停价（CPT 的 Decimal + 半分进位口径）
+price        double precision R93 这一轮现价（判不了 NULL）
+prev_close   double precision R93 昨收（判不了 NULL）
+distance_pct double precision R93 距板百分比（0=在板上，负数=超了，正数=还差；百分数不是小数）
+is_st        boolean          R93 ST 判定结果（NULL = 没判，**别当 False**）
 ```
+
+R93 两处换法要注意（CPT 回复 §3）：
+
+- **不给 `chg_pct`**：`(price - prev_close) / prev_close` 的原料我们都有，存一份就是
+  重复事实、两份迟早不一致；改给 `distance_pct`，因为它依赖 CPT 的涨停价口径
+  （浮点 `10.0 * 1.1 = 11.000000000000002`），我们自己除会差一分钱。
+- **不给 `name`**：名字会变（`600xxx` 改名成 `ST某某` 后，同一 `at` 的历史行会自相
+  矛盾）；改给 `is_st` 布尔。判据仍在 CPT 的 `is_st_name`，本仓不解析字符串。
+
+存量（2026-10-22 那 3 轮）四列**全是 NULL 且不回填** —— 补出来的是推算值不是采集值。
+判据里遇到 NULL 要当「不知道」，不能当 `False` / `0`。
 
 主键 `(at, code)`，append-only，索引 `(code, at)` 与 `(at DESC)`。
 改表必须同步三处：契约文件 → CPT `cpt/storage/intraday_seal_store.py::_INSERT_SQL` →
@@ -64,7 +80,9 @@ __all__ = [
     "bid1_vol_shares",
     "fetch_quotes_from_cpt",
     "fetch_round_from_cpt",
+    "is_st_flag",
     "sealed_state",
+    "to_quote",
 ]
 
 #: CPT 落表的表名（契约 §1）。
@@ -72,7 +90,17 @@ __all__ = [
 CPT_INTRADAY_TABLE: Final[str] = "intraday_seal_snapshot"
 
 #: 读取列。缺列 → 返回 None 并记 warning（CPT 改表是它的事，本仓不猜）。
-_COLUMNS: Final[tuple[str, ...]] = ("at", "code", "sealed", "bid1_lots", "limit_price")
+_COLUMNS: Final[tuple[str, ...]] = (
+    "at",
+    "code",
+    "sealed",
+    "bid1_lots",
+    "limit_price",
+    "price",
+    "prev_close",
+    "distance_pct",
+    "is_st",
+)
 
 #: 一手 = 100 股。`bid1_lots` 存的是手，本仓阈值是股。
 SHARES_PER_LOT: Final[int] = 100
@@ -112,6 +140,52 @@ def sealed_state(record: dict[str, Any] | None) -> bool | None:
     if not bool(sealed) and record.get("bid1_lots") is None:
         return None
     return bool(sealed)
+
+
+def is_st_flag(record: dict[str, Any] | None) -> bool | None:
+    """这一轮 CPT 判出来的 ST 标记 —— 三态。
+
+    - `record is None` 或 `is_st` 为 NULL → `None` **不知道**（R93 之前的老行全这样）。
+    - `True` / `False` 为 CPT 的判定结果。
+
+    ⚠️ `None` 不许当 `False` 用：ST 的涨停是 5%，当成非 ST 会算出 10% 的价位，
+    「已封板」会被误判成「还没到」（2026-10-07 北交所 ST 那次就是这么翻的车）。
+    """
+    if record is None:
+        return None
+    flag = record.get("is_st")
+    return None if flag is None else bool(flag)
+
+
+def to_quote(record: dict[str, Any] | None) -> dict[str, Any] | None:
+    """把 CPT 记录转成本仓 E3 形状的 quote（`algorithms/intraday.py` 直接能吃）。
+
+    映射：`price → last`、`prev_close → prev_close`、`bid1_lots × 100 → bid1_vol`、
+    `is_st=True → name="ST"`（本仓 `is_st_name` 只看名字里有没有 ST）。
+    `limit_price` 原样带过去，判「到板没有」可以直接比它，不必再用本仓公式复算
+    （CPT 用 Decimal 半分进位，本仓用整数分四舍五入，两者逐分一致但没必要赌）。
+
+    Returns:
+        quote 字典；`price` 缺失（判不了）→ `None`。
+    """
+    if record is None:
+        return None
+    price = record.get("price")
+    if price is None:
+        return None
+    st = is_st_flag(record)
+    return {
+        "code": str(record.get("code") or "").strip(),
+        "name": "ST" if st else None,
+        "last": float(price),
+        "prev_close": None if record.get("prev_close") is None else float(record["prev_close"]),
+        "bid1": None,
+        "bid1_vol": bid1_vol_shares(record),
+        "ask1": None,
+        "limit_price": None if record.get("limit_price") is None else float(record["limit_price"]),
+        "distance_pct": record.get("distance_pct"),
+        "is_st": st,
+    }
 
 
 def bid1_vol_shares(record: dict[str, Any] | None) -> float | None:

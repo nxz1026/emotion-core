@@ -179,10 +179,75 @@ def test_select_sql_only_takes_latest_round():
     assert sql.endswith("order by code")
 
 
-def test_columns_match_h2_ddl():
-    """列清单必须与 ADR §H.2 / 契约 §1 的表结构逐字对齐（只有 5 列）。"""
-    assert ci._COLUMNS == ("at", "code", "sealed", "bid1_lots", "limit_price")
+def test_columns_match_contract_r93():
+    """列清单必须与契约 §1（CPT R93，9 列）逐字对齐。"""
+    assert ci._COLUMNS == (
+        "at",
+        "code",
+        "sealed",
+        "bid1_lots",
+        "limit_price",
+        "price",
+        "prev_close",
+        "distance_pct",
+        "is_st",
+    )
     assert ci.CPT_INTRADAY_TABLE == "intraday_seal_snapshot"
+
+
+class TestIsStFlag:
+    """`is_st` 三态：NULL 是「不知道」，不许当 False。"""
+
+    def test_true_and_false_pass_through(self):
+        assert ci.is_st_flag({"is_st": True}) is True
+        assert ci.is_st_flag({"is_st": False}) is False
+
+    def test_null_is_unknown(self):
+        """R93 之前的老行 is_st 是 NULL —— 当 False 会把 ST 的 5% 算成 10%。"""
+        assert ci.is_st_flag({"is_st": None}) is None
+        assert ci.is_st_flag({}) is None
+        assert ci.is_st_flag(None) is None
+
+
+class TestToQuote:
+    """CPT 记录 → 本仓 E3 形状 quote。"""
+
+    def _rec(self, **over):
+        rec = {
+            "at": "2026-10-23T01:31:00Z",
+            "code": "000530",
+            "sealed": True,
+            "bid1_lots": 46798.04,
+            "limit_price": 9.49,
+            "price": 9.49,
+            "prev_close": 8.63,
+            "distance_pct": 0.0,
+            "is_st": False,
+        }
+        rec.update(over)
+        return rec
+
+    def test_maps_fields_and_units(self):
+        q = ci.to_quote(self._rec())
+        assert q["code"] == "000530"
+        assert q["last"] == 9.49
+        assert q["prev_close"] == 8.63
+        assert q["bid1_vol"] == 4679804.0  # 手 → 股
+        assert q["limit_price"] == 9.49
+        assert q["name"] is None  # 非 ST
+
+    def test_st_becomes_name_marker(self):
+        """本仓 `is_st_name` 只看名字里有没有 ST，所以 is_st=True 映射成 name="ST"。"""
+        assert ci.to_quote(self._rec(is_st=True))["name"] == "ST"
+        assert ci.to_quote(self._rec(is_st=None))["name"] is None
+
+    def test_missing_price_is_none(self):
+        """判不了就给 None，不许编一个价出来。"""
+        assert ci.to_quote(self._rec(price=None)) is None
+        assert ci.to_quote(None) is None
+
+    def test_missing_bid_is_none_not_zero(self):
+        assert ci.to_quote(self._rec(bid1_lots=None))["bid1_vol"] is None
 
 
 def test_docstring_states_three_reading_rules():
