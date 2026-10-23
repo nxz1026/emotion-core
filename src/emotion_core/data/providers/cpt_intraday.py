@@ -80,6 +80,7 @@ __all__ = [
     "bid1_vol_shares",
     "fetch_quotes_from_cpt",
     "fetch_round_from_cpt",
+    "fetch_rounds_from_cpt",
     "is_st_flag",
     "sealed_state",
     "to_quote",
@@ -120,6 +121,25 @@ WHERE at = (
 )
   AND code NOT LIKE {_SENTINEL_PATTERN}
 ORDER BY code
+"""
+
+#: 带参数 SQL 里的同一模式：psycopg 会把 `%` 当占位符，`LIMIT %s` 这种带参语句里
+#: 必须写成 `%%`（psycopg 发送前还原成 `%`，服务端拿到的 LIKE 模式与上面一致）。
+_SENTINEL_PATTERN_PARAM: Final[str] = r"E'\x01%%'"
+
+#: 取最近 N 轮（跨轮确认用）。`DISTINCT at` 先选轮次，再取各行 —— 不能按 code
+#: 单点查最新，否则「上一轮封着、这一轮开板」会被读成两只票（契约 §3 第 3 条）。
+_ROUNDS_SQL: Final[str] = f"""
+SELECT {", ".join(_COLUMNS)}
+FROM {CPT_INTRADAY_TABLE}
+WHERE at IN (
+    SELECT DISTINCT at FROM {CPT_INTRADAY_TABLE}
+     WHERE code NOT LIKE {_SENTINEL_PATTERN_PARAM}
+     ORDER BY at DESC
+     LIMIT %s
+)
+  AND code NOT LIKE {_SENTINEL_PATTERN_PARAM}
+ORDER BY at DESC, code
 """
 
 
@@ -244,6 +264,47 @@ class CptIntradayProvider:
             out[code] = record
         return round_at, out
 
+    def fetch_rounds(
+        self, count: int = 2, codes: list[str] | None = None
+    ) -> list[tuple[Any, dict[str, dict[str, Any]]]] | None:
+        """取最近 ``count`` 轮（新的在前）。
+
+        跨轮确认（`SEAL_CONFIRM_TICKS`）必须看**不同的 `at`**：本仓每 30 秒扫一次、
+        CPT 每 2 分钟落一轮，同一轮会被重复读到 —— 拿「同一轮读两次」当两轮确认，
+        确认形同虚设。
+
+        Returns:
+            轮次列表，新的在前；**表不存在 / 读失败 → `None`**；表在但没轮次 → `[]`。
+        """
+        wanted = set(codes) if codes else None
+        rounds: list[tuple[Any, dict[str, dict[str, Any]]]] = []
+        index: dict[Any, int] = {}
+        try:
+            with connect_ro() as conn, conn.cursor() as cur:
+                cur.execute(_ROUNDS_SQL, (max(1, int(count)),))
+                rows = cur.fetchall()
+                names = [d.name for d in cur.description]
+        except Exception as exc:  # noqa: BLE001 - 表不存在是正常状态
+            msg = str(exc)
+            if "does not exist" in msg or "不存在" in msg:
+                log.info("CPT 盘中表 %s 尚未建立，跳过读盘中数据", CPT_INTRADAY_TABLE)
+                return None
+            log.warning("读 CPT 盘中表失败：%s", exc)
+            return None
+        for row in rows:
+            record = dict(zip(names, row))
+            code = str(record.get("code") or "").strip()
+            if not code:
+                continue
+            at = record.get("at")
+            if at not in index:
+                index[at] = len(rounds)
+                rounds.append((at, {}))
+            if wanted is not None and code not in wanted:
+                continue
+            rounds[index[at]][1][code] = record
+        return rounds
+
     def fetch_quotes(self, codes: list[str] | None = None) -> dict[str, dict[str, Any]] | None:
         """只要最新一轮的 `{code: record}`（`fetch_round` 的薄封装）。
 
@@ -268,3 +329,10 @@ def fetch_round_from_cpt(
 ) -> tuple[Any, dict[str, dict[str, Any]]] | None:
     """便捷入口：带 `round_at` 的版本。"""
     return CptIntradayProvider().fetch_round(codes)
+
+
+def fetch_rounds_from_cpt(
+    count: int = 2, codes: list[str] | None = None
+) -> list[tuple[Any, dict[str, dict[str, Any]]]] | None:
+    """便捷入口：最近 ``count`` 轮（新的在前）。"""
+    return CptIntradayProvider().fetch_rounds(count, codes)

@@ -1,0 +1,28 @@
+[Unit]
+Description=Emotion Core 盘中触发扫描（读 CPT 封板快照一轮判触发，ADR 0003 §D7）
+Documentation=https://github.com/nxz1026/emotion-core/blob/main/docs/decisions/README.md
+After=network.target postgresql.service
+Wants=postgresql.service
+# 与 CPT 的盘中采集同校：CPT 每 2 分钟落一轮，本单元每 30 秒读一次最新一轮。
+# 本单元只读 CPT 的表、只写本仓 trigger_log；不采原始行情（那是 CPT 的活）。
+# 默认 disabled：等观察期闸门过了、盘中数据质量确认后再 enable（ADR 0003 §H.4）。
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/DSH/emotion-core
+ExecStart=/home/ubuntu/DSH/emotion-core/.venv/bin/python -m emotion_core.services.intraday_watch --loop
+Environment=PYTHONPATH=/home/ubuntu/DSH/emotion-core/src
+Environment=DB_CONFIG=/home/ubuntu/.dbconfig
+EnvironmentFile=-/home/ubuntu/DSH/emotion-core/deploy/env/emotion-core.env
+# 单轮失败只记日志、不退出（进程内已兜住）；真崩了才靠 Restart 拉起来。
+Restart=on-failure
+RestartSec=10
+# 扫描是旁路任务，别跟盘后主链抢 CPU。
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

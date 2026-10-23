@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 功能 · 2026-10-23 盘中触发跨轮确认 + `--loop` 常驻（C 轮第二层 Step 2）
+
+- `provider.fetch_rounds(count)` 取最近 N 轮（`DISTINCT at`，禁止按 code 单点查最新）。
+- `scan_round(prev_round=, confirm_ticks=SEAL_CONFIRM_TICKS)`：上一轮也封住才算触发；当日首轮不触发。
+- `intraday_watch --loop`：北京 09:25–15:05 + `trade_calendar.is_open` 双闸门，盘中 30 秒一轮、盘外待命不扫表，单轮失败不退出。
+- `orchestration/systemd/emotion-intraday.service` 新建，**默认 disabled**（观察期闸门过后再 enable）。
+- 修：带参 SQL 里 `LIKE E'\x01%'` 的 `%` 被 psycopg 当占位符，改 `%%` + `_SENTINEL_PATTERN_PARAM`。
+
 ### 功能 · 2026-10-23 盘中触发台账 `--round`（读 CPT 一轮判触发）
 
 CPT R93 把 `public.intraday_seal_snapshot` 扩到 9 列后，本仓补上盘中触发能力：

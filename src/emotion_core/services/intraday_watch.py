@@ -5,6 +5,8 @@
   `price/prev_close/is_st/limit_price/bid1_lots` 够本仓判据用），逐票判「封住首板」
   （`algorithms/intraday.seal_hit`：在涨停价 + 昨日非板 + 10:00 前 + 封单 ≥30 万手），
   命中就写一行 `trigger_log`（`ON CONFLICT DO NOTHING`，首次触发为准）。
+- `--loop`：常驻循环，盘中每 30 秒判一轮（`emotion-intraday.service` 的口）；
+  场次按北京 09:25–15:05 + `trade_calendar.is_open` 判定，非盘中待命不扫表。
 - `--settle`：收盘后把当日触发的「封没封住、次日开盘卖多少钱」补齐。
 
 **为什么是「读一轮」而不是「本仓自己采」**
@@ -30,8 +32,9 @@ ADR 0003 §E2：原始采集归 CPT（它已在跑 `cpt-intraday-collect.timer`�
 from __future__ import annotations
 
 import logging
-from datetime import date, time
-from typing import Any, Iterable
+import time as time_mod
+from datetime import date, datetime, time
+from typing import Any, Final, Iterable
 from zoneinfo import ZoneInfo
 
 from emotion_core.algorithms import exit as exit_svc
@@ -144,6 +147,14 @@ def settle(d: date, *, dry_run: bool = False) -> dict[str, Any]:
 #: 北京时区（CPT 的 `at` 是 UTC，交易日/时刻都要先换算再判）
 _BJ = ZoneInfo("Asia/Shanghai")
 
+#: 场次边界（北京）：开盘前 5 分钟起扫、收盘后 5 分钟收工。
+#: 与 ADR 0003 §D7 一致；盘中只在 `trade_calendar.is_open` 的日子扫。
+SESSION_START: Final[time] = time(9, 25)
+SESSION_END: Final[time] = time(15, 5)
+
+#: 非盘中时的空闲轮询间隔（秒）。不扫表，只等下一次场次判定。
+IDLE_SEC: Final[int] = 120
+
 
 def prev_days_of(d: date, codes: Iterable[str]) -> dict[str, int | None]:
     """昨日连板数：`derived_bar.cont_days`（缺行 → None，不补 0）。"""
@@ -170,6 +181,26 @@ def _names(codes: Iterable[str]) -> dict[str, str]:
         return {r[0]: r[1] for r in cur.fetchall() if r[1]}
 
 
+def _hits(
+    records: dict[str, dict[str, Any]], *, now: time,
+    prev_days: dict[str, int | None], names: dict[str, str] | None,
+) -> dict[str, dict[str, Any]]:
+    """这一轮「封住首板」的票：`{code: quote}`（quote 已补 code/name）。"""
+    names = names or {}
+    out: dict[str, dict[str, Any]] = {}
+    for code in sorted(records):
+        quote = cpt_intraday.to_quote(records[code])
+        if quote is None:
+            continue
+        quote["code"] = code
+        name = names.get(code)
+        if name:
+            quote["name"] = name
+        if intraday.seal_hit(quote, prev_days.get(code), now, code=code):
+            out[code] = quote
+    return out
+
+
 def scan_round(
     records: dict[str, dict[str, Any]],
     *,
@@ -177,32 +208,40 @@ def scan_round(
     now: time,
     prev_days: dict[str, int | None],
     names: dict[str, str] | None = None,
+    prev_round: tuple[time, dict[str, dict[str, Any]]] | None = None,
+    confirm_ticks: int = 1,
 ) -> list[dict[str, Any]]:
     """判一轮：返回应当写进 `trigger_log` 的行（纯函数，便于单测）。
 
     Args:
-        records: `cpt_intraday.fetch_round_from_cpt()` 的 `records`（CPT 原始 9 列）。
+        records: `cpt_intraday.fetch_round` 的 `records`（CPT 原始 9 列）。
         d: 北京日期。
         now: 北京时刻（判「10:00 前」）。
         prev_days: 昨日连板数，来自 `prev_days_of`。
         names: 票名，来自 `_names`。
+        prev_round: 上一轮 `(北京时刻, records)`，跨轮确认用。
+        confirm_ticks: 需要连续几轮都封住才算触发（`SEAL_CONFIRM_TICKS`）。
+            `2` 时要求本轮与上一轮**都**命中；没有上一轮（当天首轮）就不触发 ——
+            宁可晚两分钟，也不要「单轮封单冲高就记一笔」。
 
     Returns:
         `trigger_log` 行列表；判据缺数据（无 `price`、昨日板数未知、封单 NULL）一律不触发。
     """
     names = names or {}
     rows: list[dict[str, Any]] = []
-    for code in sorted(records):
-        rec = records[code]
-        quote = cpt_intraday.to_quote(rec)
-        if quote is None:
-            continue
-        quote["code"] = code
+    hits_now = _hits(records, now=now, prev_days=prev_days, names=names)
+    if not hits_now:
+        return rows
+    if confirm_ticks >= 2:
+        if prev_round is None:
+            log.info("跨轮确认：当天还没有上一轮，本轮不触发")
+            return rows
+        p_now, p_records = prev_round
+        hits_prev = _hits(p_records, now=p_now, prev_days=prev_days, names=names)
+        hits_now = {c: q for c, q in hits_now.items() if c in hits_prev}
+    for code in sorted(hits_now):
+        quote = hits_now[code]
         name = names.get(code)
-        if name:
-            quote["name"] = name
-        if not intraday.seal_hit(quote, prev_days.get(code), now, code=code):
-            continue
         entry = quote.get("limit_price")
         if entry is None:
             prev_close = quote.get("prev_close")
@@ -223,25 +262,107 @@ def scan_round(
     return rows
 
 
-def run_round(*, dry_run: bool = False) -> dict[str, Any]:
-    """读 CPT 最新一轮 → 判触发 → 写 `trigger_log`（ingest 一次，幂等）。"""
-    fetched = cpt_intraday.fetch_round_from_cpt()
-    if fetched is None:
+def run_round(
+    *, dry_run: bool = False, confirm_ticks: int | None = None
+) -> dict[str, Any]:
+    """读 CPT 最近一轮（+ 上一轮做确认）→ 判触发 → 写 `trigger_log`（幂等）。"""
+    ticks = intraday.SEAL_CONFIRM_TICKS if confirm_ticks is None else int(confirm_ticks)
+    want = max(2, int(ticks)) if ticks >= 2 else 1
+    rounds = (
+        cpt_intraday.fetch_rounds_from_cpt(want) if want > 1
+        else _single_round()
+    )
+    if rounds is None:
         log.warning("CPT 表不存在或读不到，本轮跳过")
         return {"round_at": None, "records": 0, "triggers": 0, "written": 0, "rows": []}
-    round_at, records = fetched
+    if not rounds:
+        return {"round_at": None, "records": 0, "triggers": 0, "written": 0, "rows": []}
+    round_at, records = rounds[0]
     if not records:
         return {"round_at": round_at, "records": 0, "triggers": 0, "written": 0, "rows": []}
     bj = round_at.astimezone(_BJ)
     d, now = bj.date(), bj.time().replace(microsecond=0)
+    prev_round = None
+    if len(rounds) > 1:
+        p_at, p_records = rounds[1]
+        p_bj = p_at.astimezone(_BJ)
+        prev_round = (p_bj.time().replace(microsecond=0), p_records)
     codes = list(records)
-    rows = scan_round(records, d=d, now=now,
-                      prev_days=prev_days_of(d, codes), names=_names(codes))
+    rows = scan_round(records, d=d, now=now, prev_days=prev_days_of(d, codes),
+                      names=_names(codes), prev_round=prev_round,
+                      confirm_ticks=ticks)
     written = 0 if dry_run or not rows else loader.insert_triggers(rows)
-    log.info("round %s（北京 %s）：%d 票 → 触发 %d 条 → 写入 %d 条",
-             round_at.isoformat(), bj.strftime("%H:%M:%S"), len(records), len(rows), written)
+    log.info("round %s（北京 %s）：%d 票 → 确认轮数 %d → 触发 %d 条 → 写入 %d 条",
+             round_at.isoformat(), bj.strftime("%H:%M:%S"), len(records),
+             len(rounds), len(rows), written)
     return {"round_at": round_at, "records": len(records), "triggers": len(rows),
-            "written": written, "rows": rows, "date": d, "now": now}
+            "written": written, "rows": rows, "date": d, "now": now,
+            "rounds": len(rounds)}
+
+
+def _single_round() -> list[tuple[Any, dict[str, dict[str, Any]]]] | None:
+    """`confirm_ticks == 1` 时只读最新一轮（省一次跨轮查询）。"""
+    fetched = cpt_intraday.fetch_round_from_cpt()
+    if fetched is None:
+        return None
+    at, records = fetched
+    return [(at, records)] if records else []
+
+
+def is_trading_day(d: date) -> bool:
+    """是不是交易日：以 `trade_calendar.is_open` 为准。
+
+    不看 `daily_bar` 的最新日期 —— 日线是盘后 pipeline 才写的，盘中查它必然
+    得到「今天不是交易日」（CPT R89 就是这么翻的车，见 ADR 0003 §D10 ②）。
+    日历表没有这天时退回「周一到周五」。
+    """
+    with connect_ro() as conn, conn.cursor() as cur:
+        cur.execute("SELECT is_open FROM trade_calendar WHERE date = %s", (d,))
+        row = cur.fetchone()
+    return bool(row[0]) if row else d.weekday() < 5
+
+
+def in_session(at_bj: datetime, *, trading_day: bool | None = None) -> bool:
+    """此刻该不该扫：工作日 + 场内时段 + 交易日（`trading_day` 可注入，便于单测）。"""
+    if at_bj.weekday() >= 5:
+        return False
+    if not (SESSION_START <= at_bj.time().replace(microsecond=0) <= SESSION_END):
+        return False
+    if trading_day is None:
+        trading_day = is_trading_day(at_bj.date())
+    return bool(trading_day)
+
+
+def loop(
+    *, dry_run: bool = False, interval: int | None = None,
+    max_rounds: int | None = None, sleep=None,
+) -> int:
+    """常驻循环：盘中每 `SCAN_INTERVAL_SEC` 判一轮，非盘中待命。
+
+    `max_rounds`/`sleep` 只给单测用（生产由 systemd 常驻）。
+    单轮失败只记日志、不退出 —— 一轮 502 不该让整个交易日停摆。
+    """
+    step = max(5, int(interval if interval is not None else intraday.SCAN_INTERVAL_SEC))
+    wait = sleep or time_mod.sleep
+    log.info("盘中扫描循环启动：间隔 %ds，场次 %s–%s（北京）",
+             step, SESSION_START.strftime("%H:%M"), SESSION_END.strftime("%H:%M"))
+    last: bool | None = None
+    done = 0
+    while max_rounds is None or done < max_rounds:
+        now = datetime.now(_BJ)
+        active = in_session(now)
+        if active != last:
+            log.info("场次切换：%s（北京 %s）", "进入盘中" if active else "离开盘中",
+                     now.strftime("%Y-%m-%d %H:%M:%S"))
+            last = active
+        if active:
+            try:
+                run_round(dry_run=dry_run)
+            except Exception:  # noqa: BLE001 - 单轮失败不停摆
+                log.exception("本轮扫描失败，等下一轮")
+        wait(step if active else IDLE_SEC)
+        done += 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,11 +375,19 @@ def main(argv: list[str] | None = None) -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--round", action="store_true",
                    help="读 CPT 最新一轮并判触发（写 trigger_log）")
+    g.add_argument("--loop", action="store_true",
+                   help="常驻：盘中每 SCAN_INTERVAL_SEC 判一轮（systemd 用）")
     g.add_argument("--settle", action="store_true", help="结算指定日期的全部未结算触发")
     ap.add_argument("--date", metavar="YYYY-MM-DD", help="结算日（默认今天）")
     ap.add_argument("--dry-run", action="store_true", help="只算不写")
     ns = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    if ns.loop:
+        try:
+            return loop(dry_run=ns.dry_run)
+        except KeyboardInterrupt:
+            return 0
 
     if ns.round:
         out = run_round(dry_run=ns.dry_run)

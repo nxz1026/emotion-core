@@ -242,22 +242,37 @@ class TestScanRound:
         assert rows[0]["name"] is None
 
 
+def _two_rounds(monkeypatch, *, now_rec=None, prev_rec=None, count=None):
+    """桩掉跨轮读取：返回「最新一轮 + 上一轮」（都能封住，除非显式给空）。"""
+    at_now = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)   # 北京 09:35
+    at_prev = datetime(2026, 10, 23, 1, 33, tzinfo=UTC)  # 北京 09:33
+    calls = {"count": count}
+    cur = {"600001": _rec()} if now_rec is None else now_rec
+    prev = {"600001": _rec()} if prev_rec is None else prev_rec
+
+    def _fetch(want=2, codes=None):
+        calls["count"] = want
+        return [(at_now, cur), (at_prev, prev)]
+
+    monkeypatch.setattr(w.cpt_intraday, "fetch_rounds_from_cpt", _fetch)
+    return calls
+
+
 class TestRunRound:
     def test_missing_table(self, monkeypatch):
-        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt", lambda: None)
+        monkeypatch.setattr(w.cpt_intraday, "fetch_rounds_from_cpt", lambda *a, **k: None)
         out = w.run_round(dry_run=True)
         assert out["round_at"] is None
         assert out["written"] == 0
 
     def test_dry_run_does_not_write(self, monkeypatch):
-        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
-        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
-                            lambda: (at, {"600001": _rec()}))
+        calls = _two_rounds(monkeypatch)
         monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
         monkeypatch.setattr(w, "_names", lambda codes: {"600001": "测试一号"})
         monkeypatch.setattr(w.loader, "insert_triggers",
                             lambda rows: pytest.fail("dry-run 不许写库"))
         out = w.run_round(dry_run=True)
+        assert calls["count"] >= 2, "默认应取两轮做确认"
         assert out["triggers"] == 1
         assert out["written"] == 0
         # UTC 01:35 = 北京 09:35，日期按北京日切
@@ -265,10 +280,8 @@ class TestRunRound:
         assert out["now"] == time(9, 35)
 
     def test_writes_trigger(self, monkeypatch):
-        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        _two_rounds(monkeypatch)
         seen = {}
-        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
-                            lambda: (at, {"600001": _rec()}))
         monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
         monkeypatch.setattr(w, "_names", lambda codes: {"600001": "测试一号"})
 
@@ -281,12 +294,40 @@ class TestRunRound:
         assert out["written"] == 1
         assert seen["rows"][0]["code"] == "600001"
 
+    def test_single_round_cannot_confirm(self, monkeypatch):
+        """只有一轮时无法确认：宁可漏，不可假触发（首轮 09:32 就属于这种）。"""
+        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        monkeypatch.setattr(w.cpt_intraday, "fetch_rounds_from_cpt",
+                            lambda want=2, codes=None: [(at, {"600001": _rec()})])
+        monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
+        monkeypatch.setattr(w, "_names", lambda codes: {})
+        out = w.run_round(dry_run=True)
+        assert out["triggers"] == 0
+        assert out["round_at"] is not None
+
+    def test_prev_round_missed_blocks_trigger(self, monkeypatch):
+        """上一轮没封住 → 这一轮才封，不算「连续两轮」，不触发。"""
+        _two_rounds(monkeypatch, prev_rec={})
+        monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
+        monkeypatch.setattr(w, "_names", lambda codes: {})
+        out = w.run_round(dry_run=True)
+        assert out["triggers"] == 0
+
+    def test_confirm_ticks_one_needs_no_history(self, monkeypatch):
+        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        monkeypatch.setattr(w.cpt_intraday, "fetch_rounds_from_cpt",
+                            lambda *a, **k: pytest.fail("单轮模式不该查多轮"))
+        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
+                            lambda: (at, {"600001": _rec()}))
+        monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
+        monkeypatch.setattr(w, "_names", lambda codes: {})
+        out = w.run_round(dry_run=True, confirm_ticks=1)
+        assert out["triggers"] == 1
+
 
 class TestCliRound:
     def test_round_flag_runs(self, monkeypatch, capsys):
-        at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
-        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
-                            lambda: (at, {"600001": _rec()}))
+        _two_rounds(monkeypatch)
         monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
         monkeypatch.setattr(w, "_names", lambda codes: {})
         assert w.main(["--round", "--dry-run"]) == 0
@@ -295,3 +336,81 @@ class TestCliRound:
     def test_requires_one_of_round_or_settle(self):
         with pytest.raises(SystemExit):
             w.main([])
+
+
+class TestConfirmTicksPure:
+    """`scan_round` 的跨轮确认（纯函数，不碰库）。"""
+
+    D = date(2026, 10, 23)
+
+    def _rows(self, *, prev_round, ticks=2, rec=None):
+        return w.scan_round(rec if rec is not None else {"600001": _rec()},
+                            d=self.D, now=time(9, 35), prev_days={"600001": 0},
+                            names={}, prev_round=prev_round, confirm_ticks=ticks)
+
+    def test_two_rounds_confirm(self):
+        rows = self._rows(prev_round=(time(9, 33), {"600001": _rec()}))
+        assert [r["code"] for r in rows] == ["600001"]
+
+    def test_prev_round_without_hit_blocks(self):
+        assert self._rows(prev_round=(time(9, 33), {})) == []
+
+    def test_no_prev_round_blocks(self):
+        assert self._rows(prev_round=None) == []
+
+    def test_ticks_one_ignores_prev(self):
+        assert len(self._rows(prev_round=None, ticks=1)) == 1
+
+
+class TestSession:
+    def test_weekend_never(self):
+        sat = datetime(2026, 10, 24, 10, 0, tzinfo=w._BJ)  # 周六
+        assert w.in_session(sat, trading_day=True) is False
+
+    def test_before_open_and_after_close(self):
+        early = datetime(2026, 10, 23, 9, 24, tzinfo=w._BJ)
+        late = datetime(2026, 10, 23, 15, 6, tzinfo=w._BJ)
+        assert w.in_session(early, trading_day=True) is False
+        assert w.in_session(late, trading_day=True) is False
+
+    def test_edges_are_inclusive(self):
+        assert w.in_session(datetime(2026, 10, 23, 9, 25, tzinfo=w._BJ), trading_day=True)
+        assert w.in_session(datetime(2026, 10, 23, 15, 5, tzinfo=w._BJ), trading_day=True)
+
+    def test_non_trading_day(self):
+        mid = datetime(2026, 10, 23, 10, 0, tzinfo=w._BJ)
+        assert w.in_session(mid, trading_day=False) is False
+        assert w.in_session(mid, trading_day=True) is True
+
+
+class TestLoop:
+    def test_skips_outside_session(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(w, "in_session", lambda now: False)
+        monkeypatch.setattr(w, "run_round", lambda **k: calls.append(1))
+        w.loop(max_rounds=2, sleep=lambda s: None)
+        assert calls == []
+
+    def test_runs_inside_session(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(w, "in_session", lambda now: True)
+        monkeypatch.setattr(w, "run_round",
+                            lambda **k: calls.append(k.get("dry_run")))
+        w.loop(dry_run=True, max_rounds=2, sleep=lambda s: None)
+        assert calls == [True, True]
+
+    def test_single_round_failure_does_not_stop_loop(self, monkeypatch):
+        calls = []
+
+        def _boom(**k):
+            calls.append(1)
+            raise RuntimeError("一轮 502")
+
+        monkeypatch.setattr(w, "in_session", lambda now: True)
+        monkeypatch.setattr(w, "run_round", _boom)
+        assert w.loop(max_rounds=3, sleep=lambda s: None) == 0
+        assert len(calls) == 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-q"]))

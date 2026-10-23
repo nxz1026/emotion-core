@@ -11,9 +11,14 @@ limit_price），不是 §G 里的 13 列 `intraday_quote`。读表三条铁律�
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from emotion_core.data.providers import cpt_intraday as ci
+
+UTC = ZoneInfo("UTC")
 
 
 class _Col:
@@ -256,6 +261,35 @@ def test_docstring_states_three_reading_rules():
     assert "没行 = 判不了" in doc
     assert "sealed=False` 是采到了且这一轮没封" in doc
     assert "按 `at` 分组取最新一轮" in doc
+
+
+class TestFetchRounds:
+    """跨轮读取：新的在前、按 `at` 分组、带参 SQL 的 `%` 必须转义。"""
+
+    def test_groups_by_round(self, monkeypatch):
+        at1 = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
+        at2 = datetime(2026, 10, 23, 1, 33, tzinfo=UTC)
+        rows = [
+            (at1, "600001", True, 1000.0, 11.0, 10.0, 10.0, 10.0, False),
+            (at1, "600002", True, 2000.0, 22.0, 20.0, 20.0, 10.0, False),
+            (at2, "600001", True, 900.0, 11.0, 10.0, 10.0, 10.0, False),
+        ]
+        monkeypatch.setattr(ci, "connect_ro", _fake_conn(rows, list(ci._COLUMNS)))
+        got = ci.fetch_rounds_from_cpt(2)
+        assert got is not None
+        assert [at for at, _ in got] == [at1, at2]
+        assert set(got[0][1]) == {"600001", "600002"}
+        assert set(got[1][1]) == {"600001"}
+
+    def test_empty_table_returns_empty_list(self, monkeypatch):
+        monkeypatch.setattr(ci, "connect_ro", _fake_conn([], list(ci._COLUMNS)))
+        assert ci.fetch_rounds_from_cpt(2) == []
+
+    def test_limit_is_parameterised_and_percent_escaped(self):
+        sql = " ".join(ci._ROUNDS_SQL.split()).lower()
+        assert "limit %s" in sql
+        assert "%%" in sql, "带参 SQL 里的 LIKE 通配符必须写成 %%"
+        assert sql.count("code not like") == 2
 
 
 if __name__ == "__main__":  # pragma: no cover
