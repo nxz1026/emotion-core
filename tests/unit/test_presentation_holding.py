@@ -367,7 +367,13 @@ class TestCptPointsPayload:
         body, status = server.cpt_points_payload(parsed)
         assert status == 200 and body["ok"] is True
         assert body["cpt_available"] is True
-        assert body["levels"]["buy_reference"] == 14.901
+        # 2026-10-23 口径收敛：结构位取整统一到 **2 位**（``PRICE_ROUND_DIGITS``）。
+        # —— A 股价格最小变动单位就是 0.01 元，3 位小数是伪精度；
+        # 此前 emotion 侧取 3 位、CPT 侧取 2 位 ⇒ 同一只票两个系统印出的
+        # 买/卖点价不一致（实测 36 个价里 29 个不同，最大差 0.005 元）。
+        from emotion_cpt.contracts.pricing import PRICE_ROUND_DIGITS
+
+        assert body["levels"]["buy_reference"] == round(14.901, PRICE_ROUND_DIGITS)
         assert body["human_text"] == "近低关注"
 
     def test_cpt_unavailable(self, monkeypatch):

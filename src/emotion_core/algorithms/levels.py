@@ -1,7 +1,11 @@
 """价位计算（R3 持仓决策，docs/17 §6.2）：结构位优先，固定百分比兜底。
 
-结构位算式**逐条移植**自 CPT（Chan_Pattern_Trader）的 `application/track_points.py`，
-**不 import**（`docs/shared-tables-contract.md` §5 明令两侧零代码依赖）：
+结构位算式**已于 2026-10-23 迁至 Emotion-CPT**（`emotion_cpt.snapshot.points`），
+本模块与 CPT 的 `application/track_points.py` **共用同一份实现**：
+
+- 此前这里是 CPT 的**手抄副本**（连行号引用都差 1 行），改一边不传播、无测试会红；
+- 现在公式、常量、取整位数（2 位）**单一真源** ⇒
+  同一只票在两个系统印出的买/卖点价**一致**（实测原先 36 个价里 29 个不一致）。
 
 - 买参考 = min(最近 `ZHONGSHU_LOOKBACK` 个中枢 `.low` ∪ 最近 `BI_LOOKBACK` 笔中
   `direction == -1` 的 `.low`) ÷ ratio × `BUY_BUFFER`          （track_points.py:182-221）
@@ -23,12 +27,18 @@ from typing import Any, Final
 
 from emotion_core.domain.holding import Levels
 
-# ── 结构位常数：与 CPT track_points.py 同值（移植口径，勿单方面改） ──────────
-STOP_LOSS_RATIO: Final[float] = 0.95  # track_points.py:49
-BUY_BUFFER: Final[float] = 1.02  # track_points.py:44
-SELL_BUFFER: Final[float] = 0.97  # track_points.py:47
-BI_LOOKBACK: Final[int] = 3  # track_points.py:_BI_LOOKBACK
-ZHONGSHU_LOOKBACK: Final[int] = 2  # track_points.py:_ZHONGSHU_LOOKBACK
+# ── 结构位常数与算式本体：单一真源在 Emotion-CPT（2026-10-23）──────────────
+# 此前这里是**手抄** CPT track_points.py 的副本（连行号引用都已差 1 行），
+# 改一边不传播、且没有任何测试会红。现改为 import 共享契约。
+from emotion_cpt.contracts.pricing import (
+    BI_LOOKBACK,
+    BUY_BUFFER,
+    PRICE_ROUND_DIGITS,
+    SELL_BUFFER,
+    STOP_LOSS_RATIO,
+    ZHONGSHU_LOOKBACK,
+)
+from emotion_cpt.snapshot.points import structure_picks
 
 # ── 百分比兜底（只在结构位不可用时启用，决策 D3） ────────────────────────────
 FALLBACK_BUY_PCT: Final[float] = 0.03
@@ -57,35 +67,12 @@ def _num(v: Any) -> float | None:
 
 
 def _picks(overlays: dict, ratio: float) -> tuple[float | None, float | None]:
-    """从 overlays 取 raw 域的 (买结构位, 卖结构位)；无候选返回 (None, None)。"""
-    zs = overlays.get("zhongshus")
-    bis = overlays.get("bis")
-    if not isinstance(zs, list) or not isinstance(bis, list):
-        return None, None
-    lows: list[float] = []
-    highs: list[float] = []
-    for z in zs[-ZHONGSHU_LOOKBACK:]:
-        if isinstance(z, dict):
-            lo, hi = _num(z.get("low")), _num(z.get("high"))
-            if lo is not None:
-                lows.append(lo)
-            if hi is not None:
-                highs.append(hi)
-    for b in bis[-BI_LOOKBACK:]:
-        if not isinstance(b, dict):
-            continue
-        if b.get("direction") == _DIR_DOWN:
-            lo = _num(b.get("low"))
-            if lo is not None:
-                lows.append(lo)
-        elif b.get("direction") == _DIR_UP:
-            hi = _num(b.get("high"))
-            if hi is not None:
-                highs.append(hi)
-    # adj → raw 必须除以 ratio（ratio 已由调用方校验为正）
-    buy = min(lows) / ratio * BUY_BUFFER if lows else None
-    sell = max(highs) / ratio * SELL_BUFFER if highs else None
-    return buy, sell
+    """从 overlays 取 raw 域的 (买结构位, 卖结构位)；无候选返回 (None, None)。
+
+    ⚠️ 算式本体在 Emotion-CPT（``emotion_cpt.snapshot.points``）——
+    与 CPT 的 ``track_points`` 共用同一份实现，不再各写一份。
+    """
+    return structure_picks(overlays, ratio)
 
 
 def structure_levels(
@@ -105,15 +92,15 @@ def structure_levels(
         if buy is not None or sell is not None:
             stop = buy * STOP_LOSS_RATIO if buy is not None else None
             return Levels(
-                buy_reference=round(buy, 3) if buy is not None else None,
-                stop_price=round(stop, 3) if stop is not None else None,
-                target_price=round(sell, 3) if sell is not None else None,
+                buy_reference=buy,
+                stop_price=round(stop, PRICE_ROUND_DIGITS) if stop is not None else None,
+                target_price=sell,
                 basis="cpt_structure",
                 detail=(
                     f"结构位：中枢/笔 → raw（ratio={ratio}）"
                     f" × {BUY_BUFFER} / {SELL_BUFFER}，止损 × {STOP_LOSS_RATIO}"
                 ),
-                sell_reference=round(sell, 3) if sell is not None else None,
+                sell_reference=sell,
             )
         note = "CPT overlays 里没有可用的中枢/笔"
     elif ratio is None:
@@ -139,5 +126,5 @@ def structure_levels(
             f"（收盘 {raw_close} × −{FALLBACK_BUY_PCT:.0%} / −{FALLBACK_STOP_PCT:.0%}"
             f" / +{FALLBACK_TARGET_PCT:.0%}）"
         ),
-        sell_reference=round(raw_close * (1 + FALLBACK_TARGET_PCT), 3),
+        sell_reference=round(raw_close * (1 + FALLBACK_TARGET_PCT), PRICE_ROUND_DIGITS),
     )

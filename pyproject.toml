@@ -9,7 +9,11 @@ description = "A股盘后选股：数据同步 → 判据 → 信号 → 展示"
 requires-python = ">=3.12"
 # 运行时依赖刻意**只有 6 个**且全部钉死版本 —— 见 requirements.txt（那一份才是
 # 生产实际安装的清单，CI 按它装）。这里不重复钉，避免两处漂移。
-dependencies = []
+dependencies = [
+    # 判据（结构位算式与常量）已迁至 Emotion-CPT —— 单向依赖：emotion_core → emotion_cpt。
+    # 钉到 tag 而不是 main：main 是移动目标，重建环境会拿到不确定的判据版本。
+    "emotion-cpt @ git+https://github.com/nxz1026/Emotion-CPT.git@v0.1.0",
+]
 
 [project.scripts]
 emotion-core-daily = "emotion_core.orchestration.daily:main"
