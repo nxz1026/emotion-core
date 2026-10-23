@@ -208,7 +208,7 @@ def scan_round(
     now: time,
     prev_days: dict[str, int | None],
     names: dict[str, str] | None = None,
-    prev_round: tuple[time, dict[str, dict[str, Any]]] | None = None,
+    prev_round: tuple[time | datetime, dict[str, dict[str, Any]]] | None = None,
     confirm_ticks: int = 1,
 ) -> list[dict[str, Any]]:
     """判一轮：返回应当写进 `trigger_log` 的行（纯函数，便于单测）。
@@ -219,7 +219,8 @@ def scan_round(
         now: 北京时刻（判「10:00 前」）。
         prev_days: 昨日连板数，来自 `prev_days_of`。
         names: 票名，来自 `_names`。
-        prev_round: 上一轮 `(北京时刻, records)`，跨轮确认用。
+        prev_round: 上一轮 `(时刻, records)`，跨轮确认用。`datetime`（UTC）会被
+            转成北京时刻；传 `time` 则原样用。
         confirm_ticks: 需要连续几轮都封住才算触发（`SEAL_CONFIRM_TICKS`）。
             `2` 时要求本轮与上一轮**都**命中；没有上一轮（当天首轮）就不触发 ——
             宁可晚两分钟，也不要「单轮封单冲高就记一笔」。
@@ -236,7 +237,10 @@ def scan_round(
         if prev_round is None:
             log.info("跨轮确认：当天还没有上一轮，本轮不触发")
             return rows
-        p_now, p_records = prev_round
+        p_at, p_records = prev_round
+        # `fetch_rounds` 给的是 UTC datetime；`seal_hit` 要的是**北京时刻**。
+        # 不转换会在「本轮有命中」时炸 TypeError（10:00 之后命中恒为空，掩盖了它）。
+        p_now = p_at.astimezone(_BJ).time() if isinstance(p_at, datetime) else p_at
         hits_prev = _hits(p_records, now=p_now, prev_days=prev_days, names=names)
         hits_now = {c: q for c, q in hits_now.items() if c in hits_prev}
     for code in sorted(hits_now):

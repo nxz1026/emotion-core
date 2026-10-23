@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -360,6 +361,17 @@ class TestConfirmTicksPure:
 
     def test_ticks_one_ignores_prev(self):
         assert len(self._rows(prev_round=None, ticks=1)) == 1
+
+    def test_prev_round_datetime_is_converted_to_beijing(self):
+        # 回归：`fetch_rounds_from_cpt` 给的是 UTC datetime，直接当成 `time` 用会
+        # 在「本轮有命中」时炸 TypeError（10:00 之后命中恒空，把 bug 藏了一整天）。
+        utc = datetime(2026, 10, 23, 1, 33, tzinfo=ZoneInfo("UTC"))  # 北京 09:33
+        rows = self._rows(prev_round=(utc, {"600001": _rec()}))
+        assert [r["code"] for r in rows] == ["600001"]
+
+    def test_prev_round_datetime_after_deadline_blocks(self):
+        late = datetime(2026, 10, 23, 2, 35, tzinfo=ZoneInfo("UTC"))  # 北京 10:35
+        assert self._rows(prev_round=(late, {"600001": _rec()})) == []
 
 
 class TestSession:
