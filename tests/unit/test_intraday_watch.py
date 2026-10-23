@@ -394,6 +394,14 @@ class TestSession:
         assert w.in_session(mid, trading_day=False) is False
         assert w.in_session(mid, trading_day=True) is True
 
+    def test_lunch_break_is_out_of_session(self):
+        """午休不扫：CPT 11:30–13:00 本来就不落轮次，扫了只会刷假告警。"""
+        lunch = [datetime(2026, 10, 23, h, m, tzinfo=w._BJ)
+                 for h, m in ((11, 33), (12, 0), (12, 57))]
+        assert [w.in_session(t, trading_day=True) for t in lunch] == [False] * 3
+        assert w.in_session(datetime(2026, 10, 23, 11, 32, tzinfo=w._BJ), trading_day=True)
+        assert w.in_session(datetime(2026, 10, 23, 12, 58, tzinfo=w._BJ), trading_day=True)
+
 
 class TestLoop:
     def test_skips_outside_session(self, monkeypatch):
@@ -504,6 +512,47 @@ class TestLoopAlarm:
             ),
         )
         assert len(alarms) == 2
+
+
+class TestAlarmGrace:
+    """早盘首轮宽限：09:35 之前「没有轮次」是正常的，不该告警。"""
+
+    def _clock(self, *times):
+        seq = iter(times)
+        return lambda: next(seq)
+
+    def test_no_alarm_before_grace(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0})
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=2, sleep=lambda s: None,
+            now_fn=self._clock(datetime(2026, 10, 23, 9, 26, tzinfo=w._BJ),
+                               datetime(2026, 10, 23, 9, 30, tzinfo=w._BJ)),
+        )
+        assert alarms == []
+
+    def test_alarm_after_grace(self, monkeypatch):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0})
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=1, sleep=lambda s: None,
+            now_fn=self._clock(datetime(2026, 10, 23, 9, 36, tzinfo=w._BJ)),
+        )
+        assert len(alarms) == 1
+
+    def test_alarm_result_is_logged(self, monkeypatch, caplog):
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0})
+        monkeypatch.setattr(w, "_alarm", lambda text: False)
+        with caplog.at_level("WARNING"):
+            w.loop(max_rounds=1, sleep=lambda s: None,
+                   now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=w._BJ)))
+        assert "卡死告警已触发" in caplog.text
+        assert "推送未配置/失败" in caplog.text
 
 
 class TestLoopSettle:

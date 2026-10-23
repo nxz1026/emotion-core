@@ -147,10 +147,25 @@ def settle(d: date, *, dry_run: bool = False) -> dict[str, Any]:
 #: 北京时区（CPT 的 `at` 是 UTC，交易日/时刻都要先换算再判）
 _BJ = ZoneInfo("Asia/Shanghai")
 
-#: 场次边界（北京）：开盘前 5 分钟起扫、收盘后 5 分钟收工。
-#: 与 ADR 0003 §D7 一致；盘中只在 `trade_calendar.is_open` 的日子扫。
-SESSION_START: Final[time] = time(9, 25)
-SESSION_END: Final[time] = time(15, 5)
+#: 场次边界（北京），按 **CPT 的采集窗口**切两段，而不是一整段 09:25–15:05。
+#:
+#: 为什么断开中间那一个半小时：CPT 的 timer 是 `09..11,13..14` 每 2 分钟一轮，
+#: 11:30–13:00 午休**本来就不落轮次**。若当成一整段，卡死告警会在午休里
+#: 按 `ALARM_GAP_SEC` 反复触发（每天三条假警），反而把真事故淹掉。
+#: 上午多留 2 分钟（到 11:32）、下午提前 2 分钟（12:58 起），是给 CPT 的
+#: 最后一轮/第一轮留落库余量。与 ADR 0003 §D7 一致。
+SESSION_WINDOWS: Final[tuple[tuple[time, time], ...]] = (
+    (time(9, 25), time(11, 32)),
+    (time(12, 58), time(15, 5)),
+)
+
+#: 场次最外沿，只用于日志与本文件的边界判断。
+SESSION_START: Final[time] = SESSION_WINDOWS[0][0]
+SESSION_END: Final[time] = SESSION_WINDOWS[-1][1]
+
+#: 早盘首轮宽限：CPT 09:30 起采、约 09:32 落第一轮，在此之前「没有轮次」是正常的，
+#: 不告警（否则每天开盘前必来一条假警）。
+ALARM_GRACE_UNTIL: Final[time] = time(9, 35)
 
 #: 非盘中时的空闲轮询间隔（秒）。不扫表，只等下一次场次判定。
 IDLE_SEC: Final[int] = 120
@@ -371,10 +386,11 @@ def _alarm(text: str) -> bool:
 
 
 def in_session(at_bj: datetime, *, trading_day: bool | None = None) -> bool:
-    """此刻该不该扫：工作日 + 场内时段 + 交易日（`trading_day` 可注入，便于单测）。"""
+    """此刻该不该扫：工作日 + 场内时段（午休不算）+ 交易日（`trading_day` 可注入）。"""
     if at_bj.weekday() >= 5:
         return False
-    if not (SESSION_START <= at_bj.time().replace(microsecond=0) <= SESSION_END):
+    at = at_bj.time().replace(microsecond=0)
+    if not any(start <= at <= end for start, end in SESSION_WINDOWS):
         return False
     if trading_day is None:
         trading_day = is_trading_day(at_bj.date())
@@ -422,8 +438,8 @@ def loop(
     step = max(5, int(interval if interval is not None else intraday.SCAN_INTERVAL_SEC))
     wait = sleep or time_mod.sleep
     clock = now_fn or (lambda: datetime.now(_BJ))
-    log.info("盘中扫描循环启动：间隔 %ds，场次 %s–%s（北京）",
-             step, SESSION_START.strftime("%H:%M"), SESSION_END.strftime("%H:%M"))
+    log.info("盘中扫描循环启动：间隔 %ds，场次 %s（北京，午休不扫）",
+             step, " / ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in SESSION_WINDOWS))
     last: bool | None = None
     last_alarm: datetime | None = None
     last_round: Any = None
@@ -458,11 +474,15 @@ def loop(
         except Exception:  # noqa: BLE001 - 单轮失败不停摆
             log.exception("本轮扫描失败，等下一轮")
         age = _round_age_min(res.get("round_at"), now)
-        if age is None or age > STALE_MINUTES:
+        if now.time() >= ALARM_GRACE_UNTIL and (age is None or age > STALE_MINUTES):
             gap = last_alarm is None or (now - last_alarm).total_seconds() >= ALARM_GAP_SEC
             if gap:
-                _alarm(_stale_text(res, now, age))
+                ok = _alarm(_stale_text(res, now, age))
                 last_alarm = now
+                # 成功也要留痕：告警是异步的，日志没有「已推送」就等于没法回溯
+                log.warning("卡死告警已触发（%s）：最新一轮 %s，距今 %s 分钟",
+                            "已推送" if ok else "推送未配置/失败（不影响扫描）",
+                            res.get("round_at"), "?" if age is None else f"{age:.0f}")
         wait(step)
         done += 1
     return 0
