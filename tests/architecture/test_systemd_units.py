@@ -39,13 +39,29 @@
 
 from __future__ import annotations
 
+
+def _emotion_cpt_unit_dir() -> Path:
+    """unit 真相源：**Emotion-CPT 包内**（随契约包分发）。
+
+    ★ 2026-10-24：此前本仓自带一份副本，与线上、与 Emotion-CPT 各漂各的
+    （2026-10-07 审计已记录过「生产 vs 仓内严重漂移」）。
+    ⇒ 现在只有一份，且**跨仓**读同一份 ⇒ 本测试从「仓内自检」升级成「跨仓对账」。
+    """
+    try:
+        import emotion_cpt.deploy  # noqa: F401
+    except ImportError as exc:  # pragma: no cover - 契约包没装
+        raise AssertionError(
+            "emotion_cpt 没装 ⇒ 读不到 unit 真相源（pip install -e ../Emotion-CPT）"
+        ) from exc
+    return Path(emotion_cpt.deploy.__file__).resolve().parent / "systemd"
+
 import re
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-UNIT_DIR = REPO / "src" / "emotion_core" / "orchestration" / "systemd"
+UNIT_DIR = _emotion_cpt_unit_dir()  # ★ 真相源在 Emotion-CPT（随契约包分发）
 SRC = REPO / "src"
 
 _SERVICES = sorted(UNIT_DIR.glob("*.service"))
@@ -91,6 +107,38 @@ def test_unit_dir_is_not_empty():
     assert _SERVICES and _TIMERS, f"{UNIT_DIR} 下没有 service/timer 文件"
 
 
+#: emotion-core 仓根
+_EMO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _unit_is_own(path: Path) -> bool:
+    """这个 unit 是否属于 emotion-core 本仓。
+
+    ★ 2026-10-24：unit 真相源统一到 Emotion-CPT 之后，本目录里**混着别的仓的
+    unit**（CPT 的 5 个、Emotion-CPT 的 1 个）。
+
+    「`-m` 指向的模块真有入口吗」「Environment=PYTHONPATH 有吗」这两条判据
+    **需要仓内上下文**（模块在哪个仓、路径怎么拼）⇒ 只对本仓 unit 判。
+    在 emotion-core 里对 CPT 的 unit 判这条，只会得到**假失败**
+    （它跑到 emotion-core 的 src 下去找 `cpt.web`）。
+
+    其余与仓无关的判据（时区、drop-in、timer 依赖）仍然对**全部** unit 判。
+    """
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r"^WorkingDirectory=(.+)$", text, re.M)
+    if m and m.group(1).strip().startswith(str(_EMO_ROOT)):
+        return True
+    m = re.search(r"^ExecStart=(.+)$", text, re.M)
+    if m and str(_EMO_ROOT) in m.group(1):
+        return True
+    return False
+
+
+#: 只属于 emotion-core 的 unit（仓内上下文类判据用）
+_OWN_SERVICES = [p for p in _SERVICES if _unit_is_own(p)]
+_OWN_TIMERS = [p for p in _TIMERS if _unit_is_own(p)]
+
+
 class TestExecStart:
     """入口必须真有事可做：`-m` 模块或脚本，不能是 `python -c`。"""
 
@@ -105,7 +153,7 @@ class TestExecStart:
             f"  改为 `python -m <module>`，退出码与日志才有归宿。\n  当前：{cmd}"
         )
 
-    @pytest.mark.parametrize("path", _SERVICES, ids=lambda p: p.name)
+    @pytest.mark.parametrize("path", _OWN_SERVICES, ids=lambda p: p.name)
     def test_module_target_defines_main(self, path: Path):
         """`-m foo.bar` 必须真的有事可做。
 
@@ -131,7 +179,7 @@ class TestExecStart:
             f'`if __name__ == "__main__":` 守卫——`python -m` 会静默跑完就退出 0'
         )
 
-    @pytest.mark.parametrize("path", _SERVICES, ids=lambda p: p.name)
+    @pytest.mark.parametrize("path", _OWN_SERVICES, ids=lambda p: p.name)
     def test_env_lines_present(self, path: Path):
         """每个 oneshot 都要有 PYTHONPATH，否则 `python -m` 找不到包。"""
         envs = [v for k, v in _directives(path.read_text(encoding="utf-8")) if k == "Environment"]
@@ -155,10 +203,15 @@ class TestTimerTimezone:
                 dropin_values = _effective_on_calendar(conf.read_text(encoding="utf-8"))
         effective = dropin_values or own
         for spec in effective:
-            assert "/" in spec, (
+            # ★ 判的是「**有没有显式时区**」，不是「时区是不是 Asia/Shanghai」。
+            #   `08:00:00 UTC` = 北京 16:00，是**完全正确**的写法
+            #   （A 股快照收盘后跑）；原判据只认带 `/` 的形式 ⇒ 假失败。
+            last = spec.split()[-1] if spec.split() else ""
+            has_tz = "/" in last or last.upper() in {"UTC", "GMT"}
+            assert has_tz, (
                 f"{path.name} 的 OnCalendar={spec} 没带时区。\n"
                 f"  机器时区是 Etc/UTC，不写就会整体偏 8 小时（17:20 → 北京时间次日 01:20）。\n"
-                f"  写法：OnCalendar=Mon-Fri 17:20 Asia/Shanghai"
+                f"  写法：OnCalendar=Mon-Fri 17:20 Asia/Shanghai 或 OnCalendar=*-*-* 08:00:00 UTC"
             )
 
     @pytest.mark.parametrize("path", _TIMERS, ids=lambda p: p.name)
