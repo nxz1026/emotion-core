@@ -1,4 +1,12 @@
-"""口径守护：涨停价全项目唯一实现（AST 静态扫描）。
+"""口径守护：涨停价**全系统唯一实现**（AST 静态扫描）。
+
+★ 2026-10-24：唯一实现已迁至 **Emotion-CPT**（``emotion_cpt.structure.price``）。
+本仓的 ``utils/price.py`` 现在是**转发层** ⇒
+「本仓内不得再有第二套实现」这条断言**依然成立且更有意义**。
+Python 侧的前缀全集改从 Emotion-CPT 取 ⇒
+「Rust 侧 board_pct_milli 必须覆盖 Python 侧前缀」这条**跨语言对等门禁不变**。
+
+原始裁决（docs/13 §S2）：涨停价是 is_limit_up / 连板 / 家数判定的地基，错一分钱全错。
 
 裁决（docs/13 §S2）：涨停价是 is_limit_up / 连板 / 家数判定的地基，错一分钱全错。
 历史事故是「三套实现并存」（奎爷 V2 决策合一），故用 AST 扫描禁止 `utils/price.py`
@@ -20,6 +28,16 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "emotion_core"
 PRICE_MODULE = SRC / "utils" / "price.py"
+
+#: ★ 唯一实现的**真源**（Emotion-CPT 已安装 ⇒ 从它的包位置取，不写死路径）
+def _contract_price_module() -> Path:
+    try:
+        import emotion_cpt.structure.price as m
+    except ImportError as exc:  # pragma: no cover - 契约包没装
+        raise AssertionError(
+            "emotion_cpt 没装 ⇒ 无法核对唯一实现（pip install -e ../Emotion-CPT）"
+        ) from exc
+    return Path(m.__file__).resolve()
 RUST_INDICATORS = SRC / "core" / "src" / "indicators.rs"
 
 BANNED_FLOATS = {1.1, 1.2}
@@ -125,12 +143,30 @@ def _is_starts_with(func: ast.expr) -> bool:
 
 
 def _python_board_prefixes() -> dict[int, list[str]]:
-    """从 utils/price.board_pct_milli 的 AST 抽出 {返回值: [前缀...]}。
+    """从 **Emotion-CPT** 的 ``structure.price.board_pct_milli`` 抽出 {返回值: [前缀...]}。
 
     故意**从 Python 侧推导**而不是在测试里再抄一份表：测试与实现共用同一份
     真相，就不存在「两份表一起过期」的可能。
     """
-    tree = ast.parse(PRICE_MODULE.read_text(encoding="utf-8"))
+    src = _contract_price_module().read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    # ★ 模块级命名常量：名字 → int（Emotion-CPT 的实现用命名常量，
+    #   提取器若只认字面量就会抽出空字典 ⇒ 后续对等断言**空转通过**。
+    #   这条测试自己的 docstring 写过：「断言了但什么都没断言的测试比没有测试更危险」。
+    consts: dict[str, int] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        if node.value is None:
+            continue
+        try:
+            value = ast.literal_eval(node.value)
+        except (ValueError, SyntaxError):
+            continue
+        if isinstance(value, int) and not isinstance(value, bool):
+            consts[node.target.id] = value
+
     fn = next(n for n in tree.body
               if isinstance(n, ast.FunctionDef) and n.name == "board_pct_milli")
     out: dict[int, list[str]] = {}
@@ -140,13 +176,19 @@ def _python_board_prefixes() -> dict[int, list[str]]:
         ret = next((s for s in node.body if isinstance(s, ast.Return)), None)
         call = next((s for s in ast.walk(node.test)
                      if isinstance(s, ast.Call) and _is_starts_with(s.func)), None)
-        if (ret is None or call is None
-                or not isinstance(ret.value, ast.Constant)
-                or not isinstance(ret.value.value, int)):
+        if ret is None or call is None:
+            continue
+        if isinstance(ret.value, ast.Constant):
+            value = ret.value.value
+        elif isinstance(ret.value, ast.Name):
+            value = consts.get(ret.value.id)
+        else:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
             continue
         prefix = call.args[0]
         items = prefix.elts if isinstance(prefix, ast.Tuple) else [prefix]
-        out.setdefault(ret.value.value, []).extend(
+        out.setdefault(value, []).extend(
             i.value for i in items
             if isinstance(i, ast.Constant) and isinstance(i.value, str))
     return out
@@ -211,6 +253,11 @@ def test_rust_board_pct_covers_every_python_prefix():
 
 
 def test_limit_price_functions_defined_once():
+    """涨停/跌停价函数**本仓内不许有定义** —— 真源在 Emotion-CPT。
+
+    （2026-10-24 之前是「只许定义在 utils/price.py」；那之后 utils/price.py
+    变成转发层，唯一实现搬到 Emotion-CPT ⇒ 这条断言升级为「本仓内一个都不许有」。）
+    """
     defs: list[str] = []
     for path in _iter_py_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -219,15 +266,24 @@ def test_limit_price_functions_defined_once():
                     node.name.startswith("limit_up_price")
                     or node.name.startswith("limit_down_price")):
                 defs.append(f"{path}:{node.lineno} {node.name}")
-    assert not defs, f"涨停/跌停价函数只许定义在 utils/price.py：{defs}"
-    src = PRICE_MODULE.read_text(encoding="utf-8")
+    assert not defs, (
+        "涨停/跌停价的唯一定义处是 Emotion-CPT 的 emotion_cpt.structure.price，"
+        f"本仓内不得再有实现：{defs}"
+    )
+    # 真源里必须有这两个函数
+    src = _contract_price_module().read_text(encoding="utf-8")
     assert "def limit_up_price_cents(" in src
     assert "def limit_down_price_cents(" in src
+    # 本仓的转发层必须真的转发（不是自己抄一遍）
+    fwd = PRICE_MODULE.read_text(encoding="utf-8")
+    assert "from emotion_cpt.structure.price import" in fwd, (
+        "utils/price.py 必须是转发层（从 emotion_cpt.structure.price import）"
+    )
 
 
 def test_presentation_formula_is_derived_not_hardcoded():
     server = (SRC / "presentation" / "server.py").read_text(encoding="utf-8")
     assert "board_pct_milli" in server, (
-        "展示层涨停价文案必须由 utils/price 现算，不得写死 110")
+        "展示层涨停价文案必须由价口径现算（现转发到 Emotion-CPT），不得写死 110")
     assert "pre_close_cents * 110" not in server
     assert '"涨停价": "(pre_close_cents * 110 + 50) // 1000"' not in server

@@ -41,6 +41,10 @@ from typing import Any, Final
 
 from emotion_core.utils import price as price_util
 
+# ★ 2026-10-24：口径唯一实现已收敛到 Emotion-CPT。
+# emotion_core.utils.price 现在是转发层；板制与 ST 判定的真源在那边。
+from emotion_cpt.structure import price as _price
+
 __all__ = [
     "CHG_PCT_MIN",
     "EARLY_SEAL_DEADLINE",
@@ -94,10 +98,6 @@ _SHARES_PER_LOT: Final[int] = 100
 #: 各板块涨跌幅（百分比）。**按代码前缀判，不是按 ±10% 一刀切**。
 #: 主板 10；创业板 300/301 与科创板 688/689 是 20；北交所 8xx/4xx 是 30；
 #: ST 股在主板是 5（**但 ST 的判定要靠名字，不能只看代码** —— 见 `is_st_name`）。
-_PCT_LIMIT_MAIN: Final[float] = 10.0
-_PCT_LIMIT_GROWTH: Final[float] = 20.0
-_PCT_LIMIT_BSE: Final[float] = 30.0
-_PCT_LIMIT_ST: Final[float] = 5.0
 
 #: 主板前缀（沪深两市）。CPT 的 `a_share_snapshot.py` 用同一组（1702 只）。
 _MAIN_PREFIXES: Final[tuple[str, ...]] = (
@@ -115,48 +115,32 @@ _MAIN_PREFIXES: Final[tuple[str, ...]] = (
 def board_pct_limit(code: str, *, name: str | None = None) -> float:
     """这只票的涨跌停幅度（百分比）。
 
-    **判定顺序即口径**（与 CPT `cpt/domain/intraday_rules.py::board_of` 逐条对齐，
-    跨仓对账用例 `tests/oracle/test_intraday_rules_vs_cpt.py` 钉住）：
+    ★ 2026-10-24：口径已收敛到 Emotion-CPT（``emotion_cpt.structure.price``）——
+    此前本仓与 CPT 各写一份，靠跨仓对账用例维持一致；现在是**同一份**。
+
+    判定顺序即口径：
 
     1. 创业板 300/301、科创板 688/689 → 20%（ST 也是 20%）
     2. 北交所 920/8/4 → 30%（**ST 也是 30%** —— 北交所没有 5% 档）
     3. 主板 ST → 5%
     4. 其余 → 10%
 
-    ⚠️ 2026-10-22 修正：本函数原先把 ST 判定放在最前，北交所 ST 落到
-    「非主板 → 20%」，与 CPT 的 30% 不一致（跨仓 probe 实测 40 条
-    `limit_price` 不一致、60 条 `is_at_limit` 不一致，全部是
-    `920xxx` + ST 名的组合）。北交所 ST 按 20% 会算出**偏低的涨停价**，
-    于是「已经封板」被误判成「还没到板」——方向比漏报更糟。
+    ⚠️ 顺序不能改：把 ST 提到最前 ⇒ 北交所 ST 落到 20%，算出**偏低的涨停价**，
+    于是「已经封板」被误判成「还没到板」—— 方向比漏报更糟。
 
-    Args:
-        code: 6 位纯代码（E3 契约）。
-        name: 可选。**判断主板 ST 必须要它** —— ST 只看代码分不出来，
-            而 ST 在主板是 5% 而不是 10%。不传就按「非 ST」算，
-            这是**有意的乐观**：漏判 ST 会得出偏高的涨停价（判不出封板），
-            而不是偏低的（假封板）。宁可少报不可错报。
-
-    Returns:
-        `10.0` / `20.0` / `30.0` / `5.0`。
+    :param name: 判断主板 ST 必须要它（代码里分不出 ST）。不传按「非 ST」算，
+        这是**有意的乐观**：漏判 ST 得出偏高的涨停价（判不出封板），
+        而不是偏低的（假封板）。宁可少报不可错报。
     """
-    code = code.strip()
-    if code.startswith(("300", "301")) or code.startswith(("688", "689")):
-        # 创业板/科创板 20%，ST 同档。
-        return _PCT_LIMIT_GROWTH
-    if code.startswith(("920", "8", "4")):
-        # 北交所 30%，**ST 也 30%**（北交所没有 5% 档）。
-        return _PCT_LIMIT_BSE
-    if name is not None and is_st_name(name):
-        # 主板 ST 是 5%。走到这里说明不是创业板/科创板/北交所。
-        return _PCT_LIMIT_ST
-    return _PCT_LIMIT_MAIN
+    return _price.board_pct_limit(code, name=name)
 
 
 def is_st_name(name: str | None) -> bool:
-    """名字里带 ST 就是 ST。**只能靠名字** —— 代码里没有任何 ST 信息。"""
-    if not name:
-        return False
-    return "ST" in name.upper()
+    """名字里带 ST 就是 ST。**只能靠名字** —— 代码里没有任何 ST 信息。
+
+    ★ 2026-10-24：口径已收敛到 Emotion-CPT（``emotion_cpt.structure.price``）。
+    """
+    return _price.is_st_name(name)
 
 
 def is_main_board(code: str) -> bool:
