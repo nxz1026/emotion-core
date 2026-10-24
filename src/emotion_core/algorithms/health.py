@@ -238,11 +238,31 @@ def check_limit_state_audit(trade_date: date) -> str | None:
     bad = [r for r in rows if str(r.get("status")) in ("truncated", "suspect")]
     ok_rows = [r for r in rows if str(r.get("status")) == "ok"]
     problems: list[str] = []
+    #: **已知数据源差异**（owner 裁决 Q2=A：只记录、不告警）
+    known_deviations: list[str] = []
     wind = sum(int(r["n_wind"] or 0) for r in ok_rows)
     only_wind = sum(int(r["n_only_wind"] or 0) for r in ok_rows)
     only_self = sum(int(r["n_only_self"] or 0) for r in ok_rows)
     if only_self > 0:
-        problems.append(f"only_self 合计 {only_self} 只（本库判涨停而 Wind 未列）")
+        # ★ 2026-10-24 owner 裁决（Q2 = A）：**以本库为准**，
+        #   把 Wind 的差异记为**已知数据源差异** —— 不再当红灯。
+        #
+        # 实测（近 10 个交易日）：only_self 有 7 天非零、合计 58 只，
+        # 而 status 全是 ok ⇒ 真正让 watchdog 亮红的是这一条，
+        # 不是「断档」。owner 定调：本库口径为准，Wind 名单侧视为**已知偏差**。
+        #
+        # ⚠️ 但**不静默**：记进日志（可在巡检日志里回溯），
+        #    且**其余三类问题仍然是红灯**（only_wind 超阈值 / 名单不全 / 台账落后）
+        #    —— 那些是本库自己的问题。
+        known_deviations.append(
+            f"only_self 合计 {only_self} 只（本库判涨停而 Wind 未列）—— 已知数据源差异"
+        )
+        log.info(
+            "Wind 逐日涨跌停对账：已知数据源差异 only_self 合计 %d 只（窗口 %d 条台账）"
+            " —— 按 owner 裁决（Q2=A）以本库为准，不计入告警",
+            only_self,
+            len(rows),
+        )
     pct = only_wind / wind * 100 if wind else 0.0
     if wind and pct > LIMIT_AUDIT_ONLY_WIND_PCT:
         problems.append(f"only_wind 占比 {pct:.2f}%（阈值 {LIMIT_AUDIT_ONLY_WIND_PCT}%，"
@@ -258,10 +278,17 @@ def check_limit_state_audit(trade_date: date) -> str | None:
         if gap >= LIMIT_AUDIT_STALE_DAYS:
             problems.append(f"台账最近抓取日 {last_ledger}，落后 derived_bar"
                             f" {last_data} 共 {gap} 个交易日（阈值 {LIMIT_AUDIT_STALE_DAYS}）")
+    if known_deviations:
+        # 有已知差异但没有真问题 ⇒ **不告警**（返回 None）
+        # ⇒ 调用方（CHECKS 框架）不会记 alert ⇒ watchdog 不再为此亮红
+        log.info("Wind 对账已知差异：%s", "；".join(known_deviations))
     if not problems:
         return None
-    return (f"Wind 逐日涨跌停对账异常（窗口 {len(rows)} 条台账、"
-            f"{len(ok_rows)} 条可算）：" + "；".join(problems))
+    detail = (f"Wind 逐日涨跌停对账异常（窗口 {len(rows)} 条台账、"
+              f"{len(ok_rows)} 条可算）：" + "；".join(problems))
+    if known_deviations:
+        detail += "（另有已知数据源差异：" + "；".join(known_deviations) + "）"
+    return detail
 
 
 def check_theme_coverage(trade_date: date) -> str | None:

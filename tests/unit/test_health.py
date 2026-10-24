@@ -545,11 +545,20 @@ class TestCheckLimitStateAudit:
         db.data = [D0]
         assert health.check_limit_state_audit(D0) is None
 
-    def test_only_self_nonzero_always_warns(self, db, gap):
+    def test_only_self_is_known_deviation_not_a_problem(self, db, gap, caplog):
+        """★ owner 裁决 Q2=A：**以本库为准** ⇒ only_self 是**已知数据源差异**，
+        **不再告警**（返回 None ⇒ watchdog 不亮红）。
+
+        但**不静默**：它必须被**记录**下来（caplog 里能看到），
+        否则就成了「悄悄吞掉」—— 那比亮红更糟。
+        """
         db.limit_ledger = [self._ok(D0, n_only_self=3)]
         db.data = [D0]
-        detail = health.check_limit_state_audit(D0)
-        assert "only_self 合计 3 只" in detail
+        with caplog.at_level("INFO", logger="emotion_core.health"):
+            detail = health.check_limit_state_audit(D0)
+        assert detail is None, f"已知差异不该告警，却返回了：{detail}"
+        assert "已知数据源差异" in caplog.text
+        assert "only_self 合计 3 只" in caplog.text
 
     def test_only_wind_over_threshold_warns(self, db, gap):
         db.limit_ledger = [self._ok(D0, n_wind=100, n_only_wind=6)]
