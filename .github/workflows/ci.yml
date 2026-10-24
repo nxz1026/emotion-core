@@ -107,3 +107,16 @@ jobs:
 
       - name: No gate escapes the health check
         run: python scripts/check_gate_coverage.py
+
+      # ★ 2026-10-24：契约门禁（Emotion-CPT）——
+      #   本仓从 Emotion-CPT import 价格常量（判据唯一真源在那边）。
+      #   这条守三件事：① 别又手抄常量回去 ② 9 列封板快照别漂
+      #   ③ pin 的契约版本别落后。
+      - name: Install emotion-cpt contract package
+        run: |
+          # 版本取自本仓 pyproject —— 单一真相源，不在这里复写一遍 tag
+          SPEC=$(python -c "import tomllib,pathlib;d=tomllib.loads(pathlib.Path('pyproject.toml').read_text());print([x for x in d['project']['dependencies'] if x.startswith('emotion-cpt')][0])")
+          python -m pip install "$SPEC"
+
+      - name: Contract gate (Emotion-CPT)
+        run: python -m emotion_cpt.cli.check_contracts --upstream-root .
