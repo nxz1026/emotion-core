@@ -352,6 +352,53 @@ def check_limit_state_audit(trade_date: date) -> str | None:
     return detail
 
 
+def limit_state_deviation(trade_date: date) -> dict:
+    """Wind 逐日涨跌停对账的**已知差异**快照（★2026-10-25 新增，给日报用）。
+
+    owner 裁决 Q2=A：only_self（本库判涨停而 Wind 名单没有）**以本库为准**，
+    不当红灯（见 `check_limit_state_audit`）。但「不告警」不等于「不看见」——
+    差异静默累积，没人知道本库的涨停口径哪天开始和权威名单分家。
+
+    本函数把那串差异读出来，供日报趋势段展示：每天多少只、连续几天。
+    与 `check_limit_state_audit` 共用同一张台账 `ref_limit_state_run`，
+    但**口径不同**：这里只取 `status='ok'` 的行（名单不全的日子不参与统计），
+    且不产生任何告警。
+    """
+    df = query_df(
+        "SELECT date, direction, status, n_wind, n_only_wind, n_only_self"
+        " FROM ref_limit_state_run WHERE date <= %s"
+        " ORDER BY date DESC LIMIT %s",
+        (trade_date, LIMIT_AUDIT_DAYS),
+    )
+    if df.empty:
+        return {"available": False, "reason": "对账台账为空", "days": [], "total": 0}
+    rows = df.to_dict("records")
+    ok_rows = [r for r in rows if str(r.get("status")) == "ok"]
+    per_day: list[dict] = []
+    total = 0
+    for r in ok_rows:
+        n = int(r.get("n_only_self") or 0)
+        if n <= 0:
+            continue
+        total += n
+        per_day.append(
+            {
+                "date": r["date"],
+                "direction": r.get("direction"),
+                "n_only_self": n,
+                "n_wind": int(r.get("n_wind") or 0),
+            }
+        )
+    return {
+        "available": True,
+        "days": per_day,
+        "total": total,
+        "n_days": len(per_day),
+        "window_rows": len(rows),
+        "ok_rows": len(ok_rows),
+    }
+
+
 def check_theme_coverage(trade_date: date) -> str | None:
     """题材自产的空转/覆盖率告警（★2026-10-15 新增）。
 

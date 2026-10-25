@@ -22,6 +22,7 @@ from emotion_core.algorithms import (
     caliber_b,
     entry,
     exit as exit_svc,
+    health,
     ladder,
     phase_persistence,
     reconcile,
@@ -1068,6 +1069,46 @@ def _sec_review(d: dict) -> list[str]:
     return out
 
 
+def _sec_limit_state_deviation(d: dict) -> list[str]:
+    """⑩ 段尾部：Wind 涨跌停对账的**已知差异**趋势（★2026-10-25 新增）。
+
+    owner 裁决 Q2=A：only_self（本库判涨停而 Wind 名单没有）以本库为准、
+    **不当红灯**（见 `algorithms/health.py::check_limit_state_audit`）。
+    但不告警 ≠ 不看见——差异静默累积就没人知道本库的涨停口径哪天开始
+    和权威名单分家。这里把最近窗口里每天差多少只摆出来，属**观测**不是告警。
+    """
+    try:
+        dev = health.limit_state_deviation(d["date"])
+    except Exception as exc:  # noqa: BLE001 — 观测失败不许拖垮报告
+        return ["", f"**涨跌停对账差异**：这轮算不出来（{type(exc).__name__}: {exc}）"]
+    if not dev.get("available"):
+        return ["", "**涨跌停对账差异**：对账台账为空（逐日对账还没跑过）"]
+    if not dev["days"]:
+        return [
+            "",
+            "**涨跌停对账差异**：最近窗口内本库与 Wind 名单完全一致（0 只差异）",
+        ]
+    out = [
+        "",
+        f"**涨跌停对账差异（已知、不告警）**：最近 {dev['window_rows']} 条台账里，"
+        f"{dev['n_days']} 天有差异，合计 {dev['total']} 只"
+        "（本库判涨停而 Wind 名单没有）",
+        "",
+        "| 日期 | 方向 | 差异只数 | Wind 名单只数 |",
+        "|---|---|---|---|",
+    ]
+    for r in dev["days"]:
+        out.append(
+            f"| {r['date']} | {r['direction'] or '—'} | {r['n_only_self']} | {r['n_wind']} |"
+        )
+    out.append("")
+    out.append(
+        "> 按 owner 裁决以本库为准，这串差异只记录不告警；"
+        "若持续放大，说明本库涨停口径在退化，需要人工看一眼。"
+    )
+    return out
+
+
 def _sec_secondary_block(sec: dict | None) -> list[str]:
     """V14.1 拆函数（E1 红线）：次级推荐区块——checklist + 观察标注。
 
@@ -1255,7 +1296,7 @@ def _sec_quality(d: dict) -> str:
     lines.append(_fmt_caliber(d["caliber"]))
     for warn in q.get("warns", []):
         lines.append(f"⚠ {warn}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n" + "\n".join(_sec_limit_state_deviation(d)) + "\n"
 
 
 def render_json(d: dict) -> str:

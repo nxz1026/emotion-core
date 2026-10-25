@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-25 静态检查债务棘轮转绿（门禁 A/B 双绿）
+
+- 门禁 A（`scripts/check_doc_numbers.py`）5 处文档计数与实测对齐：schema.py / README.md 的「36 张表」→「37 张表」；`docs/15-实施追踪.md` 层表 algorithms 25→29、data 25→27、services 36→37。
+- 门禁 B（`scripts/check_lint_debt.py`）：`ruff format src tests`（252 files）⇒ 待格式化文件 0；`ruff check --fix`（87 处）⇒ 286→149 errors（I001 57 / E501 15 / B905 13 / E402 7 / F841 5 / F821 5），较基线 −127。
+- 清掉 24 个「已删但仍在磁盘」的僵尸文件（死模块 `services/{execution,provider_service,revision}.py`、`data/providers/tencent.py`、4 个旧测试、15 个旧 systemd unit、`presentation/static/{app.js,style.css}`）——其中 `app.js`/`style.css` 会让 `tests/unit/test_presentation_holding.py::test_no_orphan_static_file` 真红。
+- 顺手修 3 个真 bug：`presentation/strategy_view.py` 用了未定义的 `log`（NameError）、`services/notify.py` 4 条超长行、`algorithms/alerts.py` 1 条超长行。
+- ⚠️ 坑：`ruff --fix` 的 F401 删掉了 `algorithms/levels.py` 从 `emotion_cpt` 转发的 `BI_LOOKBACK`/`ZHONGSHU_LOOKBACK`，把 `holding_service.py` 打成 ImportError —— autofix 后必须人工复核 re-export。
+
+### 功能 · 2026-10-25 涨跌停对账已知差异进日报（观测面，不是告警）
+
+- `algorithms/health.py` 新增 `limit_state_deviation()`：把 owner 裁决 Q2=A 判为「已知数据源差异」的 only_self（本库判涨停而 Wind 名单没有）读出来，**只取 `status='ok'` 的台账行**。
+- `algorithms/review/__init__.py` ⑩ 数据质检段尾巴新增「涨跌停对账差异（已知、不告警）」小节：最近窗口逐日差异只数 + 合计 + 「若持续放大说明本库涨停口径在退化」提示。
+- 实测：2026-10-22 最近 10 条台账里 4 天有差异、合计 40 只（此前只落日志，日报看不见）。
+
+
 ### 修复 · 2026-10-23 盘中触发结算的时刻与范围
 
 - `SETTLE_AFTER` 15:05 → **17:35**：D 日触发的卖出价是 D+1 开盘，日线要等 D+1 盘后 pipeline 才落库，15:05 结必然「待定」。

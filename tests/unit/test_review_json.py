@@ -71,6 +71,7 @@ def test_render_json_v24_sections():
 def test_quality_renders_four_states():
     """P1-12：diff 四态——None(缺池)≠empty(无差异)，绝不混渲染。"""
     import pandas as pd
+
     from emotion_core.algorithms import review as rv
 
     rv._fmt_caliber = lambda c: ""  # 口径元数据与四态无关
@@ -83,3 +84,40 @@ def test_quality_renders_four_states():
     # 有行 = 差异 → 人工复核
     s = rv._sec_quality({"quality": {"diff": pd.DataFrame({"a": [1]}), "warns": []}, "caliber": {}})
     assert "对账差异" in s
+
+
+def test_limit_state_deviation_section_renders(monkeypatch):
+    """★2026-10-25：known-deviation 观测面在 ⑩ 段尾巴（不是告警，是观测）。"""
+    from emotion_core.algorithms import review as rv
+
+    rv._fmt_caliber = lambda c: ""
+    d = {
+        "date": date(2026, 10, 22),
+        "quality": {"diff": None, "warns": []},
+        "caliber": {},
+    }
+    monkeypatch.setattr(
+        rv.health, "limit_state_deviation", lambda td: {"available": True, "days": [], "total": 0}
+    )
+    s = rv._sec_quality(d)
+    assert "涨跌停对账差异" in s
+    assert "对账台账为空" not in s  # available=True 不该走空台账分支
+
+    monkeypatch.setattr(
+        rv.health,
+        "limit_state_deviation",
+        lambda td: {
+            "available": True,
+            "days": [
+                {"date": date(2026, 10, 21), "direction": "up", "n_only_self": 7, "n_wind": 43}
+            ],
+            "total": 7,
+            "n_days": 1,
+            "window_rows": 10,
+            "ok_rows": 9,
+        },
+    )
+    s = rv._sec_quality(d)
+    assert "合计 7 只" in s
+    assert "2026-10-21" in s
+    assert "不告警" in s

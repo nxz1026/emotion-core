@@ -683,6 +683,68 @@ class TestCheckLimitStateAudit:
         assert ("limit_audit", health.check_limit_state_audit) in health.CHECKS
 
 
+# ────────── limit_state_deviation（★2026-10-25 新增：已知差异的观测面）──────────
+
+
+class TestLimitStateDeviation:
+    """owner 裁决 Q2=A：only_self 以本库为准、**不告警**。
+
+    但「不告警」不等于「不看见」——本函数把那串差异读出来供日报展示。
+    口径：只取 `status='ok'` 的行（名单不全的日子不参与统计）。
+    """
+
+    def _ok(self, day, **kw):
+        row = {
+            "date": day,
+            "direction": "up",
+            "status": "ok",
+            "n_wind": 83,
+            "n_only_wind": 2,
+            "n_only_self": 0,
+        }
+        row.update(kw)
+        return row
+
+    def test_empty_ledger_reports_unavailable(self, db, gap):
+        dev = health.limit_state_deviation(D0)
+        assert dev["available"] is False
+        assert dev["total"] == 0 and dev["days"] == []
+        sql, params = db.calls[0]
+        assert "FROM ref_limit_state_run" in sql and "LIMIT %s" in sql
+        assert params == (D0, health.LIMIT_AUDIT_DAYS)
+
+    def test_only_self_days_are_listed_not_alerted(self, db, gap):
+        db.limit_ledger = [
+            self._ok(date(2026, 9, 21), n_only_self=7),
+            self._ok(date(2026, 9, 22), n_only_self=11),
+        ]
+        dev = health.limit_state_deviation(D0)
+        assert dev["available"] is True
+        assert dev["total"] == 18
+        assert dev["n_days"] == 2
+        assert [r["n_only_self"] for r in dev["days"]] == [7, 11]
+
+    def test_zero_difference_days_are_not_listed(self, db, gap):
+        db.limit_ledger = [self._ok(D0, n_only_self=0)]
+        dev = health.limit_state_deviation(D0)
+        assert dev["days"] == [] and dev["total"] == 0
+
+    def test_non_ok_status_excluded_from_stats(self, db, gap):
+        """名单不全的日子（truncated/suspect）计数不可信 ⇒ 不参与统计。"""
+        db.limit_ledger = [
+            self._ok(D0, n_only_self=3),
+            self._ok(date(2026, 9, 21), n_only_self=99, status="suspect"),
+        ]
+        dev = health.limit_state_deviation(D0)
+        assert dev["total"] == 3
+        assert len(dev["days"]) == 1
+
+    def test_does_not_produce_alert(self, db, gap):
+        """观测面**只读不告警**：返回 dict，不是 detail 字符串。"""
+        db.limit_ledger = [self._ok(D0, n_only_self=5)]
+        assert isinstance(health.limit_state_deviation(D0), dict)
+
+
 # ──────────────── check_theme_coverage（★2026-10-15 新增）────────────────
 
 
