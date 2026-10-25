@@ -6,7 +6,21 @@
 
 ## [Unreleased]
 
-### 修复 · 2026-10-25 静态检查债务棘轮转绿（门禁 A/B 双绿）
+### 修复 · 2026-10-25 Lab alarm —— lab_outcome 从未写入导致产出全空
+
+- 新增 `_INSERT_OUTCOME`（lab/score.py）+ `_write_outcomes()`（lab/search.py）；`run()` / `_persist()` 在 `store_outcomes=True` 时把每个变体的逐条收益写库。
+- `score_signals()` 输出新增 `is_limit_up`/`is_bomb` 列（来自面板，供 `lab_outcome.sealed/broke` 用）。
+- 实跑 17 个变体写入 6064 行 → alarm 解除。
+- 验证：`tests/unit` 全量 2501 passed / 1 skipped（166s）。
+
+### 修复 · 2026-10-25 lint 债务清零收尾（149 → 8 errors）
+
+- B905 `zip()` 全仓补 `strict=False`（13 处）。
+- E501 line-too-long 手动拆行（17 处，含 algorithms/state.py / algorithms/alerts.py / orchestration/pipeline.py / utils/db.py 等）。
+- F841/E731/E741/B017 手修（dragon_env.py `l`→`layer`、notify.py 拆 f-string、test_intraday_quote_vs_cpt.py `Exception`→`ValueError` 等）。
+- `algorithms/levels.py` 修复 F401 autofix 误删 `BI_LOOKBACK`/`ZHONGSHU_LOOKBACK` re-export。
+- `services/ingest.py` 删死代码块（`_hist_rows`/`NoDataError`/`_mark_done`/`_pending_codes` 4 个未定义名 + 2 个无调用方函数）。
+- **当前 8 条均为有意保留**：E402 × 6（TYPE_CHECKING / lazy import）+ UP042 × 2（str+enum 三元继承）。
 
 - 门禁 A（`scripts/check_doc_numbers.py`）5 处文档计数与实测对齐：schema.py / README.md 的「36 张表」→「37 张表」；`docs/15-实施追踪.md` 层表 algorithms 25→29、data 25→27、services 36→37。
 - 门禁 B（`scripts/check_lint_debt.py`）：`ruff format src tests`（252 files）⇒ 待格式化文件 0；`ruff check --fix`（87 处）⇒ 286→149 errors（I001 57 / E501 15 / B905 13 / E402 7 / F841 5 / F821 5），较基线 −127。

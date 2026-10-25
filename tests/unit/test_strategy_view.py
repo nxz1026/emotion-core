@@ -1,4 +1,4 @@
-"""策略观察台（presentation.strategy_view）：_safe_date / strategy_dates / load_strategy / to_api。"""
+"""策略观察台（presentation.strategy_view）：_safe_date / strategy_dates / load_strategy / to_api。"""  # noqa: E501
 
 from __future__ import annotations
 

@@ -252,7 +252,7 @@ class CptIntradayProvider:
             log.warning("读 CPT 盘中表失败：%s", exc)
             return None
         for row in rows:
-            record = dict(zip(names, row))
+            record = dict(zip(names, row, strict=False))
             code = str(record.get("code") or "").strip()
             if not code:
                 continue
@@ -292,7 +292,7 @@ class CptIntradayProvider:
             log.warning("读 CPT 盘中表失败：%s", exc)
             return None
         for row in rows:
-            record = dict(zip(names, row))
+            record = dict(zip(names, row, strict=False))
             code = str(record.get("code") or "").strip()
             if not code:
                 continue

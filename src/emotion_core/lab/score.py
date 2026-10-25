@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
         return 0
-    allst = out["detail"]["all"]
+    out["detail"]["all"]
     filled = out["detail"]["filled"]
     print(
         f"n={out['n']} 成交率={out['fill_rate']}% 每信号={out['expectancy']}% "

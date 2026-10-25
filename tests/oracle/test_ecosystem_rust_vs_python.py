@@ -41,7 +41,7 @@ from emotion_core.core import emotion_core_rust as rust  # noqa: E402
 )
 def test_g1(h_series, expected_ok):
     # Python 版：all(b >= a for a, b in pairwise(hs)) and hs[-1] > hs[0]
-    py_ok = all(b >= a for a, b in zip(h_series, h_series[1:])) and h_series[-1] > h_series[0]
+    py_ok = all(b >= a for a, b in zip(h_series, h_series[1:], strict=False)) and h_series[-1] > h_series[0]  # noqa: E501
     rust_ok, rust_note = rust.g1_height_expanding(h_series, 3)
     assert rust_ok == py_ok == expected_ok, f"h_series={h_series}: rust={rust_ok} py={py_ok}"
 

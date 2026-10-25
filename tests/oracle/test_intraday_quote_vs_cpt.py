@@ -112,16 +112,16 @@ class TestParseMatchesCpt:
 
     def test_too_few_fields_raises(self, cpt_parser):
         bad = 'var hq_str_sz000002="1,2,3";\n'
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             mine.parse_sina_quotes(bad)
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             cpt_parser(bad)
 
     def test_none_matched_raises(self, cpt_parser):
         text = _response([("sz000002", _row())])
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             mine.parse_sina_quotes(text, expected=["sz999999"])
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             cpt_parser(text, expected=["sz999999"])
 
 
@@ -140,7 +140,7 @@ class TestNormalizeCode:
         assert mine.normalize_code("830799") == "bj830799"
 
     def test_bad_code_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             mine.normalize_code("abcdef")
 
 

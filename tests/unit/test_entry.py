@@ -485,7 +485,7 @@ class TestCheckRecommendSignal:
     def test_signal_carries_name_and_cont_days(self, monkeypatch):
         """R58-4：Signal 内存字段 name/cont_days 在 RECOMMEND 也填充。"""
         # 600001 是 _prev_rows 默认组里的候选 → c3 过
-        calls = patch_io(
+        patch_io(
             monkeypatch,
             today=[cand(cont=4, code="600001")],
             prev=_prev_rows(),

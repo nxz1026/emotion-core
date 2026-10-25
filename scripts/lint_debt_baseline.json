@@ -1,22 +1,9 @@
 {
-  "ruff_check_errors": 276,
-  "ruff_format_files": 225,
+  "ruff_check_errors": 8,
+  "ruff_format_files": 0,
   "by_rule": {
-    "E501": 76,
-    "F401": 72,
-    "I001": 45,
-    "B905": 11,
-    "E741": 2,
-    "F841": 7,
-    "B007": 2,
-    "E731": 2,
-    "F821": 6,
-    "F541": 1,
-    "E402": 4,
-    "F811": 6,
-    "E701": 2,
-    "B034": 1,
-    "B009": 1,
-    "W292": 1
-  }
+    "E402": 6,
+    "UP042": 2
+  },
+  "note": "2026-10-25 夜：149→8。E402（TYPE_CHECKING/lazy import）×6 + UP042（str+enum 三元继承）×2，均为有意保留。"
 }

@@ -69,7 +69,7 @@ def _parse_events(data: dict) -> list[dict]:
         columns = [c.get("name", "") for c in table.get("columns", [])]
         rows = table.get("rows", [])
         for row in rows:
-            raw = dict(zip(columns, row))
+            raw = dict(zip(columns, row, strict=False))
             # 格式 1: ST 变动
             if "实施ST日期" in raw:
                 event_date = raw.get("实施ST日期", "")
@@ -809,7 +809,7 @@ def populate_is_st_from_wind(
             for table in tables:
                 columns = [c.get("name", "") for c in table.get("columns", [])]
                 for row in table.get("rows", []):
-                    raw = dict(zip(columns, row))
+                    raw = dict(zip(columns, row, strict=False))
                     risk_flag = raw.get("是否属于风险警示板", "")
                     if risk_flag == "是":
                         with db_connect() as conn:

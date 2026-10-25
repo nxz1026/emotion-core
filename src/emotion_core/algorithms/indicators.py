@@ -49,7 +49,7 @@ def compute_derived(bars: list[Bar]) -> list[DerivedBar]:
         cont = 0
         for b in rows:
             lim_up = limit_up_price_cents(b.pre_close_cents, code)
-            lim_down = limit_down_price_cents(b.pre_close_cents, code)
+            limit_down_price_cents(b.pre_close_cents, code)
             lu = is_limit_up(b.close_cents, b.pre_close_cents, code)
             ld = is_limit_down(b.close_cents, b.pre_close_cents, code)
             ow = b.low_cents >= lim_up  # 一字板

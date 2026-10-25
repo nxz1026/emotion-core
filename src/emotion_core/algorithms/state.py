@@ -1,13 +1,19 @@
-"""状态机（4 相 + 优先级 + buy_window）。语义逐字照搬 lkl/services/emotion.py。
+"""状态机（4 相 + 优先级 + buy_window）。
+语义逐字照搬 lkl/services/emotion.py。
 
 规则（优先级 退潮 > 高潮 > 发酵 > 冰点，first match wins）：
-- 退潮：两天最高板都断了 OR zt_perf < EBB_ZT_PERF OR 跌停激增（≥EBB_LD_MIN 且 >EBB_LD_MULT× 昨日）
-- 高潮：limit_up_count > CLIMAX_COUNT OR bomb_rate > bomb_threshold OR top_amplitude > CLIMAX_AMPLITUDE
-- 发酵：height ≥ FERMENT_MIN_DAYS AND zt_perf > FERMENT_ZT_PERF 连续两天 AND 涨停数连续两天上升
-- 冰点：height ≤ ICE_MAX_DAYS AND count < ICE_COUNT_MAX AND (反转确认 OR 无唯一候选)
+- 退潮：两天最高板都断了 OR zt_perf < EBB_ZT_PERF OR
+    跌停激增（≥EBB_LD_MIN 且 >EBB_LD_MULT× 昨日）
+- 高潮：limit_up_count > CLIMAX_COUNT OR bomb_rate > bomb_threshold
+    OR top_amplitude > CLIMAX_AMPLITUDE
+- 发酵：height ≥ FERMENT_MIN_DAYS AND zt_perf > FERMENT_ZT_PERF
+    连续两天 AND 涨停数连续两天上升
+- 冰点：height ≤ ICE_MAX_DAYS AND count < ICE_COUNT_MAX
+    AND (反转确认 OR 无唯一候选)
 - 无命中 → 继承昨日；首日 seed 冰点
 
-window_of: 发酵→STANDARD, 高潮→ENHANCED, 退潮→STANDARD（解禁，见下）, 冰点→NONE
+window_of: 发酵→STANDARD, 高潮→ENHANCED,
+    退潮→STANDARD（解禁，见下）, 冰点→NONE
 
 W7′ 退潮解禁（2026-10-21 实测定档，_audit/2026-10-21-修正方案-实测定档.md）：
 旧口径把「退潮」映射为 buy_window=NONE + force_liquidate=True（禁买 + 清仓）。全史

@@ -300,3 +300,16 @@ B 轮的教训直接套用：**别用 `LEFT JOIN LATERAL` 逐行找前一日**�
 - 淘汰后的「连续 2 窗进前 20%」才可复活/晋升的历史序列；目前 `retired` 只按单轮 LCB 差判定。
 - 飞书摘要的定时：`emotion-lab.timer` 每日 17:45 跑一遍（面板 + 基线 + 搜索 + 推送，实测全流程约 40s），
   hold-out 窗口随之前移，等价于每日前滚一天。
+
+### 15.5 alarm 修复：lab_outcome 从未写入（2026-10-25 夜）
+
+**现象**：`lab.lab_outcome` 0 行（alarm 报「17 个变体、过门禁 0 个、lab.lab_outcome 0 行」）。
+
+**根因**：`schema.py` 建了 `lab_outcome` 表但**没有任何代码写它**。`score.py` 的 `score_signals()` 算完逐条收益只汇总进 `lab_score`，没落库。
+
+**修复**：
+- `lab/score.py` 新增 `_INSERT_OUTCOME`；`run()` persist 时把 `scored` 写入 `lab_outcome`（variant_id=baseline_mainline）。
+- `lab/search.py`：`evaluate()` 加 `store_outcomes=True` 参数（只对主变体存、邻域不存）；`_persist()` 加 `outcomes_map` + `_write_outcomes()` 把 17 个变体的逐条收益写库。
+- `score_signals()` 输出新增 `is_limit_up`/`is_bomb` 列（来自面板）。
+
+**验证**：实跑写入 6064 行（17 个变体）→ alarm 解除。`tests/unit` 2501 passed / 1 skipped。

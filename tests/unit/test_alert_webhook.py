@@ -1,7 +1,8 @@
 """tests/unit/test_alert_webhook.py
 
 P0-B: alerts.py:97 动态 import 接缝 — _push 模块路径搜索顺序 + 失败回退链。
-告警失效 4 天的根因是 notify 模块从 services 移入 algorithms，但旧路径优先尝试触发 ImportError → except ImportError 静默吞掉 → webhook 永远不发。
+告警失效 4 天的根因是 notify 模块从 services 移入 algorithms，
+但旧路径优先尝试触发 ImportError → except ImportError 静默吞掉 → webhook 永远不发。
 修复后：services 优先、algorithms 兜底，任一缺失仍降级为 False。
 
 另覆盖 `_days_active`（2026-10-19 补）：原 `test_items_trigger_push` 把「第 1 天/第 2 天」

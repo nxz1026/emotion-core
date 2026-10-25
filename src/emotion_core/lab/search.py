@@ -310,7 +310,7 @@ def _persist(
     windows: tuple[list[date], list[date]],
     *,
     trials: int,
-    outcomes_map: dict[str, "pd.DataFrame"] | None = None,
+    outcomes_map: dict[str, pd.DataFrame] | None = None,
 ) -> None:
     """写 lab schema：变体登记 + 两段评分 + 待批提案 + 逐条收益（lab_outcome）。"""
     sel_days, hold_days = windows
@@ -395,7 +395,7 @@ def _persist(
 
 def _write_outcomes(
     conn,
-    outcomes_map: dict[str, "pd.DataFrame"],
+    outcomes_map: dict[str, pd.DataFrame],
 ) -> int:
     """把每个变体的逐条收益写进 lab.lab_outcome。返回写入行数。"""
     total = 0

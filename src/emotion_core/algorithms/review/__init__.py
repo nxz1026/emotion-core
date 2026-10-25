@@ -47,7 +47,6 @@ from emotion_core.algorithms.review.utils import (
     _pct,
     _pctv,
     _seal_notes,
-    _strip_position_block,
     _usability,
 )
 from emotion_core.algorithms.review.wording import translate_phase, translate_window
@@ -993,7 +992,7 @@ def _sec_advice(d: dict) -> str:
         if warns:
             lines.append("")
             lines.append("**风险提示**：")
-            for name, ok, note in warns:
+            for name, _ok, note in warns:  # noqa: B007
                 lines.append(f"- ⚠ {name}: {note}")
     else:
         lines.append(_no_signal_reason(d))

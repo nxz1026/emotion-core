@@ -100,7 +100,7 @@ class TestTransaction:
 
         with patch("emotion_core.utils.db.psycopg.connect", return_value=mock_conn):
             try:
-                with db.transaction() as conn:
+                with db.transaction():
                     raise ValueError("test error")
             except ValueError:
                 pass

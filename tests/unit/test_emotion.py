@@ -569,7 +569,7 @@ def test_row_mapping_and_inf():
     )
     row = emotion._row(s)
     assert len(row) == len(emotion._COLS) == 23
-    assert dict(zip(emotion._COLS, row)) == {
+    assert dict(zip(emotion._COLS, row, strict=False)) == {
         "date": _D,
         "limit_up_count": 55,
         "bomb_rate": 0.3333,
@@ -630,7 +630,7 @@ def test_persist_writes_only_target_day(patch_io, monkeypatch):
     written = patch_io(fake, calendar)
     assert emotion.persist(target) is None
     assert len(written) == 1
-    row = dict(zip(emotion._COLS, written[0]))
+    row = dict(zip(emotion._COLS, written[0], strict=False))
     assert row["date"] == target
     assert row["limit_up_count"] == 50 and row["max_limit_days"] == 4
     assert row["phase"] == "高潮"  # 当日无规则命中 → 延续 seed（昨日落库）

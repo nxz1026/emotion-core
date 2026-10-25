@@ -67,7 +67,7 @@
 同一交易日分别调 lkl.services.dragon_env 与本模块同名函数，逐值比对。
 """
 
-# ✅ Rust 实现（oracle 对账通过；2026-09-30 全量 1857 passed + 2 skipped）：src/emotion_core/core/src/ecosystem.rs
+# ✅ Rust 实现（oracle 对账通过；2026-09-30 全量 1857 passed + 2 skipped）：src/emotion_core/core/src/ecosystem.rs  # noqa: E501
 # 纯判定逻辑（g1~g4 / b1~b5 / _verdict / rate）由 Rust 执行；本文件保留 DB 查询
 # 与 IO 适配层（_series / _tradable_theme_members / _B3_SQL），数据备好后送 Rust 判定。
 # 对账测试：tests/oracle/test_ecosystem_rust_vs_python.py（47 tests，同输入同输出）。
@@ -448,7 +448,7 @@ def ladder_health(trade_date: date) -> dict:
 
 def _unpack_groups(h: object) -> dict[int, int]:
     """Rust LadderHealth groups_keys/groups_vals → dict[int, int]（降序）。"""
-    return dict(sorted(zip(h.groups_keys, h.groups_vals), reverse=True))
+    return dict(sorted(zip(h.groups_keys, h.groups_vals, strict=False), reverse=True))
 
 
 def promotion_strength(trade_date: date, prior: list | None = None) -> dict:
@@ -480,16 +480,16 @@ def promotion_strength(trade_date: date, prior: list | None = None) -> dict:
     ps = _rust.promotion_strength(rust_layers, prior_list)
     layers_out = [
         {
-            "layer": l.layer,
-            "promote_nominal": l.promote_nominal,
-            "promote_exchange": l.promote_exchange,
-            "rate_nominal": l.rate_nominal,
-            "rate_exchange": l.rate_exchange,
-            "divergence": l.divergence,
-            "fail_perf": l.fail_perf,
-            "delta_exchange": l.delta_exchange,
+            "layer": layer.layer,
+            "promote_nominal": layer.promote_nominal,
+            "promote_exchange": layer.promote_exchange,
+            "rate_nominal": layer.rate_nominal,
+            "rate_exchange": layer.rate_exchange,
+            "divergence": layer.divergence,
+            "fail_perf": layer.fail_perf,
+            "delta_exchange": layer.delta_exchange,
         }
-        for l in ps.layers
+        for layer in ps.layers
     ]
     return {
         "date": trade_date,

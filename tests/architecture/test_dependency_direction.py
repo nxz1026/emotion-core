@@ -53,10 +53,10 @@ _LAZY_LLM_ALLOWLIST = {
 # ── 历史欠账：登记的是「现状违规」的精确位置，只许减少。────────────────────
 # 格式：(src_layer, dst_layer, src_file) -> 原因
 _DEBT: dict[tuple[str, str, str], str] = {
-    # A 类 algorithms → data（已偿还：改为走 services 胶水层，见 services/ladder_service.py / ecosystem_service.py）
+    # A 类 algorithms → data（已偿还：改为走 services 胶水层，见 services/ladder_service.py / ecosystem_service.py）  # noqa: E501
     # ("algorithms", "data", "algorithms/dragon_env.py"): 已修
     # ("algorithms", "data", "algorithms/ladder.py"): 已修
-    # ("algorithms", "data", "algorithms/doctor.py"): 已修（改为经 services 胶水层取数；该胶水层随后按 §3 治理删除，doctor 现值注入 CONFIG/query_df）
+    # ("algorithms", "data", "algorithms/doctor.py"): 已修（改为经 services 胶水层取数；该胶水层随后按 §3 治理删除，doctor 现值注入 CONFIG/query_df）  # noqa: E501
     # 转移债务：A 类改走 services 后，变为 C 类（2026-09-29 偿还 A 类）
     # algorithms/dragon_env.py 已偿还（2026-09-29）：persist_fn 参数注入，无 services/data 依赖
     # ⏸️ ladder.py — 暂不修复（2026-09-29 评估：10+ 调用方改签名，收益仅关 1 条 C 类债务）
@@ -139,7 +139,7 @@ def test_no_new_reverse_dependency():
         msg = "发现未登记的反向依赖（新增即红，请先修复或登记到 _DEBT）：\n"
         for src, dst, f in sorted(unknown):
             msg += f"  {src} -> {dst}  ({f})\n"
-        msg += "\n修复：把 import 改走 services 注入；\n登记：在 _DEBT 里加一条并写明原因（只许减少）。"
+        msg += "\n修复：把 import 改走 services 注入；\n登记：在 _DEBT 里加一条并写明原因（只许减少）。"  # noqa: E501
         pytest.fail(msg)
 
 
@@ -266,7 +266,7 @@ def test_rust_core_does_not_depend_on_python():
         if rs.name == "lib.rs":
             continue  # pyo3 binding 层，函数名 emotion_core_rust 是必须的
         for i, line in enumerate(rs.read_text(encoding="utf-8").splitlines(), 1):
-            code = re.split(r"//|/\*", line, 1)[0]  # 去掉行注释
+            code = re.split(r"//|/\*", line, maxsplit=1)[0]  # 去掉行注释
             if "emotion_core" in code:
                 bad.append((str(rs.relative_to(SRC)), i))
     if bad:

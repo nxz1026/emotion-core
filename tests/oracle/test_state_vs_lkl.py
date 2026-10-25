@@ -149,7 +149,7 @@ def test_reconciliation_with_lkl(monkeypatch):
     result = classify_series(metrics)
 
     mismatches = []
-    for r, expected in zip(result, rows):
+    for r, expected in zip(result, rows, strict=False):
         if r.phase != expected["phase"]:
             mismatches.append(
                 {
@@ -183,7 +183,7 @@ def test_n4_divergence_is_only_ebb_tightening():
     metrics = to_metrics(rows)
     result = classify_series(metrics)
 
-    bad = [(r.phase, m["phase"], m["date"]) for r, m in zip(result, rows) if r.phase != m["phase"]]
+    bad = [(r.phase, m["phase"], m["date"]) for r, m in zip(result, rows, strict=False) if r.phase != m["phase"]]  # noqa: E501
     # 只允许「lkl 说退潮、我们现在不说退潮」这一种分歧
     wrong_way = [b for b in bad if b[1] != "退潮" or b[0] == "退潮"]
     assert wrong_way == [], f"出现了 N4 解释不了的分歧：{wrong_way[:5]}"

@@ -13,7 +13,7 @@ class TestCleanupDryRun:
         mock_cursor = MagicMock()
         # 模拟各表 count 查询返回
         results = []
-        for table, (col, days) in cleanup.RETENTION.items():
+        for table, (_col, days) in cleanup.RETENTION.items():
             if table in cleanup.PROTECTED:
                 continue
             if days is None and table not in cleanup.KEEP_LATEST:

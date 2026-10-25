@@ -60,7 +60,7 @@ def load_top_themes(trade_date: date | None = None, limit: int = 3) -> list[dict
     """加载题材热度 TOP N（默认最新快照日）。"""
     trade_date = _d(trade_date)
     df = query_df(
-        "SELECT * FROM theme_group WHERE date = %s ORDER BY highest_board DESC, member_count DESC LIMIT %s",
+        "SELECT * FROM theme_group WHERE date = %s ORDER BY highest_board DESC, member_count DESC LIMIT %s",  # noqa: E501
         (trade_date, limit),
     )
     return df.to_dict("records")

@@ -49,7 +49,7 @@ def _parse_dividend_events(data: dict) -> list[dict]:
         columns = [c.get("name", "") for c in table.get("columns", [])]
         rows = table.get("rows", [])
         for row in rows:
-            event = dict(zip(columns, row))
+            event = dict(zip(columns, row, strict=False))
             # 只保留分红除权相关事件
             event_type = event.get("事件类型", "")
             keywords = ["分红", "送股", "转增", "派息", "除权", "除息", "红利"]

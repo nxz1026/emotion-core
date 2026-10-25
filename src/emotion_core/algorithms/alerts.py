@@ -6,7 +6,8 @@ acked_at 置位（未 ack = 待处理队列）；去重按 **同 source 同 deta
 事实源。判定逻辑（level 白名单、去重键、未确认过滤、排序、推送过滤与截断）零改动。
 
 三层职责（与 lkl 同名同序）：
-- `record` / `record_dedup`：写入路径（pipeline 失败步骤 / health 断档 / compare 漂移 / review 缺数）
+- `record` / `record_dedup`：写入路径
+    （pipeline 失败步骤 / health 断档 / compare 漂移 / review 缺数）
 - `pending` / `ack`：Dashboard 告警面板数据源与人工确认
 - `push_pending_webhook`：可选触达（默认关）
 

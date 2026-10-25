@@ -62,8 +62,10 @@ def digest(out: dict[str, Any]) -> str:
         lines = ["本轮没有变体过七道门禁——这是有效结论，不是故障。"]
         if top:
             lines.append(
-                f"选参区间最好的是 {top['variant_id']}（{top['sel']['mean']}%），"
-                f"但 hold-out {top['hold']['mean']}%（{top['reasons'][0] if top['reasons'] else ''}）"
+                f"选参区间最好的是 {top['variant_id']}"
+                f"（{top['sel']['mean']}%），"
+                f"但 hold-out {top['hold']['mean']}%"
+                f"（{top['reasons'][0] if top['reasons'] else ''}）"
             )
         tail = "无提案可拍板"
     text = "\n".join([head, *lines, tail])

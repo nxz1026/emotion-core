@@ -62,7 +62,7 @@ def test_fold_matches_lkl_ladder_day():
                     mismatches.append(
                         f"{ds} {code} {field}: py={getattr(r, field)} lkl={exp[code][field]}"
                     )
-    assert not mismatches, "对账失败 %d 处:\n%s" % (len(mismatches), "\n".join(mismatches[:20]))
+    assert not mismatches, "对账失败 {} 处:\n{}".format(len(mismatches), "\n".join(mismatches[:20]))
 
 
 def test_fold_output_sorted_by_board_desc():

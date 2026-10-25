@@ -569,7 +569,7 @@ class TestEntryRows:
                 "c3_elimination",
                 "c4_min_days",
                 "c5_strength_diverge",
-            ),
+            ), strict=False,
         ):
             assert ok == getattr(cl, field), field
 

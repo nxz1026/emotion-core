@@ -84,7 +84,7 @@ def test_matches_lkl_fixture_row_by_row():
     for code, rs in by_code.items():
         rs.sort(key=lambda r: r["date"])
         sim = simulate_cont_days([(date.fromisoformat(r["date"]), r["is_limit_up"]) for r in rs])
-        for r, got in zip(rs, sim):
+        for r, got in zip(rs, sim, strict=False):
             assert got == r["cont_days"], f"{code} {r['date']}: 重演 {got} ≠ lkl {r['cont_days']}"
             checked += 1
     assert checked == len(rows)

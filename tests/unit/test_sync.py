@@ -207,7 +207,7 @@ class TestSyncDaily:
             patch("emotion_core.data.sync.fetch_snapshot", side_effect=Exception("502")),
             patch("emotion_core.data.sync._all_codes", return_value=["600000"]),
             patch("emotion_core.data.sync.fallback_rows", return_value=[("600000",)]),
-            patch("emotion_core.data.sync.upsert_daily_bars", return_value=1) as mock_upsert,
+            patch("emotion_core.data.sync.upsert_daily_bars", return_value=1),
         ):
             result = sync.sync_daily(5)
             assert result == 1
