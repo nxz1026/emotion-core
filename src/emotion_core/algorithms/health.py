@@ -70,6 +70,18 @@ THEME_COVERAGE_MIN_PCT = 40.0    # 题材标签覆盖率下限（标签票数 / 
 THEME_PRIMARY_MIN_PCT = 60.0     # primary_theme 非空占标签行比例下限（实测 84%）
 
 
+class _CalendarUnavailable(RuntimeError):
+    """交易日历读不到 ⇒ 断档检查**给不出结论**。
+
+    ⚠️ 2026-10-25 静态审计：原来读不到时**返回空列表** ⇒
+    \`_trading_gap\` 对空列表求和 ⇒ **gap = 0** ⇒
+    **6 条断档检查同时静默放行**（报告/数据/三池/题材/对账/结果）。
+
+    而本函数的 docstring 明写「宁可让断档检查说『我算不出来』」⇒
+    **实现没有兑现这个承诺**。⇒ 现在用异常把「算不出来」显式传上去。
+    """
+
+
 def _recent_trading_days(d: date, n: int) -> list[date]:
     """d 及之前最近 n 个**交易日**（升序）。
 
@@ -97,15 +109,27 @@ def _recent_trading_days(d: date, n: int) -> list[date]:
             " ORDER BY date DESC LIMIT %s", (d, n))
     except Exception as exc:  # noqa: BLE001
         log.error("交易日历读取失败，断档检查给不出可信结论：%s: %s", type(exc).__name__, exc)
-        return []
+        # ⚠️ 原来这里 `return []` ⇒ 上层算出 gap=0 ⇒ **当成「没断档」** ⇒
+        #    6 条断档检查一起静默放行。⇒ 改成**显式抛**，让上层报「无法判定」。
+        raise _CalendarUnavailable(
+            f"交易日历读取失败（{type(exc).__name__}: {exc}）"
+        ) from exc
     return sorted(df["date"])
 
 
-def _trading_gap(trade_date: date, since: date | None) -> int:
-    """(since, trade_date) 开区间内的已入库交易日数；since=None 返回极大值。"""
+def _trading_gap(trade_date: date, since: date | None) -> int | None:
+    """(since, trade_date) 开区间内的已入库交易日数。
+
+    ⚠️ 返回 **None = 算不出来**（交易日历不可用）⇒ 调用方**必须**把它
+    变成一条「无法判定」的告警，**不能**当成 0（= 没断档）。
+    since=None 返回极大值（不适用）。
+    """
     if since is None:
         return 10**9
-    days = _recent_trading_days(trade_date, 60)
+    try:
+        days = _recent_trading_days(trade_date, 60)
+    except _CalendarUnavailable:
+        return None
     return sum(1 for d in days if since < d < trade_date)
 
 
@@ -117,6 +141,8 @@ def check_report_gap(trade_date: date) -> str | None:
     if last is None:
         return f"从未产出报告（截至 {trade_date} 无 review_report 落盘）"
     gap = _trading_gap(trade_date, last)
+    if gap is None:
+        return "报告断档：**无法判定**（交易日历不可用）—— 宁可说算不出来，也不报『没断档』"
     return (f"报告断档：最近成功报告 {last} 距今 {gap} 个交易日（阈值"
             f" {REPORT_GAP_DAYS}），疑似 daily.sh 未跑/中断"
             if gap >= REPORT_GAP_DAYS else None)
@@ -130,6 +156,8 @@ def check_data_gap(trade_date: date) -> str | None:
     if last is None:
         return f"derived_bar 无任何历史数据（截至 {trade_date}）"
     gap = _trading_gap(trade_date, last)
+    if gap is None:
+        return "derived_bar 断档：**无法判定**（交易日历不可用）"
     return (f"derived_bar 最近数据日 {last} 距今 {gap} 个交易日（阈值"
             f" {DATA_GAP_DAYS}），疑似 fetch/derive 采集停摆"
             if gap >= DATA_GAP_DAYS else None)
@@ -141,7 +169,11 @@ def check_outcome_stale(trade_date: date) -> str | None:
     complete=True 需前向 5 日数据齐（outcome.py 语义）；confirm_date 距今
     ≥6 交易日仍未 complete 即异常（daily.sh 每日末尾 outcome 幂等回填）。
     """
-    cutoff = _recent_trading_days(trade_date, OUTCOME_STALE_DAYS + 1)
+    try:
+        cutoff = _recent_trading_days(trade_date, OUTCOME_STALE_DAYS + 1)
+    except _CalendarUnavailable:
+        # ⚠️ 原来日历读不到 ⇒ cutoff=[] ⇒ len(cutoff)=0 < 7 ⇒ **当没过期**
+        return "BUY 结果回填：**无法判定**（交易日历不可用）"
     if len(cutoff) < OUTCOME_STALE_DAYS + 1:
         return None                        # 历史不足，无从判定
     stale = cutoff[0]                      # 第 6 个交易日前
@@ -204,6 +236,8 @@ def check_pool_stale(trade_date: date) -> str | None:
     if last_data is None:
         return None                        # 衍生层也无数据，归 data 断档管
     gap = _trading_gap(last_data, last_pool)
+    if gap is None:
+        return "东财三池断档：**无法判定**（交易日历不可用）"
     return (f"东财三池断档：limit_pool_em 最近 {last_pool}，落后 derived_bar"
             f" {last_data} 共 {gap} 个交易日（阈值 {POOL_STALE_DAYS}）——"
             f"c5 炸板回封补偿与双源对账均失效"
@@ -275,7 +309,9 @@ def check_limit_state_audit(trade_date: date) -> str | None:
     last_ledger = max(r["date"] for r in rows)
     if last_data is not None:
         gap = _trading_gap(last_data, last_ledger)
-        if gap >= LIMIT_AUDIT_STALE_DAYS:
+        if gap is None:
+            problems.append("台账落后度：**无法判定**（交易日历不可用）")
+        elif gap >= LIMIT_AUDIT_STALE_DAYS:
             problems.append(f"台账最近抓取日 {last_ledger}，落后 derived_bar"
                             f" {last_data} 共 {gap} 个交易日（阈值 {LIMIT_AUDIT_STALE_DAYS}）")
     if known_deviations:
@@ -316,6 +352,8 @@ def check_theme_coverage(trade_date: date) -> str | None:
                 f"theme_tag 最新仍为 {last_theme}——题材步骤报 OK 但无产出")
     if last_data is not None:
         gap = _trading_gap(last_data, last_theme)
+        if gap is None:
+            return "题材断档：**无法判定**（交易日历不可用）"
         if gap >= THEME_STALE_DAYS:
             return (f"题材断档：theme_tag 最近 {last_theme}，落后 derived_bar"
                     f" {last_data} 共 {gap} 个交易日（阈值 {THEME_STALE_DAYS}）")
