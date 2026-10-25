@@ -60,7 +60,8 @@ def io(monkeypatch):
     # exit 侧的两个读口（都要查库）换掉，保持 DB-free
     monkeypatch.setattr(hs.exit_svc, "held_days", lambda entry, d: box.get("held"))
     monkeypatch.setattr(
-        hs.exit_svc, "open_locked_limit_down", lambda d, code: bool(box.get("locked")))
+        hs.exit_svc, "open_locked_limit_down", lambda d, code: bool(box.get("locked"))
+    )
     monkeypatch.setattr(
         hs.holding_store, "upsert_decision", lambda d: (box["writes"].append(d), 1)[1]
     )
@@ -106,16 +107,26 @@ class TestPositionView:
 
     def test_locked_limit_down_holds_and_defers(self):
         action, r = hs._decide_action(
-            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(),
-            held=1, locked=True,
+            stat=None,
+            drv=None,
+            cost=5.0,
+            close=10.0,
+            levels=_levels(),
+            held=1,
+            locked=True,
         )
         assert action == "HOLD" and "顺延" in r["text"]
 
     def test_overdue_forces_exit_even_when_locked(self):
         """超过 T+3 无条件了结：即便今天又跌停封死，也要给卖出指令。"""
         action, r = hs._decide_action(
-            stat=None, drv=None, cost=5.0, close=10.0, levels=_levels(),
-            held=2, locked=True,
+            stat=None,
+            drv=None,
+            cost=5.0,
+            close=10.0,
+            levels=_levels(),
+            held=2,
+            locked=True,
         )
         assert action == "EXIT" and "强制了结" in r["text"]
 
@@ -129,8 +140,12 @@ class TestPositionView:
             "accel_reason": None,
         }
         action, r = hs._decide_action(
-            stat=stat, drv={"is_limit_up": True, "cont_days": 3}, cost=5.0,
-            close=10.0, levels=_levels(), held=0,
+            stat=stat,
+            drv={"is_limit_up": True, "cont_days": 3},
+            cost=5.0,
+            close=10.0,
+            levels=_levels(),
+            held=0,
         )
         assert action == "HOLD" and "刚建仓" in r["text"]
         assert "退潮" not in r["text"]
@@ -138,8 +153,12 @@ class TestPositionView:
     def test_broken_board_no_longer_trims(self):
         """断板也不减仓：口径B 的退出理由只有时间。"""
         action, r = hs._decide_action(
-            stat=None, drv={"is_limit_up": False, "cont_days": 3}, cost=5.0,
-            close=10.0, levels=_levels(), held=1,
+            stat=None,
+            drv={"is_limit_up": False, "cont_days": 3},
+            cost=5.0,
+            close=10.0,
+            levels=_levels(),
+            held=1,
         )
         assert action == "EXIT" and "T+2 开盘卖出" in r["text"]
         assert "断板" not in r["text"]
@@ -150,27 +169,31 @@ class TestWatchView:
 
     def test_sealed_board_is_watch_only(self):
         action, r = hs._decide_action(
-            stat=None, drv={"is_limit_up": True, "cont_days": 3},
-            cost=None, close=10.0, levels=_levels(buy_reference=11.0),
+            stat=None,
+            drv={"is_limit_up": True, "cont_days": 3},
+            cost=None,
+            close=10.0,
+            levels=_levels(buy_reference=11.0),
         )
         assert action == "HOLD" and "观察名单" in r["text"]
-        assert "买入建议" in r["text"]          # 明确说不给建议
-        assert "打板价" not in r["text"]        # 不再出现买点数字
+        assert "买入建议" in r["text"]  # 明确说不给建议
+        assert "打板价" not in r["text"]  # 不再出现买点数字
 
     def test_not_sealed_not_in_watchlist(self):
         """没封板就不在观察名单；同样不给价位。"""
         action, r = hs._decide_action(
-            stat=None, drv={"is_limit_up": False, "cont_days": 2},
-            cost=None, close=10.0, levels=_levels(buy_reference=11.0),
+            stat=None,
+            drv={"is_limit_up": False, "cont_days": 2},
+            cost=None,
+            close=10.0,
+            levels=_levels(buy_reference=11.0),
         )
         assert action == "HOLD" and "不在观察名单" in r["text"]
         assert "打板价" not in r["text"]
 
     def test_missing_derived_row_is_hold_not_trim(self):
         """F6：缺判据行 = 缺数，绝不是「断板」。"""
-        action, r = hs._decide_action(
-            stat=None, drv=None, cost=None, close=10.0, levels=_levels()
-        )
+        action, r = hs._decide_action(stat=None, drv=None, cost=None, close=10.0, levels=_levels())
         assert action == "HOLD" and "缺数" in r["text"]
 
     def test_sealed_but_bad_env_still_watch_only(self):
@@ -183,15 +206,21 @@ class TestWatchView:
             "accel_reason": None,
         }
         action, r = hs._decide_action(
-            stat=stat, drv={"is_limit_up": True, "cont_days": 3},
-            cost=None, close=10.0, levels=_levels(),
+            stat=stat,
+            drv={"is_limit_up": True, "cont_days": 3},
+            cost=None,
+            close=10.0,
+            levels=_levels(),
         )
         assert action == "HOLD" and "观察名单" in r["text"]
 
     def test_default_hold(self):
         action, _ = hs._decide_action(
-            stat=None, drv={"is_limit_up": False, "cont_days": 1},
-            cost=None, close=10.0, levels=_levels(buy_reference=9.0),
+            stat=None,
+            drv={"is_limit_up": False, "cont_days": 1},
+            cost=None,
+            close=10.0,
+            levels=_levels(buy_reference=9.0),
         )
         assert action == "HOLD"
 
@@ -249,8 +278,10 @@ class TestLadder:
         """
         # 持仓视角才有「买档/卖档」概念；观察视角（无成本）只给单一打板档
         from types import SimpleNamespace
+
         io["pos"] = SimpleNamespace(
-            code="601811", cost=12.0, shares=1000, entry_date=date(2026, 10, 12))
+            code="601811", cost=12.0, shares=1000, entry_date=date(2026, 10, 12)
+        )
         io["held"] = 1
         io["levels"] = _levels(buy_reference=15.0, target_price=27.0)
         d = hs.decide("601811", capital=1_000_000, persist=False)
@@ -624,8 +655,8 @@ class TestCliR4:
         # exit 侧的两个读口（都要查库）换掉，保持 DB-free
         monkeypatch.setattr(hs.exit_svc, "held_days", lambda entry, d: box.get("held"))
         monkeypatch.setattr(
-            hs.exit_svc, "open_locked_limit_down",
-            lambda d, code: bool(box.get("locked")))
+            hs.exit_svc, "open_locked_limit_down", lambda d, code: bool(box.get("locked"))
+        )
         monkeypatch.setattr(
             hs.holding_store, "upsert_decision", lambda d: (box["writes"].append(d), 1)[1]
         )

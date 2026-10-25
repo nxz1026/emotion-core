@@ -13,6 +13,7 @@ Python 参考实现：`src/emotion_core/algorithms/indicators.py`（两侧共用
   才补「零成交顺延行不打断」，产物没重编），实测同组输入 Rust cont_days=1 / Python=2。
 - `test_board_branches`：北交所 92 号段（2026-10-07 修过「漏抄 92 → 拿主板 10%」）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,14 +29,32 @@ from emotion_core.domain.bar import Bar  # noqa: E402
 # raw 行 = (code, date, open, high, low, close, pre_close, volume, turnover_rate)，价格单位分
 Raw = tuple
 
-FLAGS = ("is_limit_up", "is_limit_down", "is_one_word", "is_exchange",
-         "is_bomb", "touched_limit", "cont_days")
+FLAGS = (
+    "is_limit_up",
+    "is_limit_down",
+    "is_one_word",
+    "is_exchange",
+    "is_bomb",
+    "touched_limit",
+    "cont_days",
+)
 
 
 def _py_bars(raw: list[Raw]) -> list[Bar]:
-    return [Bar(code=c, date=d, open_cents=o, high_cents=h, low_cents=lo,
-                close_cents=cl, pre_close_cents=pc, volume=v, turnover_rate=t)
-            for c, d, o, h, lo, cl, pc, v, t in raw]
+    return [
+        Bar(
+            code=c,
+            date=d,
+            open_cents=o,
+            high_cents=h,
+            low_cents=lo,
+            close_cents=cl,
+            pre_close_cents=pc,
+            volume=v,
+            turnover_rate=t,
+        )
+        for c, d, o, h, lo, cl, pc, v, t in raw
+    ]
 
 
 def _rs_bars(raw: list[Raw]) -> list:
@@ -53,9 +72,11 @@ def _assert_same(raw: list[Raw]):
         assert r.date == str(p.date), f"{where}: date Rust {r.date} vs Python {p.date}"
         for f in FLAGS:
             assert getattr(r, f) == getattr(p, f), (
-                f"{where}: {f} Rust {getattr(r, f)} vs Python {getattr(p, f)}")
+                f"{where}: {f} Rust {getattr(r, f)} vs Python {getattr(p, f)}"
+            )
         assert r.amplitude == p.amplitude, (
-            f"{where}: amplitude Rust {r.amplitude} vs Python {p.amplitude}")
+            f"{where}: amplitude Rust {r.amplitude} vs Python {p.amplitude}"
+        )
         assert r.quality == p.quality, f"{where}: quality"
     return py, rs
 
@@ -88,7 +109,7 @@ def test_fold_suspended_row_does_not_break_streak():
     raw = [
         ("600825", D1, 1050, 1100, 1050, 1100, 1000, 100, 3.5),
         ("600825", D2, 1150, 1210, 1150, 1210, 1100, 120, 4.1),
-        ("600825", D3, 1210, 1210, 1210, 1210, 1210, 0, 0.0),      # 顺延行
+        ("600825", D3, 1210, 1210, 1210, 1210, 1210, 0, 0.0),  # 顺延行
         ("600825", D4, 1250, 1331, 1250, 1331, 1210, 130, 4.4),
     ]
     py, _ = _assert_same(raw)
@@ -101,10 +122,10 @@ def test_fold_suspended_row_does_not_break_streak():
 def test_bomb_break_and_limit_down():
     """炸板（触板未封）与跌停：touched_limit 与 is_bomb 的极性。"""
     raw = [
-        ("600825", D1, 1050, 1100, 1050, 1100, 1000, 100, 3.5),   # 第 1 板
-        ("600825", D2, 1100, 1210, 1050, 1099, 1100, 300, 9.9),   # 炸板：high 触板、close 未封
-        ("600825", D3, 1000, 1000, 989, 989, 1099, 80, 2.0),      # 跌停：989 = (1099*900+500)//1000
-        ("600825", D4, 989, 989, 900, 900, 989, 60, 1.5),         # 继续跌：不等于跌停价
+        ("600825", D1, 1050, 1100, 1050, 1100, 1000, 100, 3.5),  # 第 1 板
+        ("600825", D2, 1100, 1210, 1050, 1099, 1100, 300, 9.9),  # 炸板：high 触板、close 未封
+        ("600825", D3, 1000, 1000, 989, 989, 1099, 80, 2.0),  # 跌停：989 = (1099*900+500)//1000
+        ("600825", D4, 989, 989, 900, 900, 989, 60, 1.5),  # 继续跌：不等于跌停价
     ]
     py, _ = _assert_same(raw)
     assert py[1].touched_limit is True and py[1].is_bomb is True
@@ -115,8 +136,8 @@ def test_bomb_break_and_limit_down():
 def test_limit_up_is_exact_equality_not_ge():
     """涨停 = 收盘价「精确等于」涨停价（不是 >=）——多一分钱也不算。"""
     raw = [
-        ("600825", D1, 1101, 1101, 1101, 1101, 1000, 10, 0.1),    # 1101 > 1100：不算涨停
-        ("600825", D2, 1100, 1100, 1100, 1100, 1000, 10, 0.1),    # 1100 == 1100：一字板
+        ("600825", D1, 1101, 1101, 1101, 1101, 1000, 10, 0.1),  # 1101 > 1100：不算涨停
+        ("600825", D2, 1100, 1100, 1100, 1100, 1000, 10, 0.1),  # 1100 == 1100：一字板
     ]
     py, _ = _assert_same(raw)
     assert py[0].is_limit_up is False and py[0].cont_days == 0
@@ -124,6 +145,7 @@ def test_limit_up_is_exact_equality_not_ge():
 
 
 # ---------- 板块分支 ----------
+
 
 @pytest.mark.parametrize("code", ["600825", "000001", "002415", "601398", "603259", "605100"])
 def test_board_branches_main_10pct(code):
@@ -138,10 +160,12 @@ def test_board_branches_growth_20pct(code):
 
     板号检查用「1200 不算 10% 涨停、1100 不算 20% 涨停」双向钉住。
     """
-    py, _ = _assert_same([
-        (code, D1, 1200, 1200, 1200, 1200, 1000, 10, 0.1),        # 20% 口径涨停
-        (code, D2, 1100, 1100, 1100, 1100, 1000, 10, 0.1),        # 10% 口径不算
-    ])
+    py, _ = _assert_same(
+        [
+            (code, D1, 1200, 1200, 1200, 1200, 1000, 10, 0.1),  # 20% 口径涨停
+            (code, D2, 1100, 1100, 1100, 1100, 1000, 10, 0.1),  # 10% 口径不算
+        ]
+    )
     assert py[0].is_limit_up is True
     assert py[1].is_limit_up is False
 
@@ -152,15 +176,18 @@ def test_board_branches_bse_30pct(code):
 
     920002 曾落到 else 拿主板 10% —— 涨停价直接算错三成。
     """
-    py, _ = _assert_same([
-        (code, D1, 1300, 1300, 1300, 1300, 1000, 10, 0.1),
-        (code, D2, 1100, 1100, 1100, 1100, 1000, 10, 0.1),
-    ])
+    py, _ = _assert_same(
+        [
+            (code, D1, 1300, 1300, 1300, 1300, 1000, 10, 0.1),
+            (code, D2, 1100, 1100, 1100, 1100, 1000, 10, 0.1),
+        ]
+    )
     assert py[0].is_limit_up is True, f"{code} 没吃到 30% 分支"
     assert py[1].is_limit_up is False
 
 
 # ---------- 顺序、分组、边界 ----------
+
 
 def test_output_order_first_seen_then_date_asc():
     """输出顺序 = code 首次出现序（等价 Python dict 插入序）× 组内日期升序。"""
@@ -172,7 +199,11 @@ def test_output_order_first_seen_then_date_asc():
     ]
     py, rs = _assert_same(raw)
     assert [(p.code, p.date) for p in py] == [
-        ("000002", D1), ("000002", D2), ("600825", D1), ("600825", D3)]
+        ("000002", D1),
+        ("000002", D2),
+        ("600825", D1),
+        ("600825", D3),
+    ]
     assert [(r.code, r.date) for r in rs] == [(p.code, str(p.date)) for p in py]
 
 
@@ -187,13 +218,16 @@ def test_pre_close_zero_no_division_by_zero():
     assert py[0].amplitude == 0.0
 
 
-@pytest.mark.parametrize("high,low,pre_close,expected", [
-    (1100, 1100, 1000, 0.0),        # 一字：high == low
-    (1101, 1100, 1000, 0.1),        # 1/1000
-    (1107, 1100, 1100, 0.6364),     # 7/1100*100 = 0.636363… → 四舍五入 4 位
-    (3000, 2967, 3300, 1.0),        # 33/3300*100 = 1.0
-    (3001, 2967, 3300, 1.0303),     # 34/3300*100 = 1.030303… → 1.0303
-])
+@pytest.mark.parametrize(
+    "high,low,pre_close,expected",
+    [
+        (1100, 1100, 1000, 0.0),  # 一字：high == low
+        (1101, 1100, 1000, 0.1),  # 1/1000
+        (1107, 1100, 1100, 0.6364),  # 7/1100*100 = 0.636363… → 四舍五入 4 位
+        (3000, 2967, 3300, 1.0),  # 33/3300*100 = 1.0
+        (3001, 2967, 3300, 1.0303),  # 34/3300*100 = 1.030303… → 1.0303
+    ],
+)
 def test_amplitude_rounding(high, low, pre_close, expected):
     """振幅 = (high - low) / pre_close * 100，四舍五入到 4 位小数。"""
     py, _ = _assert_same([("600825", D1, low, high, low, high, pre_close, 10, 0.1)])

@@ -6,6 +6,7 @@
 market_stat 中 58 天 limit_up_count=0，2024-04-01 起恢复 78）。地板晚于数据起点
 就是口径事故，故锁死不变式并禁止 SQL 里再出现硬编码日期。
 """
+
 from __future__ import annotations
 
 from emotion_core.algorithms import accelerate, promotion
@@ -19,12 +20,15 @@ def test_floor_covers_the_data_layer_start():
     头 90 天全部股票被当次新剔光（58 个交易日 limit_up_count=0）。
     """
     from datetime import date
+
     assert CONFIG.NEW_ISSUER_FLOOR >= date(2024, 1, 2), (
-        f"地板 {CONFIG.NEW_ISSUER_FLOOR} 早于数据首日 → 窗口起始段计数全 0")
+        f"地板 {CONFIG.NEW_ISSUER_FLOOR} 早于数据首日 → 窗口起始段计数全 0"
+    )
 
 
 def test_floor_is_not_the_lkl_window_literal():
     from datetime import date
+
     assert CONFIG.NEW_ISSUER_FLOOR != date(2023, 11, 26), "不得再用 lkl 的数据起点"
 
 

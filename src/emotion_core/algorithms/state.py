@@ -42,6 +42,7 @@ class StateRules:
     只换这一个对象，就能在内存里重跑 675 天的相位判定，既不碰 `CONFIG`
     （`config_hash()` 不变），也不写任何生产表。
     """
+
     ebb_zt_perf: float = CONFIG.EBB_ZT_PERF
     ebb_ld_min: int = CONFIG.EBB_LD_MIN
     ebb_ld_mult: float = CONFIG.EBB_LD_MULT
@@ -52,7 +53,7 @@ class StateRules:
     ice_max_days: int = CONFIG.ICE_MAX_DAYS
     ice_zt_max: int = CONFIG.ICE_ZT_MAX
 
-    def replace(self, **kw: object) -> "StateRules":
+    def replace(self, **kw: object) -> StateRules:
         """显式替换（frozen dataclass 用 dataclasses.replace 也行，这里省个 import）。"""
         from dataclasses import replace as _replace
 
@@ -77,6 +78,7 @@ def _gt(a: Optional[float], b: float) -> bool:
 @dataclass
 class DayMetrics:
     """单日指标（从 derived_bar 计算）。"""
+
     date: date
     limit_up_count: int
     bomb_rate: Optional[float]
@@ -94,6 +96,7 @@ class DayMetrics:
 @dataclass
 class EmotionState:
     """状态机输出。"""
+
     date: date
     phase: str  # 冰点/发酵/高潮/退潮
     buy_window: str  # STANDARD/ENHANCED/NONE
@@ -101,8 +104,9 @@ class EmotionState:
     reason: str
 
 
-def _rule_ebb(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
-              r: StateRules = DEFAULT_RULES) -> bool:
+def _rule_ebb(
+    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+) -> bool:
     """退潮：断板 + 跌停潮，或涨停表现转负，或跌停倍增。
 
     ★N4（2026-10-23）：`two_day` 原来只要求「最高板连着两天炸板」就成立，
@@ -119,16 +123,24 @@ def _rule_ebb(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
     另：全样本 151 天跌停 >15 里，新旧口径都各自漏判 35 天 / 39 天（ld 那条
     要求「比昨日翻倍」，单日跌停潮抓不到）—— 这是既存问题，不在 N4 范围。
     """
-    two_day = (bool(t.top_broke) and y is not None and bool(y.top_broke)
-               and t.limit_down_count > r.ebb_ld_min)
+    two_day = (
+        bool(t.top_broke)
+        and y is not None
+        and bool(y.top_broke)
+        and t.limit_down_count > r.ebb_ld_min
+    )
     perf = _lt(t.zt_performance, r.ebb_zt_perf)
-    ld = (y is not None and t.limit_down_count > r.ebb_ld_min
-          and t.limit_down_count > y.limit_down_count * r.ebb_ld_mult)
+    ld = (
+        y is not None
+        and t.limit_down_count > r.ebb_ld_min
+        and t.limit_down_count > y.limit_down_count * r.ebb_ld_mult
+    )
     return two_day or perf or ld
 
 
-def _rule_climax(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
-                 r: StateRules = DEFAULT_RULES) -> bool:
+def _rule_climax(
+    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+) -> bool:
     """高潮：涨停家数 / 炸板率越阈 / 最高板振幅越阈。
 
     `top_amplitude` 用 `_gt` 护 None（当日无涨停股时 max(amplitude)=NULL →
@@ -136,24 +148,30 @@ def _rule_climax(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics]
     直接把 emotion.run_range 打崩（本模块与 emotion.classify 共用 _RULES）。
     None 的语义是「没有最高板振幅可比」→ 该分支不触发。
     """
-    return (t.limit_up_count > r.climax_zt
-            or _gt(t.bomb_rate, t.bomb_threshold)
-            or _gt(t.top_amplitude, r.climax_amplitude))
+    return (
+        t.limit_up_count > r.climax_zt
+        or _gt(t.bomb_rate, t.bomb_threshold)
+        or _gt(t.top_amplitude, r.climax_amplitude)
+    )
 
 
-def _rule_ferment(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
-                  r: StateRules = DEFAULT_RULES) -> bool:
-    return (t.max_limit_days >= r.ferment_min_days and y is not None
-            and b is not None
-            and _gt(t.zt_performance, r.ferment_zt_perf)
-            and _gt(y.zt_performance, r.ferment_zt_perf)
-            and t.limit_up_count > y.limit_up_count > b.limit_up_count)
+def _rule_ferment(
+    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+) -> bool:
+    return (
+        t.max_limit_days >= r.ferment_min_days
+        and y is not None
+        and b is not None
+        and _gt(t.zt_performance, r.ferment_zt_perf)
+        and _gt(y.zt_performance, r.ferment_zt_perf)
+        and t.limit_up_count > y.limit_up_count > b.limit_up_count
+    )
 
 
-def _rule_ice(t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics],
-              r: StateRules = DEFAULT_RULES) -> bool:
-    base = (t.max_limit_days <= r.ice_max_days
-            and t.limit_up_count < r.ice_zt_max)
+def _rule_ice(
+    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+) -> bool:
+    base = t.max_limit_days <= r.ice_max_days and t.limit_up_count < r.ice_zt_max
     rev = y is not None and _lt(y.zt_performance, 0) and _gt(t.zt_performance, 0)
     return base and (rev or not t.has_candidate)
 
@@ -181,8 +199,9 @@ def window_of(phase: str) -> tuple[str, bool]:
     return "NONE", False  # 冰点：禁买，不清仓（无持仓可清）
 
 
-def classify_series(series: list[DayMetrics],
-                    rules: StateRules | None = None) -> list[EmotionState]:
+def classify_series(
+    series: list[DayMetrics], rules: StateRules | None = None
+) -> list[EmotionState]:
     """按优先级逐日推进状态机（纯函数）。
 
     `rules=None` ⇒ 用 `DEFAULT_RULES`（= CONFIG 现值），与改版前逐字等价；
@@ -196,11 +215,18 @@ def classify_series(series: list[DayMetrics],
         fired = next(((rule, name) for rule, name in _RULES if rule(t, y, b, r)), None)
         phase = fired[1] if fired else (result[-1].phase if result else "冰点")
         buy_window, force_liq = window_of(phase)
-        tag = "·首日基线" if (fired is None and y is None) else (
-            "·延续" if (fired is None and y is not None) else "")
-        result.append(EmotionState(
-            date=t.date, phase=phase, buy_window=buy_window,
-            force_liquidate=force_liq,
-            reason=f"{phase}{tag}(涨停{t.limit_up_count} 最高{t.max_limit_days}板)",
-        ))
+        tag = (
+            "·首日基线"
+            if (fired is None and y is None)
+            else ("·延续" if (fired is None and y is not None) else "")
+        )
+        result.append(
+            EmotionState(
+                date=t.date,
+                phase=phase,
+                buy_window=buy_window,
+                force_liquidate=force_liq,
+                reason=f"{phase}{tag}(涨停{t.limit_up_count} 最高{t.max_limit_days}板)",
+            )
+        )
     return result

@@ -5,6 +5,7 @@
 两条路径会给出不同结果（而且 loader 那份当时还无人调用）。现两份列集/更新集必须逐列相同，
 且缺 `promote_from` 时**响亮报错**（KeyError）而不是静默写 NULL。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -21,9 +22,8 @@ D = date(2026, 9, 25)
 def _insert_columns(sql: str) -> tuple[list[str], list[str]]:
     """解析 `INSERT INTO promotion_day (…列…) VALUES … DO UPDATE SET a=EXCLUDED.a,…`。"""
     head, _, tail = sql.partition("VALUES")
-    cols = [c.strip() for c in head[head.index("(") + 1:head.rindex(")")].split(",")]
-    upd = [p.strip().split("=")[0].strip()
-           for p in tail.split("DO UPDATE SET", 1)[1].split(",")]
+    cols = [c.strip() for c in head[head.index("(") + 1 : head.rindex(")")].split(",")]
+    upd = [p.strip().split("=")[0].strip() for p in tail.split("DO UPDATE SET", 1)[1].split(",")]
     return cols, upd
 
 
@@ -69,9 +69,17 @@ class _Rec:
 
 
 def _row(**kw) -> dict:
-    base = {"date": D, "layer": "1->2", "promote_from": 10,
-            "promote_nominal": 3, "promote_exchange": 2, "rate_nominal": 0.3,
-            "rate_exchange": 0.2, "divergence": None, "fail_perf": 1.5}
+    base = {
+        "date": D,
+        "layer": "1->2",
+        "promote_from": 10,
+        "promote_nominal": 3,
+        "promote_exchange": 2,
+        "rate_nominal": 0.3,
+        "rate_exchange": 0.2,
+        "divergence": None,
+        "fail_perf": 1.5,
+    }
     base.update(kw)
     return base
 

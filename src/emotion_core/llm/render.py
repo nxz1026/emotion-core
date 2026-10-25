@@ -1,4 +1,5 @@
 """prompt 模板加载 + 变量填充。"""
+
 from __future__ import annotations
 
 import logging

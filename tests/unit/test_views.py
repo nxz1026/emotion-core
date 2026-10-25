@@ -1,4 +1,5 @@
 """presentation/views 视图渲染测试。"""
+
 from __future__ import annotations
 
 from emotion_core.presentation.views import intuitive, logic, algorithm

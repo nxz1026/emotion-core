@@ -29,6 +29,7 @@ rerun=RERUN.get(step)、排序键）零改动。
 真实库对账另跑（编排者阶段）：同输入下与 lkl.services.pipeline 逐字段一致；
 离线用例见 tests/unit/test_pipeline.py（无 DB，DB 与告警全部桩掉）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,20 +42,19 @@ log = logging.getLogger("emotion_core.pipeline")
 
 # 步骤名 -> 重跑命令（失败时给用户可复制的一行命令）
 RERUN = {
-    "fetch":      "lkl fetch sync",
-    "derive":     "lkl derive",
-    "emotion":    "lkl emotion",
-    "ladder":     "lkl ladder <date>",
-    "theme":      "lkl theme <date>",
-    "review":     "lkl review <date>",
+    "fetch": "lkl fetch sync",
+    "derive": "lkl derive",
+    "emotion": "lkl emotion",
+    "ladder": "lkl ladder <date>",
+    "theme": "lkl theme <date>",
+    "review": "lkl review <date>",
     "trade-export": "lkl trade export",
     "trade-import": "lkl trade import",
     "trade-sync": "lkl trade sync",
 }
 
 
-def mark_running(step: str, for_date: date | None = None,
-                 detail: str = "") -> None:
+def mark_running(step: str, for_date: date | None = None, detail: str = "") -> None:
     """步骤开始：status=RUNNING，记 started_at + config_hash（幂等覆盖上次）。
 
     config_hash 由 `utils/config.py` 的 `config_hash()` 现算（审核文档 §9 第 7 条：
@@ -68,11 +68,13 @@ def mark_running(step: str, for_date: date | None = None,
         " for_date=EXCLUDED.for_date, detail=EXCLUDED.detail,"
         " started_at=now(), finished_at=null, exit_code=null,"
         " config_hash=EXCLUDED.config_hash",
-        (step, for_date, detail, config_hash()))
+        (step, for_date, detail, config_hash()),
+    )
 
 
-def mark_done(step: str, for_date: date | None = None,
-              detail: str = "", exit_code: int = 0) -> None:
+def mark_done(
+    step: str, for_date: date | None = None, detail: str = "", exit_code: int = 0
+) -> None:
     """步骤结束：status=OK/FAILED，记 finished_at + exit_code + 耗时。"""
     status = "OK" if exit_code == 0 else "FAILED"
     execute(
@@ -83,11 +85,11 @@ def mark_done(step: str, for_date: date | None = None,
         " for_date=EXCLUDED.for_date, detail=EXCLUDED.detail,"
         " finished_at=now(), exit_code=EXCLUDED.exit_code,"
         " config_hash=EXCLUDED.config_hash",
-        (step, status, for_date, detail, exit_code, config_hash()))
+        (step, status, for_date, detail, exit_code, config_hash()),
+    )
 
 
-def mark_failed(step: str, detail: str,
-                for_date: date | None = None) -> None:
+def mark_failed(step: str, detail: str, for_date: date | None = None) -> None:
     """步骤异常兜底：FAILED + 详情 + 入 alert（A2-7 闭环，不静默）。"""
     execute(
         "INSERT INTO pipeline_state (step, status, for_date, detail,"
@@ -97,11 +99,13 @@ def mark_failed(step: str, detail: str,
         " for_date=EXCLUDED.for_date, detail=EXCLUDED.detail,"
         " finished_at=now(), exit_code=1,"
         " config_hash=EXCLUDED.config_hash",
-        (step, for_date, detail[:500], config_hash()))
+        (step, for_date, detail[:500], config_hash()),
+    )
     try:
         from emotion_core.algorithms import alerts
+
         alerts.record("ERROR", "pipeline", f"步骤 {step} 失败：{detail[:200]}")
-    except Exception:                            # noqa: BLE001
+    except Exception:  # noqa: BLE001
         log.debug("告警入队失败（不拦 FAILED 记录）")
 
 
@@ -110,18 +114,25 @@ def overview() -> list[dict]:
     df = query_df(
         "SELECT step, status, for_date, detail, started_at, finished_at,"
         " exit_code, config_hash FROM pipeline_state"
-        " ORDER BY coalesce(finished_at, started_at) DESC")
+        " ORDER BY coalesce(finished_at, started_at) DESC"
+    )
     out = []
     for r in df.itertuples():
         dur = None
         if r.started_at is not None and r.finished_at is not None:
             dur = round((r.finished_at - r.started_at).total_seconds(), 1)
-        out.append({"step": r.step, "status": r.status,
-                    "for_date": r.for_date.isoformat() if r.for_date else None,
-                    "detail": r.detail, "duration_s": dur,
-                    "exit_code": r.exit_code,
-                    "config_hash": r.config_hash,
-                    "rerun": RERUN.get(r.step)})
+        out.append(
+            {
+                "step": r.step,
+                "status": r.status,
+                "for_date": r.for_date.isoformat() if r.for_date else None,
+                "detail": r.detail,
+                "duration_s": dur,
+                "exit_code": r.exit_code,
+                "config_hash": r.config_hash,
+                "rerun": RERUN.get(r.step),
+            }
+        )
     return out
 
 

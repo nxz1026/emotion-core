@@ -16,6 +16,7 @@
 
 Python 参考实现：src/emotion_core/algorithms/dragon_env.py。
 """
+
 from __future__ import annotations
 
 import sys
@@ -23,35 +24,41 @@ import sys
 import pytest
 
 sys.path.insert(0, "src")
-from emotion_core.algorithms import dragon_env as py  # noqa: E402
 from emotion_core.core import emotion_core_rust as rust  # noqa: E402
 
 
 # ── g1_height_expanding ─────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("h_series,expected_ok", [
-    ([3, 4, 5], True),           # 单调递增
-    ([3, 3, 4], True),           # 不降且至少一日上升
-    ([5, 4, 3], False),          # 单调递减
-    ([3, 3, 3], False),          # 恒定不变（无上升）
-    ([3, 5, 4], False),          # 先升后降
-])
+
+@pytest.mark.parametrize(
+    "h_series,expected_ok",
+    [
+        ([3, 4, 5], True),  # 单调递增
+        ([3, 3, 4], True),  # 不降且至少一日上升
+        ([5, 4, 3], False),  # 单调递减
+        ([3, 3, 3], False),  # 恒定不变（无上升）
+        ([3, 5, 4], False),  # 先升后降
+    ],
+)
 def test_g1(h_series, expected_ok):
     # Python 版：all(b >= a for a, b in pairwise(hs)) and hs[-1] > hs[0]
-    py_ok = (all(b >= a for a, b in zip(h_series, h_series[1:]))
-             and h_series[-1] > h_series[0])
+    py_ok = all(b >= a for a, b in zip(h_series, h_series[1:])) and h_series[-1] > h_series[0]
     rust_ok, rust_note = rust.g1_height_expanding(h_series, 3)
     assert rust_ok == py_ok == expected_ok, f"h_series={h_series}: rust={rust_ok} py={py_ok}"
 
 
 # ── g4_headroom ─────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("h_series,ref_window,expected_ok", [
-    ([3, 4, 5, 4, 3], 10, True),     # H=3, max=5, 3 <= 5-1, len=5 >= 10//2=5
-    ([3, 4, 5, 6, 7], 10, False),    # H=7, max=7, 7 > 7-1
-    ([5, 5, 5, 5, 5], 10, False),    # H=5, max=5, 5 > 5-1
-    ([3, 3, 3, 3, 4], 10, False),    # H=4, max=4, 4 <= 4-1=3? No → False
-])
+
+@pytest.mark.parametrize(
+    "h_series,ref_window,expected_ok",
+    [
+        ([3, 4, 5, 4, 3], 10, True),  # H=3, max=5, 3 <= 5-1, len=5 >= 10//2=5
+        ([3, 4, 5, 6, 7], 10, False),  # H=7, max=7, 7 > 7-1
+        ([5, 5, 5, 5, 5], 10, False),  # H=5, max=5, 5 > 5-1
+        ([3, 3, 3, 3, 4], 10, False),  # H=4, max=4, 4 <= 4-1=3? No → False
+    ],
+)
 def test_g4(h_series, ref_window, expected_ok):
     ref = max(h_series)
     h = h_series[-1]
@@ -61,6 +68,7 @@ def test_g4(h_series, ref_window, expected_ok):
 
 
 # ── g2_theme_ladder ────────────────────────────────────────────────────────
+
 
 def test_g2_empty():
     rust_ok, rust_note = rust.g2_theme_ladder([], 3)
@@ -81,18 +89,23 @@ def test_g2_qualified():
 
 # ── g3_break_feedback ──────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("perfs,expected_ok", [
-    ([-1.0, -2.0], True),         # avg=-1.5 > -3.0
-    ([-5.0, -6.0], False),        # avg=-5.5 < -3.0
-    ([-3.0, -3.0], False),        # avg=-3.0 == -3.0 → False
-    ([1.0], None),                # 样本不足
-])
+
+@pytest.mark.parametrize(
+    "perfs,expected_ok",
+    [
+        ([-1.0, -2.0], True),  # avg=-1.5 > -3.0
+        ([-5.0, -6.0], False),  # avg=-5.5 < -3.0
+        ([-3.0, -3.0], False),  # avg=-3.0 == -3.0 → False
+        ([1.0], None),  # 样本不足
+    ],
+)
 def test_g3(perfs, expected_ok):
     rust_ok, rust_note = rust.g3_break_feedback(perfs, -3.0)
     assert rust_ok == expected_ok, f"perfs={perfs}: rust={rust_ok}"
 
 
 # ── b1_acceleration ────────────────────────────────────────────────────────
+
 
 def test_b1_hit():
     ok, note = rust.b1_acceleration(True)
@@ -105,6 +118,7 @@ def test_b1_no_hit():
 
 
 # ── b2_oneword_made ────────────────────────────────────────────────────────
+
 
 def test_b2_a3_not_hit():
     ok, note = rust.b2_oneword_made(False, 0.5)
@@ -128,18 +142,23 @@ def test_b2_a3_hit_no_divergence():
 
 # ── b3_next_day_dump ───────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("avg,count,expected_ok", [
-    (-8.5, 2, True),      # avg=-8.5 < -7.0
-    (-5.5, 2, False),     # avg=-5.5 > -7.0
-    (1.0, 1, None),       # 样本不足
-    (0.0, 0, None),       # 空
-])
+
+@pytest.mark.parametrize(
+    "avg,count,expected_ok",
+    [
+        (-8.5, 2, True),  # avg=-8.5 < -7.0
+        (-5.5, 2, False),  # avg=-5.5 > -7.0
+        (1.0, 1, None),  # 样本不足
+        (0.0, 0, None),  # 空
+    ],
+)
 def test_b3(avg, count, expected_ok):
     rust_ok, rust_note = rust.b3_next_day_dump(avg, count, -7.0, "live")
     assert rust_ok == expected_ok, f"avg={avg}: rust={rust_ok}"
 
 
 # ── b4_no_sector ───────────────────────────────────────────────────────────
+
 
 def test_b4_empty():
     ok, note = rust.b4_no_sector([])
@@ -166,12 +185,16 @@ def test_b4_no_theme():
 
 # ── b5_cross_theme ────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("distinct,total,confident,expected_ok", [
-    (2, 5, 3, True),              # 跨 2 题材
-    (1, 5, 3, False),             # 仅 1 题材
-    (0, 0, 0, None),              # 无同身位
-    (1, 5, 0, None),              # 无可信标注
-])
+
+@pytest.mark.parametrize(
+    "distinct,total,confident,expected_ok",
+    [
+        (2, 5, 3, True),  # 跨 2 题材
+        (1, 5, 3, False),  # 仅 1 题材
+        (0, 0, 0, None),  # 无同身位
+        (1, 5, 0, None),  # 无可信标注
+    ],
+)
 def test_b5(distinct, total, confident, expected_ok):
     rust_ok, rust_note = rust.b5_cross_theme(distinct, total, confident)
     assert rust_ok == expected_ok, f"distinct={distinct}: rust={rust_ok}"
@@ -179,46 +202,68 @@ def test_b5(distinct, total, confident, expected_ok):
 
 # ── verdict ────────────────────────────────────────────────────────────────
 
+
 def test_verdict_unfavorable():
     goods = [("G1", True, "ok"), ("G4", True, "ok")]
     bads = [("B1", True, "bad")]
-    assert rust.verdict(
-        [(g[0], g[1], g[2]) for g in goods],
-        [(b[0], b[1], b[2]) for b in bads],
-    ) == "UNFAVORABLE"
+    assert (
+        rust.verdict(
+            [(g[0], g[1], g[2]) for g in goods],
+            [(b[0], b[1], b[2]) for b in bads],
+        )
+        == "UNFAVORABLE"
+    )
 
 
 def test_verdict_favorable():
-    goods = [("G1 可交易高度扩张", True, "ok"), ("G2 主线梯队完整", None, "ok"),
-             ("G3 断板负反馈温和", None, "ok"), ("G4 胜者上方有空间", True, "ok")]
-    bads = [("B1 加速事件", False, "ok"), ("B2 高度靠一字制造", False, "ok"),
-            ("B3 胜出次日核按钮", None, "ok"), ("B4 无板块支持", False, "ok"),
-            ("B5 高标跨题材", False, "ok")]
-    assert rust.verdict(
-        [(g[0], g[1], g[2]) for g in goods],
-        [(b[0], b[1], b[2]) for b in bads],
-    ) == "FAVORABLE"
+    goods = [
+        ("G1 可交易高度扩张", True, "ok"),
+        ("G2 主线梯队完整", None, "ok"),
+        ("G3 断板负反馈温和", None, "ok"),
+        ("G4 胜者上方有空间", True, "ok"),
+    ]
+    bads = [
+        ("B1 加速事件", False, "ok"),
+        ("B2 高度靠一字制造", False, "ok"),
+        ("B3 胜出次日核按钮", None, "ok"),
+        ("B4 无板块支持", False, "ok"),
+        ("B5 高标跨题材", False, "ok"),
+    ]
+    assert (
+        rust.verdict(
+            [(g[0], g[1], g[2]) for g in goods],
+            [(b[0], b[1], b[2]) for b in bads],
+        )
+        == "FAVORABLE"
+    )
 
 
 def test_verdict_neutral_core_false():
     goods = [("G1 可交易高度扩张", False, "bad"), ("G4 胜者上方有空间", True, "ok")]
     bads = [("B1 加速事件", False, "ok")]
-    assert rust.verdict(
-        [(g[0], g[1], g[2]) for g in goods],
-        [(b[0], b[1], b[2]) for b in bads],
-    ) == "NEUTRAL"
+    assert (
+        rust.verdict(
+            [(g[0], g[1], g[2]) for g in goods],
+            [(b[0], b[1], b[2]) for b in bads],
+        )
+        == "NEUTRAL"
+    )
 
 
 def test_verdict_neutral_all_none():
     goods = [("G1 可交易高度扩张", None, "ok"), ("G4 胜者上方有空间", None, "ok")]
     bads = [("B1 加速事件", None, "ok")]
-    assert rust.verdict(
-        [(g[0], g[1], g[2]) for g in goods],
-        [(b[0], b[1], b[2]) for b in bads],
-    ) == "NEUTRAL"
+    assert (
+        rust.verdict(
+            [(g[0], g[1], g[2]) for g in goods],
+            [(b[0], b[1], b[2]) for b in bads],
+        )
+        == "NEUTRAL"
+    )
 
 
 # ── ladder_health ──────────────────────────────────────────────────────────
+
 
 def test_ladder_health_empty():
     health = rust.ladder_health([])
@@ -243,6 +288,7 @@ def test_ladder_health_basic():
 
 # ── promotion_strength ─────────────────────────────────────────────────────
 
+
 def test_promotion_strength_empty():
     ps = rust.promotion_strength([], [])
     assert ps.layers == []
@@ -265,6 +311,7 @@ def test_promotion_strength_basic():
 
 
 # ── rate (完整评级) ─────────────────────────────────────────────────────────
+
 
 def test_rate_favorable():
     """全真场景 → FAVORABLE"""
@@ -336,6 +383,7 @@ def test_rate_neutral():
 
 
 # ── EcosystemItem / EcosystemRating 类 ────────────────────────────────────
+
 
 def test_ecosystem_item():
     item = rust.EcosystemItem("G1", True, "高度扩张")

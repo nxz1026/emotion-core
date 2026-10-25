@@ -12,6 +12,7 @@
 `--dry-run` 只打印将被回填的区间与交易日数，**不写库**；它不是口径预演——
 逐日五条件判定只在真实写入路径（`run` → `entry.check_signal`）里跑。
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,12 +64,12 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="python -m emotion_core.services.replay_service",
-        description="回填历史 signal（逐交易日调 entry.check_signal，source=replay）。")
+        description="回填历史 signal（逐交易日调 entry.check_signal，source=replay）。",
+    )
     ap.add_argument("--start", required=True, metavar="YYYY-MM-DD", help="起始日（含）")
     ap.add_argument("--end", required=True, metavar="YYYY-MM-DD", help="结束日（含）")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="只打印将回填的区间与交易日数，不写库")
-    ns = ap.parse_args(argv)          # 参数缺失/非法：argparse 自带退出码 2
+    ap.add_argument("--dry-run", action="store_true", help="只打印将回填的区间与交易日数，不写库")
+    ns = ap.parse_args(argv)  # 参数缺失/非法：argparse 自带退出码 2
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     try:
@@ -82,13 +83,15 @@ def main(argv: list[str] | None = None) -> int:
 
     days = trading_days(start, end)
     if ns.dry_run:
-        print(f"[dry-run] 区间 {start} ~ {end}：{len(days)} 个交易日 "
-              f"（{days[0] if days else '—'} ~ {days[-1] if days else '—'}），不写库")
+        print(
+            f"[dry-run] 区间 {start} ~ {end}：{len(days)} 个交易日 "
+            f"（{days[0] if days else '—'} ~ {days[-1] if days else '—'}），不写库"
+        )
         return 0
 
     try:
         n = run(start, end)
-    except Exception as exc:          # CLI 边界兜底：异常折成非 0，不吞栈
+    except Exception as exc:  # CLI 边界兜底：异常折成非 0，不吞栈
         log.error("回填失败 %s ~ %s: %s", start, end, exc, exc_info=True)
         return 1
     print(f"回填完成：{n} 条信号（区间 {start} ~ {end}，{len(days)} 个交易日）")

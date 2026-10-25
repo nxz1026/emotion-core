@@ -1,12 +1,10 @@
 """algorithms/review/utils.py 格式化工具函数测试。"""
+
 from __future__ import annotations
 
 import dataclasses
-import json
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -121,10 +119,13 @@ class TestEnvCaveat:
         assert rv._env_caveat(de) == ""
 
     def test_favorable_with_unknown(self):
-        de = {"rating": "FAVORABLE", "goods": [
-            {"ok": True, "cond": "G1"},
-            {"ok": None, "cond": "G2 题材关联"},
-        ]}
+        de = {
+            "rating": "FAVORABLE",
+            "goods": [
+                {"ok": True, "cond": "G1"},
+                {"ok": None, "cond": "G2 题材关联"},
+            ],
+        }
         result = rv._env_caveat(de)
         assert "G2" in result
         assert "尚无数据" in result
@@ -143,8 +144,11 @@ class TestEnvConflict:
 
     def test_unfavorable_and_enhanced(self):
         d = {
-            "dragon_env": {"rating": "UNFAVORABLE", "goods": [],
-                           "bads": [{"ok": True, "cond": "G3 龙头断板"}]},
+            "dragon_env": {
+                "rating": "UNFAVORABLE",
+                "goods": [],
+                "bads": [{"ok": True, "cond": "G3 龙头断板"}],
+            },
             "stat": {"phase": "发酵"},
             "window": "ENHANCED",
         }
@@ -220,37 +224,50 @@ class TestSealNotes:
 
 class TestFmtCatalyst:
     def test_empty(self):
-        tags = pd.DataFrame(columns=["catalyst_source", "cont_days", "code",
-                                     "name", "primary_theme", "catalyst",
-                                     "evidence_date", "confidence"])
+        tags = pd.DataFrame(
+            columns=[
+                "catalyst_source",
+                "cont_days",
+                "code",
+                "name",
+                "primary_theme",
+                "catalyst",
+                "evidence_date",
+                "confidence",
+            ]
+        )
         assert rv._fmt_catalyst(tags) == ""
 
     def test_announcement(self):
-        tags = pd.DataFrame({
-            "catalyst_source": ["announcement"],
-            "cont_days": [3],
-            "code": ["600000"],
-            "name": ["贵州茅台"],
-            "primary_theme": ["白酒"],
-            "catalyst": ["业绩预增"],
-            "evidence_date": ["2024-06-15"],
-            "confidence": ["HIGH"],
-        })
+        tags = pd.DataFrame(
+            {
+                "catalyst_source": ["announcement"],
+                "cont_days": [3],
+                "code": ["600000"],
+                "name": ["贵州茅台"],
+                "primary_theme": ["白酒"],
+                "catalyst": ["业绩预增"],
+                "evidence_date": ["2024-06-15"],
+                "confidence": ["HIGH"],
+            }
+        )
         result = rv._fmt_catalyst(tags)
         assert "催化剂证据" in result
         assert "贵州茅台" in result
 
     def test_high_cont(self):
-        tags = pd.DataFrame({
-            "catalyst_source": ["concept"],
-            "cont_days": [4],
-            "code": ["600001"],
-            "name": ["华海药业"],
-            "primary_theme": ["医药"],
-            "catalyst": [None],
-            "evidence_date": [None],
-            "confidence": [None],
-        })
+        tags = pd.DataFrame(
+            {
+                "catalyst_source": ["concept"],
+                "cont_days": [4],
+                "code": ["600001"],
+                "name": ["华海药业"],
+                "primary_theme": ["医药"],
+                "catalyst": [None],
+                "evidence_date": [None],
+                "confidence": [None],
+            }
+        )
         result = rv._fmt_catalyst(tags)
         assert "无事件催化" in result
 
@@ -300,26 +317,44 @@ class TestUsability:
 
 class TestCounterItems:
     def test_empty(self):
-        d = {"stat": {"top_broke": True}, "dragon_env": {}, "quality": {"warns": [], "diff": pd.DataFrame()}}
+        d = {
+            "stat": {"top_broke": True},
+            "dragon_env": {},
+            "quality": {"warns": [], "diff": pd.DataFrame()},
+        }
         assert rv._counter_items(d) == []
 
     def test_mean_median_conflict(self):
-        d = {"stat": {"zt_performance_mean": 2.0, "zt_performance_median": -1.0, "top_broke": True,
-                      "max_limit_days": None, "tradable_max_days": None},
-             "dragon_env": {}, "quality": {"warns": [], "diff": pd.DataFrame()}}
+        d = {
+            "stat": {
+                "zt_performance_mean": 2.0,
+                "zt_performance_median": -1.0,
+                "top_broke": True,
+                "max_limit_days": None,
+                "tradable_max_days": None,
+            },
+            "dragon_env": {},
+            "quality": {"warns": [], "diff": pd.DataFrame()},
+        }
         result = rv._counter_items(d)
         assert len(result) == 1
         assert "方向相反" in result[0]
 
     def test_max_vs_tradable(self):
-        d = {"stat": {"max_limit_days": 8, "tradable_max_days": 5},
-             "dragon_env": {}, "quality": {"warns": [], "diff": pd.DataFrame()}}
+        d = {
+            "stat": {"max_limit_days": 8, "tradable_max_days": 5},
+            "dragon_env": {},
+            "quality": {"warns": [], "diff": pd.DataFrame()},
+        }
         result = rv._counter_items(d)
         assert any("名义" in item for item in result)
 
     def test_top_broke_none(self):
-        d = {"stat": {"top_broke": None}, "dragon_env": {},
-             "quality": {"warns": [], "diff": pd.DataFrame()}}
+        d = {
+            "stat": {"top_broke": None},
+            "dragon_env": {},
+            "quality": {"warns": [], "diff": pd.DataFrame()},
+        }
         result = rv._counter_items(d)
         assert any("断板" in item for item in result)
 
@@ -357,6 +392,7 @@ class TestJsonable:
 
     def test_numpy(self):
         import numpy as np
+
         result = rv._jsonable(np.int64(42))
         assert result == 42
 

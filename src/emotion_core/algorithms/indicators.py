@@ -64,13 +64,21 @@ def compute_derived(bars: list[Bar]) -> list[DerivedBar]:
             else:
                 cont = 0
             # 振幅 = (high - low) / pre_close * 100
-            amp = (b.high_cents - b.low_cents) / b.pre_close_cents * 100 if b.pre_close_cents else 0.0
-            result.append(DerivedBar(
-                code=code, date=b.date,
-                is_limit_up=lu, is_limit_down=ld,
-                is_one_word=ow, is_exchange=ex, is_bomb=bomb,
-                touched_limit=tl,
-                cont_days=0 if suspended else cont,
-                amplitude=round(amp, 4),
-            ))
+            amp = (
+                (b.high_cents - b.low_cents) / b.pre_close_cents * 100 if b.pre_close_cents else 0.0
+            )
+            result.append(
+                DerivedBar(
+                    code=code,
+                    date=b.date,
+                    is_limit_up=lu,
+                    is_limit_down=ld,
+                    is_one_word=ow,
+                    is_exchange=ex,
+                    is_bomb=bomb,
+                    touched_limit=tl,
+                    cont_days=0 if suspended else cont,
+                    amplitude=round(amp, 4),
+                )
+            )
     return result

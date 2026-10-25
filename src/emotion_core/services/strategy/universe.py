@@ -56,8 +56,7 @@ def tradable_codes(trade_date: date) -> set[str]:
     """
     ph = ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
     df = query_df(
-        f"SELECT code FROM daily_bar WHERE date = %s AND volume > 0"
-        f" AND left(code, 3) IN ({ph})",
+        f"SELECT code FROM daily_bar WHERE date = %s AND volume > 0 AND left(code, 3) IN ({ph})",
         (trade_date, *CONFIG.BOARD_PREFIXES),
     )
     return set(_codes(df))
@@ -104,7 +103,10 @@ def build_universe(trade_date: date) -> list[str]:
     tradable = drop_untradable(codes, trade_date)
     if len(tradable) != len(codes):
         kept = set(tradable)
-        log.info("候选池剔除当日无行情标的 %d 只（%s）：%s",
-                 len(codes) - len(tradable), trade_date,
-                 ",".join(c for c in codes if c not in kept))
+        log.info(
+            "候选池剔除当日无行情标的 %d 只（%s）：%s",
+            len(codes) - len(tradable),
+            trade_date,
+            ",".join(c for c in codes if c not in kept),
+        )
     return tradable

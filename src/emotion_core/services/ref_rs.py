@@ -5,6 +5,7 @@ RS = 个股区间涨幅 / 基准指数区间涨幅（或排序分位）。
 
 指数源：Wind（通过指数日行情接口）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -70,9 +71,7 @@ def calculate_rs(as_of_date: date | None = None, benchmark: str = DEFAULT_BENCHM
 
         # 获取所有有效股票代码
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT code FROM stock_basic WHERE in_market = true LIMIT 5000"
-            )
+            cur.execute("SELECT code FROM stock_basic WHERE in_market = true LIMIT 5000")
             codes = [row[0] for row in cur.fetchall()]
 
         # 批量获取区间行情
@@ -115,7 +114,9 @@ def calculate_rs(as_of_date: date | None = None, benchmark: str = DEFAULT_BENCHM
 
         # 按 20 日 RS 排序赋 rank
         rows_with_rank = []
-        sorted_rows = sorted(enumerate(rows), key=lambda x: x[1][2] if x[1][2] is not None else -999, reverse=True)
+        sorted_rows = sorted(
+            enumerate(rows), key=lambda x: x[1][2] if x[1][2] is not None else -999, reverse=True
+        )
         rank_map = {orig_idx: rank + 1 for rank, (orig_idx, _) in enumerate(sorted_rows)}
         for idx, row in enumerate(rows):
             code, d, rs20, rs60, bm = row
@@ -157,10 +158,7 @@ def get_top_rs(
                     ORDER BY rs_rank NULLS LAST LIMIT %s""",
                 (as_of_date, benchmark, limit),
             )
-            return [
-                {"code": row[0], "rs": row[1], "rank": row[2]}
-                for row in cur.fetchall()
-            ]
+            return [{"code": row[0], "rs": row[1], "rank": row[2]} for row in cur.fetchall()]
 
 
 def main(argv: list[str] | None = None) -> int:

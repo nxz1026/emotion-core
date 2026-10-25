@@ -81,7 +81,7 @@ log = logging.getLogger(__name__)
 
 Cand = LadderDay
 Ctx = dict[str, Any]
-Row = tuple[str, bool | None, str]                     # (标签, 通过?, 说明)
+Row = tuple[str, bool | None, str]  # (标签, 通过?, 说明)
 Cond = Callable[[Cand, Ctx], "tuple[bool | None, str]"]
 
 
@@ -90,9 +90,9 @@ def _cfg(name: str, default: Any) -> Any:
     return getattr(CONFIG, name, default)
 
 
-MIN_LEADER_DAYS: int = CONFIG.MIN_LEADER_DAYS                  # lkl MIN_LEADER_DAYS=4
-SECONDARY_MIN_LEADER_DAYS: int = CONFIG.SECONDARY_MIN_DAYS      # lkl SECONDARY_MIN_LEADER_DAYS=3
-DIVERGE_MIN_TURNOVER: float = CONFIG.EXCHANGE_TURNOVER_MIN      # lkl DIVERGE_MIN_TURNOVER=5.0
+MIN_LEADER_DAYS: int = CONFIG.MIN_LEADER_DAYS  # lkl MIN_LEADER_DAYS=4
+SECONDARY_MIN_LEADER_DAYS: int = CONFIG.SECONDARY_MIN_DAYS  # lkl SECONDARY_MIN_LEADER_DAYS=3
+DIVERGE_MIN_TURNOVER: float = CONFIG.EXCHANGE_TURNOVER_MIN  # lkl DIVERGE_MIN_TURNOVER=5.0
 SECONDARY_DIVERGE_MIN_TURNOVER: float = _cfg("SECONDARY_DIVERGE_MIN_TURNOVER", 3.5)
 REQUIRE_YESTERDAY_COMPETITION: bool = _cfg("REQUIRE_YESTERDAY_COMPETITION", True)
 POOL_RECENT_DAYS: int = _cfg("POOL_RECENT_DAYS", 30)
@@ -106,13 +106,13 @@ def _field(cand: Cand, ctx: Ctx, key: str, default: Any = None) -> Any:
 
 def c1_uniqueness(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
     ok = ctx["sole"] is not None and cand.code == ctx["sole"].code
-    return ok, (f"唯一换手高标: {_field(cand, ctx, 'name', '')}"
-                f"({cand.code}) {cand.cont_days}板")
+    return ok, (f"唯一换手高标: {_field(cand, ctx, 'name', '')}({cand.code}) {cand.cont_days}板")
 
 
 def c2_exchange(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
-    return cand.is_exchange, ("换手板(非一字)" if cand.is_exchange
-                              else "一字板=网络垄断，无有效投票")
+    return cand.is_exchange, (
+        "换手板(非一字)" if cand.is_exchange else "一字板=网络垄断，无有效投票"
+    )
 
 
 def c3_elimination(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
@@ -127,11 +127,11 @@ def c3_elimination(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
         return False, f"昨日最高板组{g}只→今日幸存{s}只(要求≥2竞争且仅1幸存)"
     y_codes, survivors = ctx["y_surv"]
     if cand.code not in y_codes:
-        return False, (f"候选({_field(cand, ctx, 'name', '')})不在昨日最高组内——"
-                       "新插队高标，淘汰赛身份不成立")
+        return False, (
+            f"候选({_field(cand, ctx, 'name', '')})不在昨日最高组内——新插队高标，淘汰赛身份不成立"
+        )
     if survivors != {cand.code}:
-        return False, ("幸存者非候选——昨日组唯一幸存者另有其票，"
-                       "候选已被淘汰")
+        return False, ("幸存者非候选——昨日组唯一幸存者另有其票，候选已被淘汰")
     return True, f"昨日最高板组{g}只→候选胜出（集合等值：幸存=候选本身）"
 
 
@@ -147,11 +147,12 @@ def _c3_secondary(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
         return True, "R2 关闭：不要求昨日竞争"
     peer = ctx["y_peer"]
     if peer < 2:
-        return False, (f"昨日{ctx['min_days'] - 1}板身位换手连板{peer}只"
-                       "(要求≥2竞争)")
-    return True, (f"昨日{ctx['min_days'] - 1}板身位{peer}只竞争→"
-                  f"候选今日晋级{ctx['min_days']}板（次级降档："
-                  "不要求昨日最高组唯一幸存）")
+        return False, (f"昨日{ctx['min_days'] - 1}板身位换手连板{peer}只(要求≥2竞争)")
+    return True, (
+        f"昨日{ctx['min_days'] - 1}板身位{peer}只竞争→"
+        f"候选今日晋级{ctx['min_days']}板（次级降档："
+        "不要求昨日最高组唯一幸存）"
+    )
 
 
 def c3_loose(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
@@ -174,17 +175,18 @@ def c3_loose(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
         return False, f"昨日最高板组{g}只→今日幸存{s}只(要求≥2竞争且≥1幸存)"
     y_codes, survivors = ctx["y_surv"]
     if cand.code not in y_codes:
-        return False, (f"候选({_field(cand, ctx, 'name', '')})不在昨日最高组内——"
-                       "新插队高标，淘汰赛身份不成立")
+        return False, (
+            f"候选({_field(cand, ctx, 'name', '')})不在昨日最高组内——新插队高标，淘汰赛身份不成立"
+        )
     if cand.code not in survivors:
         return False, "候选不在昨日组幸存者中（昨日组中其它幸存者今日未延续）"
     return True, f"昨日最高板组{g}只→幸存{s}只，候选在其中（不要求唯一幸存）"
 
 
 # ---- W2′ c3 三档身份（不否决，只定仓位） -----------------------------------
-TIER_STRICT = "严格胜出"      # 昨日最高组 g≥2 且今日幸存 s==1 且候选在昨日组内
-TIER_INHERIT = "身位延续"     # 候选在昨日最高组内（非严格胜出）
-TIER_NEWCOMER = "新插队"      # 候选不在昨日最高组内
+TIER_STRICT = "严格胜出"  # 昨日最高组 g≥2 且今日幸存 s==1 且候选在昨日组内
+TIER_INHERIT = "身位延续"  # 候选在昨日最高组内（非严格胜出）
+TIER_NEWCOMER = "新插队"  # 候选不在昨日最高组内
 
 
 def c3_tier(cand: Cand, ctx: Ctx) -> str:
@@ -229,10 +231,11 @@ class PositionTier:
     weight 只当过滤器用（0.0 不进观察名单）。旧标签「满仓/半仓/观望」已废弃
     ——系统不出买入建议，谈仓位就是暗示。
     """
-    tier: str          # 严格胜出 / 身位延续 / 新插队
-    label: str         # 优先 / 次选 / 不参与
-    weight: float      # 1.0 / 0.5 / 0.0（仅作过滤）
-    expectancy: str    # 该格实测每信号期望（口径B，费后）
+
+    tier: str  # 严格胜出 / 身位延续 / 新插队
+    label: str  # 优先 / 次选 / 不参与
+    weight: float  # 1.0 / 0.5 / 0.0（仅作过滤）
+    expectancy: str  # 该格实测每信号期望（口径B，费后）
     phase: str
     diverge: bool
 
@@ -288,8 +291,7 @@ def position_tier(phase: str, diverge: bool, tier: str) -> PositionTier:
         w = 0.0 if tier == TIER_NEWCOMER else _WEIGHT_HALF
     label = {1.0: "优先", 0.5: "次选", 0.0: "不参与"}[w]
     exp = _EXPECT.get((phase, dg, tier), "未测")
-    return PositionTier(tier=tier, label=label, weight=w,
-                        expectancy=exp, phase=phase, diverge=dg)
+    return PositionTier(tier=tier, label=label, weight=w, expectancy=exp, phase=phase, diverge=dg)
 
 
 def tier_of(cand: Cand, window: str, *, as_of: date | None = None) -> PositionTier:
@@ -298,10 +300,10 @@ def tier_of(cand: Cand, window: str, *, as_of: date | None = None) -> PositionTi
     报告/诊断专用：与 check_signal 落库时的判断同源，避免报告自己再算一遍仓位档。
     """
     stat = _read_stat(cand.date) or {}
-    ctx = _ctx(cand, window, min_days=MIN_LEADER_DAYS,
-               diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of)
-    return position_tier(stat.get("phase") or "", bool(stat.get("diverge")),
-                         c3_tier(cand, ctx))
+    ctx = _ctx(
+        cand, window, min_days=MIN_LEADER_DAYS, diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of
+    )
+    return position_tier(stat.get("phase") or "", bool(stat.get("diverge")), c3_tier(cand, ctx))
 
 
 # A 止血（2026-10-21）：`buy_point` / `plan_text` 已删除。口径B 打板的成交假设被证伪
@@ -326,19 +328,19 @@ def c5_strength_diverge(cand: Cand, ctx: Ctx) -> tuple[bool | None, str]:
     if ctx["window"] != "ENHANCED":
         return True, "标准窗口不适用"
     if not ctx.get("c5_verifiable", True):
-        return None, ("⚠ EM池窗口外：回封腿无池数据、换手率系当前股本反算"
-                      "——本条件不可核验(UNKNOWN)，不计入通过/否决")
+        return None, (
+            "⚠ EM池窗口外：回封腿无池数据、换手率系当前股本反算"
+            "——本条件不可核验(UNKNOWN)，不计入通过/否决"
+        )
     threshold = ctx.get("diverge_min", DIVERGE_MIN_TURNOVER)
     bomb_times = _field(cand, ctx, "bomb_times", 0) or 0
     if bomb_times >= 1:
         return True, f"炸板{bomb_times}次回封"
     turnover = _field(cand, ctx, "turnover_rate")
     if turnover is None or (isinstance(turnover, float) and math.isnan(turnover)):
-        return True, (f"⚠ 换手率缺失（非 0）——强度补偿无法核验，"
-                      f"阈值{threshold}%，建议人工确认")
+        return True, (f"⚠ 换手率缺失（非 0）——强度补偿无法核验，阈值{threshold}%，建议人工确认")
     ok = float(turnover) >= threshold
-    return ok, (f"换手{float(turnover):.2f}%"
-                f"{'≥' if ok else '<'}阈值{threshold}%")
+    return ok, (f"换手{float(turnover):.2f}%{'≥' if ok else '<'}阈值{threshold}%")
 
 
 # V5（二轮审计「条件编号常量化」）：编号从函数名剥离——此前显示名靠
@@ -369,7 +371,7 @@ _SECONDARY_CONDITIONS: tuple[tuple[Cond, str, str], ...] = (
 _RECOMMEND_CONDITIONS: tuple[tuple[Cond, str, str], ...] = (
     (c1_uniqueness, "c1_uniqueness", "c1 唯一换手高标"),
     (c2_exchange, "c2_exchange", "c2 换手板非一字"),
-    (c3_loose, "c3_elimination", "c3 淘汰赛身份"),   # 沿用 c3_elimination 字段名
+    (c3_loose, "c3_elimination", "c3 淘汰赛身份"),  # 沿用 c3_elimination 字段名
     (c4_min_days, "c4_min_days", "c4 最低板数门槛"),
     (c5_strength_diverge, "c5_strength_diverge", "c5 强度与分歧补偿"),
 )
@@ -388,19 +390,19 @@ def w1_crowding(cand: Cand, ctx: Ctx) -> tuple[bool, str]:
     h = max(r.cont_days for r in rows)
     n = sum(1 for r in rows if r.cont_days == h)
     if n >= 2:
-        return True, (f"⚠ 同身位扎堆：绝对最高 {h}板 {n} 只"
-                      f"（历史组中位-8.69%/胜率8%，建议降仓或放弃）")
+        return True, (
+            f"⚠ 同身位扎堆：绝对最高 {h}板 {n} 只（历史组中位-8.69%/胜率8%，建议降仓或放弃）"
+        )
     return True, "无同身位扎堆"
 
 
-_WARNINGS: tuple[tuple[Cond, str, str], ...] = (
-    (w1_crowding, "w1_crowding", "W1 同身位扎堆"),
-)
+_WARNINGS: tuple[tuple[Cond, str, str], ...] = ((w1_crowding, "w1_crowding", "W1 同身位扎堆"),)
 
 # 三套条件集的标签都映射到同一 Checklist 字段（c3 三档共用 c3_elimination 槽位）
-_FIELD_OF: dict[str, str] = {label: field
-                             for _, field, label in (_CONDITIONS + _SECONDARY_CONDITIONS
-                                                     + _RECOMMEND_CONDITIONS + _WARNINGS)}
+_FIELD_OF: dict[str, str] = {
+    label: field
+    for _, field, label in (_CONDITIONS + _SECONDARY_CONDITIONS + _RECOMMEND_CONDITIONS + _WARNINGS)
+}
 
 
 @dataclass(frozen=True)
@@ -411,6 +413,7 @@ class WarningOnly:
     警告不论返回 True/False 都没有否决权。待 domain 契约层扩列后移入
     domain/signal.py（本次范围限两个文件）。
     """
+
     w1_crowding: bool | None
 
 
@@ -438,15 +441,24 @@ def _candidate_view(cand: Cand) -> dict[str, Any]:
         row = conn.execute(_VIEW_SQL, {"code": cand.code, "d": cand.date}).fetchone()
     if row is None:
         return {}
-    return {"name": row[0] or "",
-            "turnover_rate": None if row[1] is None else float(row[1]),
-            "bomb_times": None if row[2] is None else int(row[2]),
-            # W3′：T 日收盘 → 买点（T+1 涨停价）唯一输入
-            "close": None if row[3] is None else float(row[3])}
+    return {
+        "name": row[0] or "",
+        "turnover_rate": None if row[1] is None else float(row[1]),
+        "bomb_times": None if row[2] is None else int(row[2]),
+        # W3′：T 日收盘 → 买点（T+1 涨停价）唯一输入
+        "close": None if row[3] is None else float(row[3]),
+    }
 
 
-def _ctx(cand: Cand, window: str, *, min_days: int, diverge_min: float,
-         as_of: date | None = None, include_peer: bool = False) -> Ctx:
+def _ctx(
+    cand: Cand,
+    window: str,
+    *,
+    min_days: int,
+    diverge_min: float,
+    as_of: date | None = None,
+    include_peer: bool = False,
+) -> Ctx:
     """预取 ctx（lkl 同构：ctx 承担全部 IO，条件函数只做纯判定）。
 
     as_of = 可复现基准日（回放传评估日；缺省 today_sh() 显式化，禁止隐式
@@ -456,32 +468,31 @@ def _ctx(cand: Cand, window: str, *, min_days: int, diverge_min: float,
     prev = prev_trading_day(cand.date)
     prev_rows = ladder.build(prev) if prev is not None else []
     y_codes = {r.code for r in ladder.top_group(prev_rows)}
-    survivors = ladder.y_survivors(cand.date)          # V3：幸存 = 今日仍换手
+    survivors = ladder.y_survivors(cand.date)  # V3：幸存 = 今日仍换手
     base = as_of or today_sh()
     ctx: Ctx = {
         "sole": ladder.sole_top(rows, min_days),
         "window": window,
         "min_days": min_days,
         "diverge_min": diverge_min,
-        "y_comp": (len(y_codes), len(survivors)),      # R2 淘汰赛况
+        "y_comp": (len(y_codes), len(survivors)),  # R2 淘汰赛况
         "rows": rows,
-        "y_surv": (y_codes, survivors),                # P1-2 集合等值校验
+        "y_surv": (y_codes, survivors),  # P1-2 集合等值校验
         # V4④a：EM 池窗口外（数据源只有近 POOL_RECENT_DAYS 天）→ c5 不可核验
         "c5_verifiable": cand.date >= base - timedelta(days=POOL_RECENT_DAYS),
     }
     ctx.update(_candidate_view(cand))
     if include_peer:
-        ctx["y_peer"] = sum(1 for r in prev_rows
-                            if r.cont_days == cand.cont_days - 1 and r.is_exchange)
+        ctx["y_peer"] = sum(
+            1 for r in prev_rows if r.cont_days == cand.cont_days - 1 and r.is_exchange
+        )
     return ctx
 
 
 def _rows(cand: Cand, ctx: Ctx, conditions: tuple[tuple[Cond, str, str], ...]) -> list[Row]:
     """五条件逐行 + 警告行（恒排在最后，报告/落库按此序）。"""
-    out = [(label, ok, note) for fn, _, label in conditions
-           for ok, note in [fn(cand, ctx)]]
-    out += [(label, ok, note) for fn, _, label in _WARNINGS
-            for ok, note in [fn(cand, ctx)]]
+    out = [(label, ok, note) for fn, _, label in conditions for ok, note in [fn(cand, ctx)]]
+    out += [(label, ok, note) for fn, _, label in _WARNINGS for ok, note in [fn(cand, ctx)]]
     return out
 
 
@@ -489,34 +500,58 @@ def _to_checklist(rows: list[Row]) -> Checklist:
     return Checklist(**{_FIELD_OF[label]: ok for label, ok, _ in rows})
 
 
-def _evaluate_ctx(cand: Cand, window: str, *, min_days: int, diverge_min: float,
-                  as_of: date | None = None,
-                  conditions: tuple[tuple[Cond, str, str], ...] = _CONDITIONS,
-                  include_peer: bool = False) -> tuple[Checklist, list[Row], Ctx]:
+def _evaluate_ctx(
+    cand: Cand,
+    window: str,
+    *,
+    min_days: int,
+    diverge_min: float,
+    as_of: date | None = None,
+    conditions: tuple[tuple[Cond, str, str], ...] = _CONDITIONS,
+    include_peer: bool = False,
+) -> tuple[Checklist, list[Row], Ctx]:
     """评估并**同时交出 ctx**（W2′：仓位档要用 ctx 里的 y_comp / y_surv）。"""
-    ctx = _ctx(cand, window, min_days=min_days, diverge_min=diverge_min,
-               as_of=as_of, include_peer=include_peer)
+    ctx = _ctx(
+        cand,
+        window,
+        min_days=min_days,
+        diverge_min=diverge_min,
+        as_of=as_of,
+        include_peer=include_peer,
+    )
     rows = _rows(cand, ctx, conditions)
     return _to_checklist(rows), rows, ctx
 
 
-def _evaluate(cand: Cand, window: str, *, min_days: int, diverge_min: float,
-              as_of: date | None = None,
-              conditions: tuple[tuple[Cond, str, str], ...] = _CONDITIONS,
-              include_peer: bool = False) -> tuple[Checklist, list[Row]]:
+def _evaluate(
+    cand: Cand,
+    window: str,
+    *,
+    min_days: int,
+    diverge_min: float,
+    as_of: date | None = None,
+    conditions: tuple[tuple[Cond, str, str], ...] = _CONDITIONS,
+    include_peer: bool = False,
+) -> tuple[Checklist, list[Row]]:
     """一次评估同时产出 Checklist（判定用）与行（落库/报告用），ctx 只建一次。"""
-    cl, rows, _ = _evaluate_ctx(cand, window, min_days=min_days,
-                                diverge_min=diverge_min, as_of=as_of,
-                                conditions=conditions, include_peer=include_peer)
+    cl, rows, _ = _evaluate_ctx(
+        cand,
+        window,
+        min_days=min_days,
+        diverge_min=diverge_min,
+        as_of=as_of,
+        conditions=conditions,
+        include_peer=include_peer,
+    )
     return cl, rows
 
 
-def checklist(cand: Cand, window: str, min_days: int | None = None,
-              as_of: date | None = None) -> Checklist:
+def checklist(
+    cand: Cand, window: str, min_days: int | None = None, as_of: date | None = None
+) -> Checklist:
     """五条件逐项核对 + 警告项。min_days 供 R1 参数矩阵。"""
     md = MIN_LEADER_DAYS if min_days is None else min_days
-    cl, _ = _evaluate(cand, window, min_days=md, diverge_min=DIVERGE_MIN_TURNOVER,
-                      as_of=as_of)
+    cl, _ = _evaluate(cand, window, min_days=md, diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of)
     return cl
 
 
@@ -531,14 +566,25 @@ def checklist_secondary(cand: Cand, window: str, as_of: date | None = None) -> C
     - c5：分歧换手下限 SECONDARY_DIVERGE_MIN_TURNOVER=3.5%（主=5.0%）
     c1/c2 身份类不松——仍须唯一换手高标、非一字。
     """
-    cl, _ = _evaluate(cand, window, min_days=SECONDARY_MIN_LEADER_DAYS,
-                      diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER, as_of=as_of,
-                      conditions=_SECONDARY_CONDITIONS, include_peer=True)
+    cl, _ = _evaluate(
+        cand,
+        window,
+        min_days=SECONDARY_MIN_LEADER_DAYS,
+        diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
+        as_of=as_of,
+        conditions=_SECONDARY_CONDITIONS,
+        include_peer=True,
+    )
     return cl
 
 
-def rows(cand: Cand, window: str, min_days: int | None = None,
-         as_of: date | None = None, secondary: bool = False) -> list[Row]:
+def rows(
+    cand: Cand,
+    window: str,
+    min_days: int | None = None,
+    as_of: date | None = None,
+    secondary: bool = False,
+) -> list[Row]:
     """五条件 + W- 警告的**带说明**行（落库/报告用），顺序同 `entry._persist`。
 
     `checklist()` 只回布尔投影，把 `_evaluate` 已经算好的 note 丢掉了。复盘报告
@@ -548,14 +594,18 @@ def rows(cand: Cand, window: str, min_days: int | None = None,
     secondary=True 走次级阈值与次级 c3（`checklist_secondary` 的同一组参数）。
     """
     if secondary:
-        _, out = _evaluate(cand, window, min_days=SECONDARY_MIN_LEADER_DAYS,
-                           diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
-                           as_of=as_of, conditions=_SECONDARY_CONDITIONS,
-                           include_peer=True)
+        _, out = _evaluate(
+            cand,
+            window,
+            min_days=SECONDARY_MIN_LEADER_DAYS,
+            diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
+            as_of=as_of,
+            conditions=_SECONDARY_CONDITIONS,
+            include_peer=True,
+        )
         return out
     md = MIN_LEADER_DAYS if min_days is None else min_days
-    _, out = _evaluate(cand, window, min_days=md,
-                       diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of)
+    _, out = _evaluate(cand, window, min_days=md, diverge_min=DIVERGE_MIN_TURNOVER, as_of=as_of)
     return out
 
 
@@ -579,8 +629,7 @@ def split_checklist(cl: Checklist) -> tuple[Checklist, WarningOnly]:
     return replace(cl, w1_crowding=None), WarningOnly(w1_crowding=cl.w1_crowding)
 
 
-_STAT_SQL = ("SELECT buy_window, phase, diverge"
-             " FROM market_stat WHERE date = %s")
+_STAT_SQL = "SELECT buy_window, phase, diverge FROM market_stat WHERE date = %s"
 
 
 def _read_stat(trade_date: date) -> dict[str, Any] | None:
@@ -614,8 +663,7 @@ def current_window(trade_date: date) -> str:
     return _read_window(trade_date) or "NONE"
 
 
-def check_signal(trade_date: date,
-                 source: SignalSource = SignalSource.LIVE) -> Signal | None:
+def check_signal(trade_date: date, source: SignalSource = SignalSource.LIVE) -> Signal | None:
     """当日**观察记录**：窗口非NONE + 唯一最高板候选 + 条件全过 + 档位非「不参与」→ 落库。
 
     A 止血（2026-10-21）：返回值与落库行都**不含买点 / 卖点 / 仓位**。`action=BUY` 是
@@ -647,26 +695,34 @@ def check_signal(trade_date: date,
         # 无 4 板候选 → 无 BUY；SECONDARY（3 板起）仍可能成观察记录
         check_secondary_signal(trade_date, source)
         return None
-    cl, rows, ctx = _evaluate_ctx(cand, window, min_days=MIN_LEADER_DAYS,
-                                  diverge_min=DIVERGE_MIN_TURNOVER)
+    cl, rows, ctx = _evaluate_ctx(
+        cand, window, min_days=MIN_LEADER_DAYS, diverge_min=DIVERGE_MIN_TURNOVER
+    )
     # R58-4：name 仅 BUY 推送需要——直接走 _candidate_view 复用同 IO（与
     # c1/c5 同源）；缺数按 None 落空（推送模板照「code()」也好看）。
     cand_view = _candidate_view(cand)
-    sig = Signal(code=cand.code, date=trade_date, action=Action.BUY,
-                 checklist=cl, source=source,
-                 name=cand_view.get("name") or None,
-                 cont_days=cand.cont_days)   # 仅内存展示（推送/诊断用，不入库）
-    if passed_of(cl):        # P1-1：与回测同一聚合器（UNKNOWN 不否决）
+    sig = Signal(
+        code=cand.code,
+        date=trade_date,
+        action=Action.BUY,
+        checklist=cl,
+        source=source,
+        name=cand_view.get("name") or None,
+        cont_days=cand.cont_days,
+    )  # 仅内存展示（推送/诊断用，不入库）
+    if passed_of(cl):  # P1-1：与回测同一聚合器（UNKNOWN 不否决）
         pt = position_tier(phase, diverge, c3_tier(cand, ctx))
         if pt.weight <= 0:
-            log.info("%s 候选 %s 通过但档位=不参与（%s）→ 不落记录",
-                     trade_date, cand.code, pt.reason)
+            log.info(
+                "%s 候选 %s 通过但档位=不参与（%s）→ 不落记录", trade_date, cand.code, pt.reason
+            )
             check_secondary_signal(trade_date, source)
             return None
         _persist(sig, window, rows)
         return sig
-    log.info("%s 候选 %s 未全过: %s", trade_date, cand.code,
-             [n for n, ok, _ in rows if ok is False])
+    log.info(
+        "%s 候选 %s 未全过: %s", trade_date, cand.code, [n for n, ok, _ in rows if ok is False]
+    )
     # 主信号未通过 → SECONDARY（放宽 c3 与 c4/c5 阈值的观察档；不导出、不推送）
     check_secondary_signal(trade_date, source)
     return None
@@ -698,10 +754,19 @@ def _persist(sig: Signal, window: str, rows: list[Row]) -> None:
     config_hash：本次产出的策略版本指纹，冲突时按最后一次运行覆盖。
     """
     with transaction() as conn:
-        conn.execute(_INSERT_SQL, (sig.date, sig.code, sig.action.value,
-                                   window, json.dumps(rows, ensure_ascii=False),
-                                   _cfg("STRATEGY_VERSION", None),
-                                   sig.source.value, config_hash()))
+        conn.execute(
+            _INSERT_SQL,
+            (
+                sig.date,
+                sig.code,
+                sig.action.value,
+                window,
+                json.dumps(rows, ensure_ascii=False),
+                _cfg("STRATEGY_VERSION", None),
+                sig.source.value,
+                config_hash(),
+            ),
+        )
 
 
 # ---- 次级推荐（次推荐）：放宽阈值，独立落库，action='SECONDARY' ----
@@ -711,8 +776,9 @@ def _persist(sig: Signal, window: str, rows: list[Row]) -> None:
 # 避免同一 confirm_date 产生双 action 记录）。
 
 
-def check_secondary_signal(trade_date: date,
-                           source: SignalSource = SignalSource.LIVE) -> Signal | None:
+def check_secondary_signal(
+    trade_date: date, source: SignalSource = SignalSource.LIVE
+) -> Signal | None:
     """次级买入信号：次级唯一高标 + 次级 checklist 全过 → 落库 SECONDARY。
 
     - 主推荐（check_signal）未通过时才尝试次级，避免同一 confirm_date 同
@@ -730,23 +796,31 @@ def check_secondary_signal(trade_date: date,
     rows_today = ladder.build(trade_date)
     cand = ladder.sole_top(rows_today, SECONDARY_MIN_LEADER_DAYS)
     if cand is None:
-        log.info("%s 无次级唯一高标候选（min_days=%d）",
-                 trade_date, SECONDARY_MIN_LEADER_DAYS)
+        log.info("%s 无次级唯一高标候选（min_days=%d）", trade_date, SECONDARY_MIN_LEADER_DAYS)
         return None
-    cl, rows = _evaluate(cand, window, min_days=SECONDARY_MIN_LEADER_DAYS,
-                         diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
-                         conditions=_SECONDARY_CONDITIONS, include_peer=True)
+    cl, rows = _evaluate(
+        cand,
+        window,
+        min_days=SECONDARY_MIN_LEADER_DAYS,
+        diverge_min=SECONDARY_DIVERGE_MIN_TURNOVER,
+        conditions=_SECONDARY_CONDITIONS,
+        include_peer=True,
+    )
     cand_view = _candidate_view(cand)
-    sig = Signal(code=cand.code, date=trade_date, action=Action.SECONDARY,
-                 checklist=cl, source=source,
-                 name=cand_view.get("name") or None,
-                 cont_days=cand.cont_days)
+    sig = Signal(
+        code=cand.code,
+        date=trade_date,
+        action=Action.SECONDARY,
+        checklist=cl,
+        source=source,
+        name=cand_view.get("name") or None,
+        cont_days=cand.cont_days,
+    )
     if passed_of(cl):
         _persist(sig, window, rows)
         log.info("%s 次级推荐 %s 生成", trade_date, cand.code)
         return sig
-    log.info("%s 次级候选 %s 未全过: %s", trade_date, cand.code,
-             [n for n, ok, _ in rows if not ok])
+    log.info("%s 次级候选 %s 未全过: %s", trade_date, cand.code, [n for n, ok, _ in rows if not ok])
     return None
 
 
@@ -764,8 +838,9 @@ def check_secondary_signal(trade_date: date,
 # 里也调用 check_recommend_signal（与 check_secondary_signal 同先例）。
 
 
-def check_recommend_signal(trade_date: date,
-                           source: SignalSource = SignalSource.LIVE) -> Signal | None:
+def check_recommend_signal(
+    trade_date: date, source: SignalSource = SignalSource.LIVE
+) -> Signal | None:
     """RECOMMEND 信号：BUY 同身位最高板 + 仅放宽 c3（候选 ∈ 幸存集）+ 其余 4 项通过。
 
     - 与 BUY 的区别：c3 由「幸存集 == {候选}」放宽为「候选 ∈ 幸存集」——c1/c2/c4/c5
@@ -777,26 +852,34 @@ def check_recommend_signal(trade_date: date,
     """
     window = current_window(trade_date)
     if window == "NONE":
-        log.info("%s buy_window=NONE——RECOMMEND 仍生成（观察记录，不导出）",
-                 trade_date)
+        log.info("%s buy_window=NONE——RECOMMEND 仍生成（观察记录，不导出）", trade_date)
     rows_today = ladder.build(trade_date)
     cand = ladder.sole_top(rows_today, MIN_LEADER_DAYS)
     if cand is None:
-        log.info("%s 无 RECOMMEND 唯一高标候选（min_days=%d）",
-                 trade_date, MIN_LEADER_DAYS)
+        log.info("%s 无 RECOMMEND 唯一高标候选（min_days=%d）", trade_date, MIN_LEADER_DAYS)
         return None
-    cl, rows = _evaluate(cand, window, min_days=MIN_LEADER_DAYS,
-                         diverge_min=DIVERGE_MIN_TURNOVER,
-                         conditions=_RECOMMEND_CONDITIONS)
+    cl, rows = _evaluate(
+        cand,
+        window,
+        min_days=MIN_LEADER_DAYS,
+        diverge_min=DIVERGE_MIN_TURNOVER,
+        conditions=_RECOMMEND_CONDITIONS,
+    )
     cand_view = _candidate_view(cand)
-    sig = Signal(code=cand.code, date=trade_date, action=Action.RECOMMEND,
-                 checklist=cl, source=source,
-                 name=cand_view.get("name") or None,
-                 cont_days=cand.cont_days)
+    sig = Signal(
+        code=cand.code,
+        date=trade_date,
+        action=Action.RECOMMEND,
+        checklist=cl,
+        source=source,
+        name=cand_view.get("name") or None,
+        cont_days=cand.cont_days,
+    )
     if passed_of(cl):
         _persist(sig, window, rows)
         log.info("%s RECOMMEND 推荐 %s 生成", trade_date, cand.code)
         return sig
-    log.info("%s RECOMMEND 候选 %s 未全过: %s", trade_date, cand.code,
-             [n for n, ok, _ in rows if not ok])
+    log.info(
+        "%s RECOMMEND 候选 %s 未全过: %s", trade_date, cand.code, [n for n, ok, _ in rows if not ok]
+    )
     return None

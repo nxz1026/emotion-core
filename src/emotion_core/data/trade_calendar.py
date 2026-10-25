@@ -18,6 +18,7 @@ materialize 成区间内每一自然日的 `is_open` 落 `trade_calendar` 表，
 
 运维：`python -m emotion_core.data.trade_calendar refresh`（也可 `--show 2026-09-25`）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,10 +93,20 @@ def refresh(conn: Any | None = None) -> dict[str, Any]:
     else:
         with conn.cursor() as cur:
             _upsert(cur, rows)
-    info = {"open_n": len(open_dates), "rows": len(rows),
-            "first": rows[0][0], "last": rows[-1][0], "source": SOURCE}
-    log.info("交易日历刷新：%d 行（开市 %d），区间 %s ~ %s",
-             info["rows"], info["open_n"], info["first"], info["last"])
+    info = {
+        "open_n": len(open_dates),
+        "rows": len(rows),
+        "first": rows[0][0],
+        "last": rows[-1][0],
+        "source": SOURCE,
+    }
+    log.info(
+        "交易日历刷新：%d 行（开市 %d），区间 %s ~ %s",
+        info["rows"],
+        info["open_n"],
+        info["first"],
+        info["last"],
+    )
     return info
 
 
@@ -151,8 +162,10 @@ def _main(argv: list[str] | None = None) -> int:
 
     if ns.cmd == "refresh":
         info = refresh()
-        print(f"OK 交易日历 {info['rows']} 行（开市 {info['open_n']}）"
-              f" 区间 {info['first']} ~ {info['last']} 源 {info['source']}")
+        print(
+            f"OK 交易日历 {info['rows']} 行（开市 {info['open_n']}）"
+            f" 区间 {info['first']} ~ {info['last']} 源 {info['source']}"
+        )
         return 0
     d = date.fromisoformat(ns.date) if ns.date else today_sh()
     print(f"{d} {d.strftime('%a')} -> {'开市' if is_trading_day(d) else '休市'}（源 {SOURCE}）")

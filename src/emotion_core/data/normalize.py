@@ -3,6 +3,7 @@
 从 asel/sources/free_daily.py 移植，去掉 asel 依赖。
 本模块只负责归一化，不含网络/文件/数据库代码。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -111,13 +112,30 @@ def normalize_daily_rows(
         amount_raw = _pick(row, _AMOUNT_KEYS)
         amount = None if amount_raw is None else _decimal(amount_raw, "amount")
         invalid = (
-            open_ <= 0 or high <= 0 or low <= 0 or close <= 0 or volume < 0
-            or high < max(open_, close, low) or low > min(open_, close, high)
+            open_ <= 0
+            or high <= 0
+            or low <= 0
+            or close <= 0
+            or volume < 0
+            or high < max(open_, close, low)
+            or low > min(open_, close, high)
             or (amount is not None and amount < 0)
         )
-        result.append(DailyBar(
-            trade_date, open_, high, low, close, volume, amount,
-            _pick(row, _ADJUST_KEYS), code, source, source_ref, fetched_at,
-            "invalid" if invalid else "valid",
-        ))
+        result.append(
+            DailyBar(
+                trade_date,
+                open_,
+                high,
+                low,
+                close,
+                volume,
+                amount,
+                _pick(row, _ADJUST_KEYS),
+                code,
+                source,
+                source_ref,
+                fetched_at,
+                "invalid" if invalid else "valid",
+            )
+        )
     return tuple(result)

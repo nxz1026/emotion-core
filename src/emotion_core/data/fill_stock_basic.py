@@ -41,6 +41,7 @@ f20/f21 是 2026-10-12 才接入 `_SINA_TO_EM` 的（配 `_SINA_UNIT_SCALE` 做
 `f100='-'` 显式丢弃。**退市不反扫**依然成立：不会把库内已有的退市股改回 false，
 待单独工单做退市扫描。
 """
+
 from __future__ import annotations
 
 import logging
@@ -110,10 +111,10 @@ def _is_st_name(name: str) -> bool:
     实测 198/5228 命中，与 `stock_basic` 里的 `ST`/`*ST` 名单逐只吻合、零歧义。
     """
     s = name
-    for _ in range(2):                       # 最多两层除权标记
+    for _ in range(2):  # 最多两层除权标记
         for d in _ST_EX_PREFIXES:
             if s.startswith(d):
-                s = s[len(d):]
+                s = s[len(d) :]
                 break
         else:
             break
@@ -182,8 +183,9 @@ def _rows_from_frame(raw: pd.DataFrame) -> list[Row]:
             dropped += 1
             continue
         market_cap = _as_float(rec.get("f20")) if "f20" in cols else None
-        rows.append((code, name, industry, market_cap,
-                     _float_shares_from(rec, cols), _is_st_name(name)))
+        rows.append(
+            (code, name, industry, market_cap, _float_shares_from(rec, cols), _is_st_name(name))
+        )
     if dropped:
         log.info("过滤已退市证券 %d 只（f100='-'），保留 %d 只在市", dropped, len(rows))
     return rows
@@ -214,9 +216,14 @@ def upsert_stock_basic(rows: list[Row]) -> int:
         with conn.cursor() as cur:
             values = sql.SQL(", ").join(
                 sql.SQL("({}, {}, {}, {}, {}, {}, {}, true)").format(
-                    _lit(code), _lit(name), _lit(_market(code)),
-                    _lit(industry), _lit(market_cap), _lit(float_shares),
-                    _lit(is_st))
+                    _lit(code),
+                    _lit(name),
+                    _lit(_market(code)),
+                    _lit(industry),
+                    _lit(market_cap),
+                    _lit(float_shares),
+                    _lit(is_st),
+                )
                 for code, name, industry, market_cap, float_shares, is_st in rows
             )
             query = sql.SQL(
@@ -259,8 +266,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="刷新 stock_basic（全市场快照，幂等 upsert）")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只抓取并打印解析行数与样例，不写库")
+    parser.add_argument("--dry-run", action="store_true", help="只抓取并打印解析行数与样例，不写库")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if not args.dry_run:

@@ -6,6 +6,7 @@
 - psycopg 取出的 Decimal/date 必须能序列化成 JSON（不然页面直接 500）；
 - 个股页必须在导航里、能预填代码；直观层推荐要能点进个股页。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -16,7 +17,7 @@ from emotion_core.presentation import server
 
 
 def test_recover_utf8_handles_raw_utf8_query():
-    raw = "新华文轩".encode().decode("latin-1")   # curl 直发原始字节的形态
+    raw = "新华文轩".encode().decode("latin-1")  # curl 直发原始字节的形态
     assert server._recover_utf8(raw) == "新华文轩"
 
 
@@ -28,8 +29,7 @@ def test_recover_utf8_leaves_normal_and_ascii_untouched():
 
 def test_query_arg_decodes_percent_encoded_and_raw():
     assert server._query_arg(urlparse("/api/stock?code=601811"), "code") == "601811"
-    assert server._query_arg(urlparse("/api/stock?code=%E6%96%B0%E5%8D%8E"),
-                             "code") == "新华"
+    assert server._query_arg(urlparse("/api/stock?code=%E6%96%B0%E5%8D%8E"), "code") == "新华"
     raw = "/api/stock?code=" + "新华".encode().decode("latin-1")
     assert server._query_arg(urlparse(raw), "code") == "新华"
     assert server._query_arg(urlparse("/api/stock"), "code") == ""
@@ -62,33 +62,63 @@ def test_stock_page_states_data_sources_and_pit():
 
 
 def test_intuitive_page_links_recommendations_to_stock(monkeypatch):
-    monkeypatch.setattr(server, "_load_intuitive_data", lambda trade_date=None: {
-        "phase": "发酵", "phase_desc": "x", "buy_window": "STANDARD",
-        "force_liquidate": False, "limit_up_count": 40, "max_limit_days": 4,
-        "limit_down_count": 3, "ladder_count": 0, "signal_count": 1,
-        "dragon_env": "NEUTRAL", "dragon_desc": "环境一般", "accelerate": False,
-        "accel_reason": "", "recommendation": {"code": "601811", "cont_days": 2},
-        "recommendations": [{"code": "601811", "name": "新华文轩", "cont_days": 2}],
-        "top_ladder": [], "signal_counts": {"day": 1, "total": 1, "ladder_day": 0,
-                                            "ladder_total": 0}})
+    monkeypatch.setattr(
+        server,
+        "_load_intuitive_data",
+        lambda trade_date=None: {
+            "phase": "发酵",
+            "phase_desc": "x",
+            "buy_window": "STANDARD",
+            "force_liquidate": False,
+            "limit_up_count": 40,
+            "max_limit_days": 4,
+            "limit_down_count": 3,
+            "ladder_count": 0,
+            "signal_count": 1,
+            "dragon_env": "NEUTRAL",
+            "dragon_desc": "环境一般",
+            "accelerate": False,
+            "accel_reason": "",
+            "recommendation": {"code": "601811", "cont_days": 2},
+            "recommendations": [{"code": "601811", "name": "新华文轩", "cont_days": 2}],
+            "top_ladder": [],
+            "signal_counts": {"day": 1, "total": 1, "ladder_day": 0, "ladder_total": 0},
+        },
+    )
     html = server.render_dashboard("intuitive")
-    assert f'{server.BASE_PATH}/stock?code=601811' in html
+    assert f"{server.BASE_PATH}/stock?code=601811" in html
 
 
 def test_intuitive_page_offers_input_when_no_signal(monkeypatch):
-    monkeypatch.setattr(server, "_load_intuitive_data", lambda trade_date=None: {
-        "phase": "冰点", "phase_desc": "x", "buy_window": "NONE",
-        "force_liquidate": False, "limit_up_count": 5, "max_limit_days": 1,
-        "limit_down_count": 1, "ladder_count": 0, "signal_count": 0,
-        "dragon_env": "", "dragon_desc": "暂无评级", "accelerate": False,
-        "accel_reason": "", "recommendation": None, "recommendations": [],
-        "top_ladder": [], "signal_counts": {"day": 0, "total": 0, "ladder_day": 0,
-                                            "ladder_total": 0}})
+    monkeypatch.setattr(
+        server,
+        "_load_intuitive_data",
+        lambda trade_date=None: {
+            "phase": "冰点",
+            "phase_desc": "x",
+            "buy_window": "NONE",
+            "force_liquidate": False,
+            "limit_up_count": 5,
+            "max_limit_days": 1,
+            "limit_down_count": 1,
+            "ladder_count": 0,
+            "signal_count": 0,
+            "dragon_env": "",
+            "dragon_desc": "暂无评级",
+            "accelerate": False,
+            "accel_reason": "",
+            "recommendation": None,
+            "recommendations": [],
+            "top_ladder": [],
+            "signal_counts": {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        },
+    )
     html = server.render_dashboard("intuitive")
     assert f'action="{server.BASE_PATH}/stock"' in html
 
 
 # ── R4 前端：sizing 参数 + 关注列表 ─────────────────────────────────────────
+
 
 def test_stock_page_has_sizing_inputs():
     html = server.render_dashboard("stock")

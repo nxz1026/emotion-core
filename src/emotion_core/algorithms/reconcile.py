@@ -6,6 +6,7 @@
 - `from lkl.utils import db` + `db.query_df` → `from emotion_core.utils.db import query_df`。
 SQL 文本（含 f-string 占位与 `%%ST%%` 转义）与参数顺序逐字不变。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -26,7 +27,8 @@ def reconcile(trade_date: date) -> pd.DataFrame:
         f"WHERE p.date = %s AND p.pool_type = 'ZT' AND NOT p.name LIKE '%%ST%%' "
         f"  AND left(p.code, 3) IN ({ph}) "
         f"  AND d.cont_days IS DISTINCT FROM p.cont_days_em",
-        (trade_date, *CONFIG.BOARD_PREFIXES))
+        (trade_date, *CONFIG.BOARD_PREFIXES),
+    )
 
 
 def reconcile_range(start: date, end: date) -> pd.DataFrame:
@@ -48,12 +50,16 @@ def reconcile_range(start: date, end: date) -> pd.DataFrame:
         " WHERE p.date BETWEEN %s AND %s AND p.pool_type = 'ZT' AND NOT s.is_st"
         f" AND left(p.code,3) IN ({ph})"
         " GROUP BY p.date ORDER BY p.date",
-        (start, end, *CONFIG.BOARD_PREFIXES))
+        (start, end, *CONFIG.BOARD_PREFIXES),
+    )
     if df.empty:
         return df
     # P1-10：高度差异独立列——缺票(diff)与板数不同(height_diff)分开报，
     # 同码同日但连板高度错时不再冒充匹配。
     df["mismatch"] = df["diff"] + df["height_diff"]
-    df["match_pct"] = ((df["pool_mb"] - df["mismatch"]) / df["pool_mb"] * 100
-                       ).round(2).where(df["pool_mb"] > 0, 100.0)
+    df["match_pct"] = (
+        ((df["pool_mb"] - df["mismatch"]) / df["pool_mb"] * 100)
+        .round(2)
+        .where(df["pool_mb"] > 0, 100.0)
+    )
     return df.reset_index(drop=True)

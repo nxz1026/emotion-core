@@ -54,7 +54,9 @@ class TestParseLog:
 
     def test_naive_timestamp_treated_as_beijing(self, tmp_path):
         p = tmp_path / "c.log"
-        p.write_text(json.dumps({"at": "2026-10-22T10:00:00", "outcome": "ok"}) + "\n", encoding="utf-8")
+        p.write_text(
+            json.dumps({"at": "2026-10-22T10:00:00", "outcome": "ok"}) + "\n", encoding="utf-8"
+        )
         r = w.parse_log(p)[0]
         assert r.ts.date() == date(2026, 10, 22)
         assert r.ts.utcoffset().total_seconds() == 8 * 3600
@@ -127,7 +129,9 @@ class TestEvaluate:
         log.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         monkeypatch.setattr(w, "dashboard_errors", lambda *a, **k: 0)
-        res = w.evaluate(_FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=log)
+        res = w.evaluate(
+            _FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=log
+        )
         assert res.streak == 1
         assert not res.ready
         assert res.dashboard_errors == 0
@@ -139,13 +143,19 @@ class TestEvaluate:
             encoding="utf-8",
         )
         monkeypatch.setattr(w, "dashboard_errors", lambda *a, **k: 0)
-        res = w.evaluate(_FakeConn(None), now=datetime(2026, 10, 22, 11, 0, tzinfo=BJ), log_path=log)
+        res = w.evaluate(
+            _FakeConn(None), now=datetime(2026, 10, 22, 11, 0, tzinfo=BJ), log_path=log
+        )
         assert res.pending_day == date(2026, 10, 22)
         assert date(2026, 10, 22) not in [d.day for d in res.days]
 
     def test_missing_log_is_not_clean(self, monkeypatch, fake_db, tmp_path):
         monkeypatch.setattr(w, "dashboard_errors", lambda *a, **k: 0)
-        res = w.evaluate(_FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=tmp_path / "nope.log")
+        res = w.evaluate(
+            _FakeConn(None),
+            now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ),
+            log_path=tmp_path / "nope.log",
+        )
         assert res.log_missing is True
         assert res.streak == 0
         assert not res.ready
@@ -179,7 +189,9 @@ class TestEvaluate:
         log = tmp_path / "c.log"
         log.write_text("", encoding="utf-8")
         monkeypatch.setattr(w, "dashboard_errors", lambda *a, **k: None)
-        res = w.evaluate(_FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=log)
+        res = w.evaluate(
+            _FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=log
+        )
         assert res.dashboard_errors is None
 
 
@@ -188,7 +200,9 @@ class TestRenderText:
         log = tmp_path / "c.log"
         log.write_text("", encoding="utf-8")
         monkeypatch.setattr(w, "dashboard_errors", lambda *a, **k: 0)
-        res = w.evaluate(_FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=log)
+        res = w.evaluate(
+            _FakeConn(None), now=datetime(2026, 10, 22, 16, 0, tzinfo=BJ), log_path=log
+        )
         text = w.render_text(res)
         assert "观察期闸门" in text
         assert "还不能开工" in text

@@ -8,10 +8,10 @@
 CLI 路径：``/home/ubuntu/.agents/skills/wind-mcp-skill/scripts/cli.mjs``
 API Key：``~/.wind-aifinmarket/config`` 的 ``WIND_API_KEY=xxx``
 """
+
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -19,16 +19,20 @@ from datetime import datetime, timezone  # noqa: F401 — kept for future timest
 from pathlib import Path
 from typing import Any, Callable, Final, Mapping, Sequence
 
-DEFAULT_CLI_SCRIPT: Final[Path] = Path(
-    "/home/ubuntu/.agents/skills/wind-mcp-skill/scripts/cli.mjs"
-)
+DEFAULT_CLI_SCRIPT: Final[Path] = Path("/home/ubuntu/.agents/skills/wind-mcp-skill/scripts/cli.mjs")
 DEFAULT_CONFIG_PATH: Final[Path] = Path("~/.wind-aifinmarket/config").expanduser()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 90.0
 
 _QUOTA_CODES: frozenset[str] = frozenset({"RATE_LIMIT_ERROR"})
 _QUOTA_MARKERS: tuple[str, ...] = (
-    "额度", "积分", "配额", "余额不足", "试用已", "到期",
-    "insufficient", "quota",
+    "额度",
+    "积分",
+    "配额",
+    "余额不足",
+    "试用已",
+    "到期",
+    "insufficient",
+    "quota",
 )
 
 
@@ -47,6 +51,7 @@ class WindSourceError(RuntimeError):
 @dataclass(frozen=True)
 class WindCall:
     """一次 CLI 调用的回执。"""
+
     server_type: str
     tool_name: str
     params: Mapping[str, Any]

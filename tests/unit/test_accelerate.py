@@ -4,6 +4,7 @@
 本文件锁纯逻辑与降级分支——A1/A2/A3 的边界、F6 不补 0、A8 全量取行、
 V3 停牌断档归零、基线滚动窗口与预热期。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -107,19 +108,25 @@ class TestTopStreak:
         """断档日归零后重数；返回值是「截至今日的当前连续长度」，非历史最长段。"""
         ds = _days(3, 2, 1, 0)
         fake.calendar = ds
-        fake.bars = [("600000", ds[0], True, True), ("600000", ds[1], True, True),
-                     ("600000", ds[2], False, True), ("600000", ds[3], True, True)]
+        fake.bars = [
+            ("600000", ds[0], True, True),
+            ("600000", ds[1], True, True),
+            ("600000", ds[2], False, True),
+            ("600000", ds[3], True, True),
+        ]
         assert accelerate._top_streak(D, 5) == 1
-        fake.bars = [("600000", d, True, True) for d in ds[:3]] + [
-            ("600000", ds[3], False, True)]
-        assert accelerate._top_streak(D, 5) == 0   # 今日断档 → 0，尽管前三日连续
+        fake.bars = [("600000", d, True, True) for d in ds[:3]] + [("600000", ds[3], False, True)]
+        assert accelerate._top_streak(D, 5) == 0  # 今日断档 → 0，尽管前三日连续
 
     def test_suspension_gap_resets(self, fake):
         """停牌缺行：相邻两行中间隔了其他交易日 → 断档归零（V3）。"""
         ds = _days(4, 2, 0)
         fake.calendar = ds + [D - timedelta(days=3), D - timedelta(days=1)]
-        fake.bars = [("600000", ds[0], True, True), ("600000", ds[1], True, True),
-                     ("600000", ds[2], True, True)]
+        fake.bars = [
+            ("600000", ds[0], True, True),
+            ("600000", ds[1], True, True),
+            ("600000", ds[2], True, True),
+        ]
         # 无停牌应为 3；calendar 里补进 gap 日后每段断开，最长段 = 1
         assert accelerate._top_streak(D, 5) == 1
 
@@ -145,8 +152,8 @@ class TestBaselineRatio:
     def test_memory_path_uses_only_window_and_latest_first(self, fake):
         fake.forbid_reads = True
         win = accelerate.ACCEL_BASELINE_WINDOW
-        head = [0.30] * win                       # 最新在前：窗口内 30 个 0.30
-        tail = [0.90] * 10                        # 窗口外旧值必须被忽略
+        head = [0.30] * win  # 最新在前：窗口内 30 个 0.30
+        tail = [0.90] * 10  # 窗口外旧值必须被忽略
         assert accelerate._baseline_ratio(D, head + tail) == 0.30
 
     def test_memory_path_insufficient_samples_is_none(self, fake):
@@ -172,25 +179,30 @@ class TestBaselineRatio:
 @pytest.fixture
 def stub(monkeypatch):
     """替换四项 IO：直接给定判据输入，测 detect 的聚合与边界。"""
+
     def _apply(nominal_h=5, tradable_h=5, ratio=None, base=None, streak=0):
         monkeypatch.setattr(accelerate, "heights", lambda d: (nominal_h, tradable_h))
         monkeypatch.setattr(accelerate, "oneword_ratio", lambda d: ratio)
         monkeypatch.setattr(accelerate, "_baseline_ratio", lambda d, p=None: base)
         monkeypatch.setattr(accelerate, "_top_streak", lambda d, h: streak)
+
     return _apply
 
 
 class TestHit:
     """命中规则 A1 and (A2 or A3)。"""
 
-    @pytest.mark.parametrize("a1,a2,a3,expected", [
-        (True, True, False, True),
-        (True, False, True, True),
-        (True, True, True, True),
-        (True, False, False, False),
-        (False, True, True, False),      # 无高度背离：A2/A3 只是表现
-        (False, False, False, False),
-    ])
+    @pytest.mark.parametrize(
+        "a1,a2,a3,expected",
+        [
+            (True, True, False, True),
+            (True, False, True, True),
+            (True, True, True, True),
+            (True, False, False, False),
+            (False, True, True, False),  # 无高度背离：A2/A3 只是表现
+            (False, False, False, False),
+        ],
+    )
     def test_truth_table(self, a1, a2, a3, expected):
         assert accelerate._hit(a1, a2, a3) is expected
 
@@ -203,14 +215,15 @@ class TestDetect:
         stub(nominal_h=threshold + 4, tradable_h=4, streak=accelerate.ACCEL_ONEWORD_DAYS)
         assert accelerate.detect(D)[0] is True
         stub(nominal_h=threshold + 4, tradable_h=5, streak=accelerate.ACCEL_ONEWORD_DAYS)
-        assert accelerate.detect(D)[0] is False           # gap = threshold-1
+        assert accelerate.detect(D)[0] is False  # gap = threshold-1
 
     def test_streak_boundary(self, stub):
         stub(nominal_h=6, tradable_h=4, streak=accelerate.ACCEL_ONEWORD_DAYS)
         assert accelerate.detect(D)[0] is True
-        stub(nominal_h=6, tradable_h=4, streak=accelerate.ACCEL_ONEWORD_DAYS - 1,
-             ratio=0.9, base=0.1)
-        assert accelerate.detect(D)[0] is True            # A2 差 1 日，A3 补位
+        stub(
+            nominal_h=6, tradable_h=4, streak=accelerate.ACCEL_ONEWORD_DAYS - 1, ratio=0.9, base=0.1
+        )
+        assert accelerate.detect(D)[0] is True  # A2 差 1 日，A3 补位
         stub(nominal_h=6, tradable_h=4, streak=0, ratio=None, base=0.1)
         assert accelerate.detect(D)[0] is False
 
@@ -219,23 +232,31 @@ class TestDetect:
         stub(nominal_h=6, tradable_h=4, ratio=thr, base=thr - 0.01)
         assert accelerate.detect(D)[0] is True
         stub(nominal_h=6, tradable_h=4, ratio=thr - 0.01, base=0.1)
-        assert accelerate.detect(D)[0] is False           # 低于绝对阈值
+        assert accelerate.detect(D)[0] is False  # 低于绝对阈值
         stub(nominal_h=6, tradable_h=4, ratio=thr, base=thr)
-        assert accelerate.detect(D)[0] is False           # 等于基线：非「高于」
+        assert accelerate.detect(D)[0] is False  # 等于基线：非「高于」
 
     def test_a3_false_when_ratio_or_baseline_missing(self, stub):
         stub(nominal_h=6, tradable_h=4, ratio=None, base=0.1)
-        assert accelerate.detect(D)[2]["a3"] is False     # 无涨停（F6）→ A3 不成立
+        assert accelerate.detect(D)[2]["a3"] is False  # 无涨停（F6）→ A3 不成立
         stub(nominal_h=6, tradable_h=4, ratio=0.9, base=None)
-        assert accelerate.detect(D)[2]["a3"] is False     # 预热期无基线 → A3 不成立
+        assert accelerate.detect(D)[2]["a3"] is False  # 预热期无基线 → A3 不成立
 
     def test_facts_and_reason(self, stub):
         stub(nominal_h=7, tradable_h=4, ratio=0.5, base=0.3, streak=3)
         hit, reason, facts = accelerate.detect(D)
         assert hit is True
-        assert facts == {"nominal_h": 7, "tradable_h": 4, "gap": 3, "streak": 3,
-                         "oneword_ratio": 0.5, "baseline_ratio": 0.3,
-                         "a1": True, "a2": True, "a3": True}
+        assert facts == {
+            "nominal_h": 7,
+            "tradable_h": 4,
+            "gap": 3,
+            "streak": 3,
+            "oneword_ratio": 0.5,
+            "baseline_ratio": 0.3,
+            "a1": True,
+            "a2": True,
+            "a3": True,
+        }
         assert "A1高度背离3" in reason and "A2连续一字3日" in reason and "A3一字占比0.5" in reason
 
     def test_reason_marks_missing_values(self, stub):

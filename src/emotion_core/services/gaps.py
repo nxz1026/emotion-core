@@ -10,6 +10,7 @@
 调用方：``presentation/server.py`` 的 ``_load_algorithm_data`` 注入 context，
 ``algorithm.html`` 的「已知缺口」区块改为从 context 渲染。
 """
+
 from __future__ import annotations
 
 import ast
@@ -33,7 +34,7 @@ def _check_coverage_gate() -> dict | None:
         return {
             "item": "覆盖率门槛未接线",
             "detail": "MIN_COVERAGE=0.90 仅为常量；<code>orchestration/daily.py</code>"
-                    " 未调用 <code>coverage.gate()</code>。",
+            " 未调用 <code>coverage.gate()</code>。",
             "impl": "services/coverage.py:59-65；orchestration/daily.py",
         }
     return None  # 已接线，无缺口
@@ -46,19 +47,18 @@ def _check_health_step() -> dict | None:
     if "health" in daily and "TODO" in daily and "health.push" not in daily:
         return {
             "item": "health 步骤是空实现",
-            "detail": "每日编排只打印 TODO，<code>services/health.py</code>"
-                    " 的断档检查未被调用。",
+            "detail": "每日编排只打印 TODO，<code>services/health.py</code> 的断档检查未被调用。",
             "impl": "orchestration/daily.py",
         }
     # 检查 health 模块是否存在且被调用（可能在 algorithms/ 或 services/）
-    health_py = (SRC / "algorithms" / "health.py")
+    health_py = SRC / "algorithms" / "health.py"
     if not health_py.exists():
-        health_py = (SRC / "services" / "health.py")
+        health_py = SRC / "services" / "health.py"
     if not health_py.exists():
         return {
             "item": "health 服务不存在",
             "detail": "<code>services/health.py</code> 不存在，"
-                    "断档检查（日报/数据链/信号结果陈旧）未实现。",
+            "断档检查（日报/数据链/信号结果陈旧）未实现。",
             "impl": "services/health.py（缺失）",
         }
     return None
@@ -67,7 +67,7 @@ def _check_health_step() -> dict | None:
 def _check_caliber_tests() -> dict | None:
     """tests/caliber/ 是否有测试文件？"""
     caliber_dir = SRC.parent.parent / "tests" / "caliber"
-    if not caliber_dir.exists() or not any( caliber_dir.glob("test_*.py")):
+    if not caliber_dir.exists() or not any(caliber_dir.glob("test_*.py")):
         return {
             "item": "tests/caliber/ 为空",
             "detail": "规划的口径守护测试未落地；C1-C7 无专测。",
@@ -86,13 +86,11 @@ def _check_ecosystem_rs() -> dict | None:
             "impl": "core/src/ecosystem.rs（缺失）",
         }
     text = rs.read_text()
-    lines = [l for l in text.splitlines()
-             if l.strip() and not l.strip().startswith("//")]
+    lines = [l for l in text.splitlines() if l.strip() and not l.strip().startswith("//")]
     if len(lines) < 20:  # 空壳阈值
         return {
             "item": "ecosystem.rs 是空壳",
-            "detail": f"全文仅 {len(lines)} 行有效代码，"
-                    "dragon_env.py 注释声称的 Rust 实现未完成。",
+            "detail": f"全文仅 {len(lines)} 行有效代码，dragon_env.py 注释声称的 Rust 实现未完成。",
             "impl": f"core/src/ecosystem.rs:{len(lines)}",
         }
     return None
@@ -129,7 +127,7 @@ def _check_config_hash_callers() -> dict | None:
         return {
             "item": "config_hash() 无调用方",
             "detail": f"函数 <code>{func_name}()</code> 定义后无人调用，"
-                    "pipeline_state / signal / eval_result 无指纹。",
+            "pipeline_state / signal / eval_result 无指纹。",
             "impl": "utils/config.py",
         }
     return None
@@ -137,7 +135,6 @@ def _check_config_hash_callers() -> dict | None:
 
 def _check_signal_source() -> dict | None:
     """signal 表是否有 source 列？"""
-    import re
     schema = (SRC / "data" / "schema.py").read_text()
     # 提取 signal 表的整个 CREATE 块（从 signal ( 到对应的关闭 )）
     start = schema.find("signal (")
@@ -154,8 +151,7 @@ def _check_signal_source() -> dict | None:
     if "source" not in block.lower():
         return {
             "item": "signal 表无 source 列",
-            "detail": "entry._persist 写入的 signal 行无 source 列，"
-                    "live / replay 无法在库内区分。",
+            "detail": "entry._persist 写入的 signal 行无 source 列，live / replay 无法在库内区分。",
             "impl": "data/schema.py；algorithms/entry.py",
         }
     return None
@@ -168,8 +164,8 @@ def _check_c7_bj_filter() -> dict | None:
         return {
             "item": "C7 北交所未过滤",
             "detail": "<code>services/market_service.py</code> 的"
-                    " <code>_load_day_metrics</code> 无 bj/8 前缀过滤，"
-                    "与 <code>algorithms/emotion.py</code> 的 _counts 口径不一致。",
+            " <code>_load_day_metrics</code> 无 bj/8 前缀过滤，"
+            "与 <code>algorithms/emotion.py</code> 的 _counts 口径不一致。",
             "impl": "services/market_service.py",
         }
     return None
@@ -183,7 +179,7 @@ def _check_outcome_step() -> dict | None:
             return {
                 "item": "outcome 步骤接错服务",
                 "detail": "outcome 步骤接到 replay_service.run（回填 signal），"
-                        "而非 algorithms.outcome.backfill（回填 signal_outcome）。",
+                "而非 algorithms.outcome.backfill（回填 signal_outcome）。",
                 "impl": "orchestration/daily.py",
             }
     return None
@@ -206,7 +202,7 @@ def _check_stock_basic_columns() -> dict | None:
             return {
                 "item": f"stock_basic 缺列 {', '.join(missing)}",
                 "detail": f"<code>diagnose_service</code> 查询"
-                        f" {', '.join(missing)} 列，DDL 中不存在。",
+                f" {', '.join(missing)} 列，DDL 中不存在。",
                 "impl": "data/schema.py",
             }
     return None
@@ -228,7 +224,7 @@ def _check_config_duplicates() -> dict | None:
                             return {
                                 "item": f"CONFIG 内有重复字段 {name}",
                                 "detail": f"<code>{name}</code> 在 Config 中声明两次，"
-                                        "dataclass 取后者；不影响运行但属冗余。",
+                                "dataclass 取后者；不影响运行但属冗余。",
                                 "impl": f"utils/config.py",
                             }
                         fields.add(name)
@@ -281,4 +277,5 @@ def scan_gaps_summary() -> dict:
 
 if __name__ == "__main__":
     import json
+
     print(json.dumps(scan_gaps(), ensure_ascii=False, indent=2))

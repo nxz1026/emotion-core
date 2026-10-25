@@ -71,9 +71,7 @@ def check_write(sql: str) -> None:
     target = m.group(1).strip().strip('"').lower()
     if target == SCHEMA or target.startswith(f"{SCHEMA}."):
         return
-    raise LabWriteDenied(
-        f"lab 层禁止写 {target}：实验代码只允许写 {SCHEMA}.*（docs/20 §2）"
-    )
+    raise LabWriteDenied(f"lab 层禁止写 {target}：实验代码只允许写 {SCHEMA}.*（docs/20 §2）")
 
 
 def execute(
@@ -84,9 +82,7 @@ def execute(
     return conn.execute(sql, params)
 
 
-def query_df(
-    sql: str, params: tuple[Any, ...] | list[Any] | None = None
-) -> pd.DataFrame:
+def query_df(sql: str, params: tuple[Any, ...] | list[Any] | None = None) -> pd.DataFrame:
     """只读查询。`public` 部分只允许白名单表（按 SQL 里出现的表名检查）。"""
     lowered = sql.lower()
     cte = set(re.findall(r"(?:\bwith|,)\s+([a-z_][a-z0-9_]*)\s+as\s*\(", lowered))

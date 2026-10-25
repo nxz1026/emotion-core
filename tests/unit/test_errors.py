@@ -1,4 +1,5 @@
 """全局异常定义（utils.errors）：FetchError / DataError / ProviderError。"""
+
 from __future__ import annotations
 
 from emotion_core.utils import errors

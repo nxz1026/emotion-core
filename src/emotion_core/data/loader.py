@@ -3,13 +3,14 @@
 所有函数返回 domain 类型（bar.py/market.py/ladder.py/signal.py），不返回裸 DataFrame。
 算法模块只依赖此层，不直接写 SQL。
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import date
 from typing import Optional
 
-from emotion_core.domain.bar import Bar, DerivedBar
+from emotion_core.domain.bar import DerivedBar
 from emotion_core.domain.market import MarketStat, Phase
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
@@ -29,11 +30,21 @@ def load_derived_bars(d: date) -> list[DerivedBar]:
                FROM derived_bar WHERE date = %s""",
             (d,),
         ).fetchall()
-        return [DerivedBar(
-            code=r[0], date=r[1], is_limit_up=bool(r[2]), is_limit_down=bool(r[3]),
-            is_one_word=bool(r[4]), is_exchange=bool(r[5]), is_bomb=bool(r[6]),
-            touched_limit=bool(r[7]), cont_days=int(r[8]), amplitude=float(r[9]),
-        ) for r in rows]
+        return [
+            DerivedBar(
+                code=r[0],
+                date=r[1],
+                is_limit_up=bool(r[2]),
+                is_limit_down=bool(r[3]),
+                is_one_word=bool(r[4]),
+                is_exchange=bool(r[5]),
+                is_bomb=bool(r[6]),
+                touched_limit=bool(r[7]),
+                cont_days=int(r[8]),
+                amplitude=float(r[9]),
+            )
+            for r in rows
+        ]
 
 
 def load_stock_basic() -> dict[str, dict]:
@@ -55,10 +66,13 @@ def load_market_stat(d: date) -> Optional[MarketStat]:
         if r is None:
             return None
         return MarketStat(
-            date=r[0], phase=Phase(r[1]) if r[1] else Phase.ICE,
-            buy_window=r[2], limit_up_count=int(r[3] or 0),
+            date=r[0],
+            phase=Phase(r[1]) if r[1] else Phase.ICE,
+            buy_window=r[2],
+            limit_up_count=int(r[3] or 0),
             bomb_rate=None if r[4] is None else float(r[4]),
-            limit_down_count=int(r[5] or 0), max_limit_days=int(r[6] or 0),
+            limit_down_count=int(r[5] or 0),
+            max_limit_days=int(r[6] or 0),
             force_liquidate=bool(r[7]),
             bomb_threshold=None if r[8] is None else float(r[8]),
             has_candidate=bool(r[9]),
@@ -68,6 +82,7 @@ def load_market_stat(d: date) -> Optional[MarketStat]:
 def load_ladder_history(d: date, n: int = 5) -> list[list[LadderDay]]:
     """最近 n 个交易日的 ladder_day 行。返回列表的列表（每日子一天）。"""
     from emotion_core.utils.dates import recent_trading_days
+
     days = recent_trading_days(n)
     result = []
     for day in days:
@@ -80,11 +95,21 @@ def load_ladder_history(d: date, n: int = 5) -> list[list[LadderDay]]:
                    FROM ladder_day WHERE date = %s ORDER BY cont_days DESC""",
                 (day,),
             ).fetchall()
-            result.append([LadderDay(
-                date=r[0], code=r[1], cont_days=int(r[2]), is_exchange=bool(r[3]),
-                is_top=bool(r[4]), is_sole_top=bool(r[5]),
-                y_top_group_count=int(r[6] or 0), y_top_survivor_count=int(r[7] or 0),
-            ) for r in rows])
+            result.append(
+                [
+                    LadderDay(
+                        date=r[0],
+                        code=r[1],
+                        cont_days=int(r[2]),
+                        is_exchange=bool(r[3]),
+                        is_top=bool(r[4]),
+                        is_sole_top=bool(r[5]),
+                        y_top_group_count=int(r[6] or 0),
+                        y_top_survivor_count=int(r[7] or 0),
+                    )
+                    for r in rows
+                ]
+            )
     return result
 
 
@@ -96,12 +121,24 @@ def load_signal_history(limit: int = 200) -> list[Signal]:
                FROM signal ORDER BY confirm_date DESC LIMIT %s""",
             (limit,),
         ).fetchall()
-        return [Signal(
-            code=r[1], date=r[0], action=Action(r[2]),
-            checklist=Checklist(c1_uniqueness=None, c2_exchange=None, c3_elimination=None,
-                                c4_min_days=None, c5_strength_diverge=None, w1_crowding=None),
-            source=SignalSource.LIVE, status=r[4],
-        ) for r in rows]
+        return [
+            Signal(
+                code=r[1],
+                date=r[0],
+                action=Action(r[2]),
+                checklist=Checklist(
+                    c1_uniqueness=None,
+                    c2_exchange=None,
+                    c3_elimination=None,
+                    c4_min_days=None,
+                    c5_strength_diverge=None,
+                    w1_crowding=None,
+                ),
+                source=SignalSource.LIVE,
+                status=r[4],
+            )
+            for r in rows
+        ]
 
 
 def load_ladder_candidates(d: date) -> list[tuple[str, int, bool]]:
@@ -121,8 +158,7 @@ def load_ladder_candidates(d: date) -> list[tuple[str, int, bool]]:
                        AND s.first_bar_date <= GREATEST(%s::date - %s * interval '1 day',
                                                         %s::date))
                 ORDER BY d.cont_days DESC, d.code""",
-            (d, *CONFIG.BOARD_PREFIXES, d, CONFIG.NEW_ISSUER_MIN_DAYS,
-             CONFIG.NEW_ISSUER_FLOOR),
+            (d, *CONFIG.BOARD_PREFIXES, d, CONFIG.NEW_ISSUER_MIN_DAYS, CONFIG.NEW_ISSUER_FLOOR),
         ).fetchall()
     return [(r[0], int(r[1]), bool(r[2])) for r in rows]
 
@@ -166,8 +202,7 @@ def load_suspended_candidates(d: date) -> list[tuple[str, int]]:
                         AND s.first_bar_date <= GREATEST(%s::date - %s * interval '1 day',
                                                          %s::date))
                  ORDER BY r.cont_days DESC, r.code""",
-            (d, *CONFIG.BOARD_PREFIXES, d, CONFIG.NEW_ISSUER_MIN_DAYS,
-             CONFIG.NEW_ISSUER_FLOOR),
+            (d, *CONFIG.BOARD_PREFIXES, d, CONFIG.NEW_ISSUER_MIN_DAYS, CONFIG.NEW_ISSUER_FLOOR),
         ).fetchall()
     return [(r[0], int(r[1])) for r in rows]
 
@@ -187,9 +222,9 @@ def load_exchange_codes(d: date) -> set[str]:
 def count_derived_rows(d: date) -> int:
     """当日 derived_bar 行数（上游完整性凭证：0 行 = 缺数日，禁止清空下游）。"""
     with connect() as conn:
-        return int(conn.execute(
-            "SELECT count(*) FROM derived_bar WHERE date = %s", (d,)
-        ).fetchone()[0])
+        return int(
+            conn.execute("SELECT count(*) FROM derived_bar WHERE date = %s", (d,)).fetchone()[0]
+        )
 
 
 def replace_ladder_day(d: date, rows: list[LadderDay]) -> int:
@@ -202,9 +237,20 @@ def replace_ladder_day(d: date, rows: list[LadderDay]) -> int:
         conn.execute("DELETE FROM ladder_day WHERE date = %s", (d,))
         if not rows:
             return 0
-        data = [(r.date, r.code, r.cont_days, r.is_exchange, r.is_top, r.is_sole_top,
-                 r.y_top_group_count, r.y_top_survivor_count,
-                 bool(getattr(r, "is_suspended", False))) for r in rows]
+        data = [
+            (
+                r.date,
+                r.code,
+                r.cont_days,
+                r.is_exchange,
+                r.is_top,
+                r.is_sole_top,
+                r.y_top_group_count,
+                r.y_top_survivor_count,
+                bool(getattr(r, "is_suspended", False)),
+            )
+            for r in rows
+        ]
         with conn.cursor() as cur:
             cur.executemany(
                 """INSERT INTO ladder_day
@@ -235,10 +281,20 @@ def upsert_promotion_day(rows: list[dict]) -> int:
             return 0
         d = rows[0]["date"]
         conn.execute("DELETE FROM promotion_day WHERE date = %s", (d,))
-        data = [(r["date"], r["layer"], r["promote_from"], r["promote_nominal"],
-                 r["promote_exchange"], r.get("rate_nominal"),
-                 r.get("rate_exchange"), r.get("divergence"),
-                 r.get("fail_perf")) for r in rows]
+        data = [
+            (
+                r["date"],
+                r["layer"],
+                r["promote_from"],
+                r["promote_nominal"],
+                r["promote_exchange"],
+                r.get("rate_nominal"),
+                r.get("rate_exchange"),
+                r.get("divergence"),
+                r.get("fail_perf"),
+            )
+            for r in rows
+        ]
         with conn.cursor() as cur:
             cur.executemany(
                 """INSERT INTO promotion_day
@@ -278,10 +334,23 @@ def insert_signal(sig: Signal) -> int:
                  buy_window=EXCLUDED.buy_window,
                  checklist=EXCLUDED.checklist, status=EXCLUDED.status,
                  source=EXCLUDED.source, config_hash=EXCLUDED.config_hash""",
-            (sig.date, sig.code, sig.action.value, None,
-             {"c1": cl.c1_uniqueness, "c2": cl.c2_exchange, "c3": cl.c3_elimination,
-              "c4": cl.c4_min_days, "c5": cl.c5_strength_diverge, "w1": cl.w1_crowding},
-             sig.status, sig.source.value, config_hash()),
+            (
+                sig.date,
+                sig.code,
+                sig.action.value,
+                None,
+                {
+                    "c1": cl.c1_uniqueness,
+                    "c2": cl.c2_exchange,
+                    "c3": cl.c3_elimination,
+                    "c4": cl.c4_min_days,
+                    "c5": cl.c5_strength_diverge,
+                    "w1": cl.w1_crowding,
+                },
+                sig.status,
+                sig.source.value,
+                config_hash(),
+            ),
         ).rowcount
 
 
@@ -311,9 +380,18 @@ def upsert_market_stat(stat: MarketStat) -> int:
                  force_liquidate=EXCLUDED.force_liquidate,
                  bomb_threshold=EXCLUDED.bomb_threshold,
                  has_candidate=EXCLUDED.has_candidate""",
-            (stat.date, stat.phase.value, stat.buy_window, stat.limit_up_count,
-             stat.bomb_count, stat.limit_down_count, stat.max_height,
-             stat.force_liquidate, stat.bomb_threshold, stat.has_candidate),
+            (
+                stat.date,
+                stat.phase.value,
+                stat.buy_window,
+                stat.limit_up_count,
+                stat.bomb_count,
+                stat.limit_down_count,
+                stat.max_height,
+                stat.force_liquidate,
+                stat.bomb_threshold,
+                stat.has_candidate,
+            ),
         ).rowcount
 
 
@@ -346,9 +424,19 @@ def insert_triggers(rows: list[dict]) -> int:
     """
     if not rows:
         return 0
-    data = [(r["date"], r["code"], r.get("name"), r.get("first_seal_ts"),
-             r.get("trigger_price"), r.get("seal_bid1_vol"), r.get("prev_days"),
-             r.get("entry_px")) for r in rows]
+    data = [
+        (
+            r["date"],
+            r["code"],
+            r.get("name"),
+            r.get("first_seal_ts"),
+            r.get("trigger_price"),
+            r.get("seal_bid1_vol"),
+            r.get("prev_days"),
+            r.get("entry_px"),
+        )
+        for r in rows
+    ]
     with transaction() as conn, conn.cursor() as cur:
         cur.executemany(_TRIGGER_INSERT_SQL, data)
         return cur.rowcount
@@ -356,9 +444,11 @@ def insert_triggers(rows: list[dict]) -> int:
 
 def load_triggers(d: date, *, unsettled_only: bool = False) -> list[dict]:
     """读某日触发台账（settle 与报告共用）。"""
-    sql = ("SELECT date, code, name, first_seal_ts, trigger_price, seal_bid1_vol,"
-           " broke, broke_ts, closed_sealed, prev_days, entry_px, exit_px,"
-           " rolled, ret_pct, settled_at FROM trigger_log WHERE date = %s")
+    sql = (
+        "SELECT date, code, name, first_seal_ts, trigger_price, seal_bid1_vol,"
+        " broke, broke_ts, closed_sealed, prev_days, entry_px, exit_px,"
+        " rolled, ret_pct, settled_at FROM trigger_log WHERE date = %s"
+    )
     if unsettled_only:
         sql += " AND settled_at IS NULL"
     sql += " ORDER BY code"
@@ -379,7 +469,9 @@ def pending_trigger_dates(before: date) -> list[date]:
     with connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT date FROM trigger_log "
-            "WHERE settled_at IS NULL AND date < %s ORDER BY date", (before,))
+            "WHERE settled_at IS NULL AND date < %s ORDER BY date",
+            (before,),
+        )
         return [row[0] for row in cur.fetchall()]
 
 
@@ -387,8 +479,19 @@ def save_settlements(rows: list[dict]) -> int:
     """回填结算列（broke/closed_sealed/exit_px/rolled/ret_pct/settled_at）。"""
     if not rows:
         return 0
-    data = [(r["broke"], r.get("broke_ts"), r["closed_sealed"], r.get("exit_px"),
-             r.get("rolled"), r.get("ret_pct"), r["date"], r["code"]) for r in rows]
+    data = [
+        (
+            r["broke"],
+            r.get("broke_ts"),
+            r["closed_sealed"],
+            r.get("exit_px"),
+            r.get("rolled"),
+            r.get("ret_pct"),
+            r["date"],
+            r["code"],
+        )
+        for r in rows
+    ]
     with transaction() as conn, conn.cursor() as cur:
         cur.executemany(_TRIGGER_SETTLE_SQL, data)
         return cur.rowcount

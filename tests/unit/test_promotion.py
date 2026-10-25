@@ -4,6 +4,7 @@
 纯计算用 `_matrix`；边界守卫用假连接 + monkeypatch（不触库）。
 真实数据语义对账见 tests/oracle/fixtures/promotion_day.json（3305 行 / 661 日）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,18 +38,18 @@ class _FakeConn:
 
 # (昨日板数, 今日板数, 今日是否换手, 今日涨幅%|None)
 _PAIRS = [
-    (1, 2, True, 5.0),    # 1->2 晋级（换手）
-    (1, 2, False, 3.0),   # 1->2 晋级（一字）
+    (1, 2, True, 5.0),  # 1->2 晋级（换手）
+    (1, 2, False, 3.0),  # 1->2 晋级（一字）
     (1, 0, False, -2.0),  # 1->2 失败
     (1, 1, False, -4.0),  # 1->2 失败
     (1, 1, False, -6.0),  # 1->2 失败
-    (2, 3, True, 1.0),    # 2->3 晋级（分母 2 < 3）
+    (2, 3, True, 1.0),  # 2->3 晋级（分母 2 < 3）
     (2, 0, False, -1.0),  # 2->3 失败（样本 1 < 3）
-    (3, 4, True, 2.0),    # 3->4 晋级
+    (3, 4, True, 2.0),  # 3->4 晋级
     (3, 0, False, -1.0),  # 3->4 失败
     (3, 0, False, -3.0),  # 3->4 失败
     (3, 0, False, -5.0),  # 3->4 失败
-    (5, 6, True, 4.0),    # 5+->6+ 晋级
+    (5, 6, True, 4.0),  # 5+->6+ 晋级
     (8, 0, False, -5.0),  # 5+->6+ 失败（需 >=9 才晋级）
 ]
 
@@ -67,9 +68,14 @@ class TestMatrixMultiLayer:
     def test_first_board_layer(self):
         rows = _rows()
         assert rows["1->2"] == {
-            "date": D, "layer": "1->2", "promote_from": 5,
-            "promote_nominal": 2, "promote_exchange": 1,
-            "rate_nominal": 0.4, "rate_exchange": 0.2, "divergence": 0.2,
+            "date": D,
+            "layer": "1->2",
+            "promote_from": 5,
+            "promote_nominal": 2,
+            "promote_exchange": 1,
+            "rate_nominal": 0.4,
+            "rate_exchange": 0.2,
+            "divergence": 0.2,
             "fail_perf": -4.0,  # 失败股 (-2 + -4 + -6) / 3
         }
 
@@ -84,17 +90,27 @@ class TestMatrixMultiLayer:
     def test_upper_layer_merges_five_plus(self):
         # 5 与 8 同层；8 板今日归零 → 判失败
         assert _rows()["5+->6+"] == {
-            "date": D, "layer": "5+->6+", "promote_from": 2,
-            "promote_nominal": 1, "promote_exchange": 1,
-            "rate_nominal": None, "rate_exchange": None, "divergence": None,
+            "date": D,
+            "layer": "5+->6+",
+            "promote_from": 2,
+            "promote_nominal": 1,
+            "promote_exchange": 1,
+            "rate_nominal": None,
+            "rate_exchange": None,
+            "divergence": None,
             "fail_perf": None,  # 失败样本 1 < 3
         }
 
     def test_empty_layer(self):
         assert _rows()["4->5"] == {
-            "date": D, "layer": "4->5", "promote_from": 0,
-            "promote_nominal": 0, "promote_exchange": 0,
-            "rate_nominal": None, "rate_exchange": None, "divergence": None,
+            "date": D,
+            "layer": "4->5",
+            "promote_from": 0,
+            "promote_nominal": 0,
+            "promote_exchange": 0,
+            "rate_nominal": None,
+            "rate_exchange": None,
+            "divergence": None,
             "fail_perf": None,
         }
 
@@ -185,14 +201,19 @@ class TestPersistDoesNotDestroyDataOnGuardHit:
     def _stub(self, monkeypatch, rows_or_exc):
         conn = _RecordingConn()
         monkeypatch.setattr(promotion, "connect", lambda: conn)
-        monkeypatch.setattr(promotion, "promotion_matrix",
-                            lambda *a, **k: (_ for _ in ()).throw(rows_or_exc)
-                            if isinstance(rows_or_exc, Exception) else rows_or_exc)
+        monkeypatch.setattr(
+            promotion,
+            "promotion_matrix",
+            lambda *a, **k: (
+                (_ for _ in ()).throw(rows_or_exc)
+                if isinstance(rows_or_exc, Exception)
+                else rows_or_exc
+            ),
+        )
         return conn
 
     def test_guard_hit_sends_no_sql(self, monkeypatch):
-        conn = self._stub(monkeypatch,
-                          promotion.PromotionSkipped(D, "derived_bar 当日整体缺失"))
+        conn = self._stub(monkeypatch, promotion.PromotionSkipped(D, "derived_bar 当日整体缺失"))
         assert promotion.persist(D) == 0
         assert conn.sql == [], f"守卫命中仍发了 SQL，数据会被清空：{conn.sql}"
 

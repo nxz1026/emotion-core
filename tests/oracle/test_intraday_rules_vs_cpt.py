@@ -107,7 +107,12 @@ class TestIsAtLimitMatchesCpt:
                     limit = cpt_rules.limit_up_price(code, pre, name=name)
                     if limit is None:
                         continue
-                    for last in (limit, round(limit - 0.01, 2), round(limit + 0.01, 2), round(limit - 1, 2)):
+                    for last in (
+                        limit,
+                        round(limit - 0.01, 2),
+                        round(limit + 0.01, 2),
+                        round(limit - 1, 2),
+                    ):
                         quote = {"last": last, "prev_close": pre, "code": code, "name": name}
                         mine = it.is_at_limit(quote)
                         theirs = cpt_rules.is_at_limit_up(code, last=last, pre_close=pre, name=name)

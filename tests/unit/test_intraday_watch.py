@@ -18,8 +18,7 @@ from emotion_core.services import intraday_watch as w
 
 
 def _trig(**over):
-    base = {"date": "2026-10-22", "code": "000530", "entry_px": 9.49,
-            "trigger_price": 9.49}
+    base = {"date": "2026-10-22", "code": "000530", "entry_px": 9.49, "trigger_price": 9.49}
     base.update(over)
     return base
 
@@ -74,16 +73,22 @@ class TestSettle:
 
     def test_settles_and_writes(self, monkeypatch):
         import datetime as dt
+
         written = {}
-        monkeypatch.setattr(w.loader, "load_triggers",
-                            lambda d, unsettled_only=False: [_trig()])
-        monkeypatch.setattr(w.loader, "save_settlements",
-                            lambda rows: written.setdefault("rows", rows) or len(rows))
+        monkeypatch.setattr(w.loader, "load_triggers", lambda d, unsettled_only=False: [_trig()])
+        monkeypatch.setattr(
+            w.loader, "save_settlements", lambda rows: written.setdefault("rows", rows) or len(rows)
+        )
         monkeypatch.setattr(w, "_derived", lambda d, codes: {"000530": _DERIVED})
-        monkeypatch.setattr(w, "next_trading_day",
-                            lambda d: dt.date(2099, 1, 1) if d < dt.date(2099, 1, 1) else dt.date(2099, 1, 2))
+        monkeypatch.setattr(
+            w,
+            "next_trading_day",
+            lambda d: dt.date(2099, 1, 1) if d < dt.date(2099, 1, 1) else dt.date(2099, 1, 2),
+        )
         monkeypatch.setattr(w.exit_svc, "open_locked_limit_down", lambda d, code: False)
-        monkeypatch.setattr(w, "_open_px", lambda d, code: 10.44 if d == dt.date(2099, 1, 1) else 9.0)
+        monkeypatch.setattr(
+            w, "_open_px", lambda d, code: 10.44 if d == dt.date(2099, 1, 1) else 9.0
+        )
 
         out = w.settle(dt.date(2026, 10, 22))
         assert out["settled"] == 1 and out["pending"] == 0
@@ -91,6 +96,7 @@ class TestSettle:
 
     def test_dry_run_does_not_write(self, monkeypatch):
         import datetime as dt
+
         calls = []
         monkeypatch.setattr(w.loader, "load_triggers", lambda d, unsettled_only=False: [_trig()])
         monkeypatch.setattr(w.loader, "save_settlements", lambda rows: calls.append(rows))
@@ -105,13 +111,18 @@ class TestSettle:
 
     def test_locked_t1_falls_through_to_t2(self, monkeypatch):
         import datetime as dt
+
         monkeypatch.setattr(w.loader, "load_triggers", lambda d, unsettled_only=False: [_trig()])
         monkeypatch.setattr(w.loader, "save_settlements", lambda rows: len(rows))
         monkeypatch.setattr(w, "_derived", lambda d, codes: {"000530": _DERIVED})
-        monkeypatch.setattr(w, "next_trading_day",
-                            lambda d: dt.date(2099, 1, 1) if d < dt.date(2099, 1, 1) else dt.date(2099, 1, 2))
-        monkeypatch.setattr(w.exit_svc, "open_locked_limit_down",
-                            lambda d, code: d == dt.date(2099, 1, 1))
+        monkeypatch.setattr(
+            w,
+            "next_trading_day",
+            lambda d: dt.date(2099, 1, 1) if d < dt.date(2099, 1, 1) else dt.date(2099, 1, 2),
+        )
+        monkeypatch.setattr(
+            w.exit_svc, "open_locked_limit_down", lambda d, code: d == dt.date(2099, 1, 1)
+        )
         monkeypatch.setattr(w, "_open_px", lambda d, code: 9.0)
 
         out = w.settle(dt.date(2026, 10, 22))
@@ -170,27 +181,42 @@ class TestLoaderSql:
                 pass
 
         monkeypatch.setattr(loader, "connect", lambda: _Conn())
-        assert loader.load_triggers(__import__("datetime").date(2026, 10, 22),
-                                    unsettled_only=True) == []
+        assert (
+            loader.load_triggers(__import__("datetime").date(2026, 10, 22), unsettled_only=True)
+            == []
+        )
         assert "settled_at IS NULL" in captured["sql"]
 
 
 # ---- --round：判一轮（CPT R93 九列 → trigger_log 行） ----
 
+
 def _rec(**over):
     """CPT `intraday_seal_snapshot` 的一行（R93 九列）。"""
-    rec = {"at": "2026-10-23T01:35:00+00:00", "code": "600001", "sealed": True,
-           "bid1_lots": 400000.0, "limit_price": 11.0, "price": 11.0,
-           "prev_close": 10.0, "distance_pct": 0.0, "is_st": False}
+    rec = {
+        "at": "2026-10-23T01:35:00+00:00",
+        "code": "600001",
+        "sealed": True,
+        "bid1_lots": 400000.0,
+        "limit_price": 11.0,
+        "price": 11.0,
+        "prev_close": 10.0,
+        "distance_pct": 0.0,
+        "is_st": False,
+    }
     rec.update(over)
     return rec
 
 
 class TestScanRound:
     def test_hits_early_first_board(self):
-        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 0},
-                            names={"600001": "测试一号"})
+        rows = w.scan_round(
+            {"600001": _rec()},
+            d=date(2026, 10, 23),
+            now=time(9, 35),
+            prev_days={"600001": 0},
+            names={"600001": "测试一号"},
+        )
         assert len(rows) == 1
         row = rows[0]
         assert row["code"] == "600001"
@@ -202,50 +228,72 @@ class TestScanRound:
         assert row["first_seal_ts"] == time(9, 35)
 
     def test_not_first_board(self):
-        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 1})
+        rows = w.scan_round(
+            {"600001": _rec()}, d=date(2026, 10, 23), now=time(9, 35), prev_days={"600001": 1}
+        )
         assert rows == []
 
     def test_prev_days_unknown_is_not_first_board(self):
-        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={})
+        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23), now=time(9, 35), prev_days={})
         assert rows == []
 
     def test_late_seal_is_skipped(self):
-        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
-                            now=time(10, 5), prev_days={"600001": 0})
+        rows = w.scan_round(
+            {"600001": _rec()}, d=date(2026, 10, 23), now=time(10, 5), prev_days={"600001": 0}
+        )
         assert rows == []
 
     def test_thin_seal_is_skipped(self):
-        rows = w.scan_round({"600001": _rec(bid1_lots=100.0)}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 0})
+        rows = w.scan_round(
+            {"600001": _rec(bid1_lots=100.0)},
+            d=date(2026, 10, 23),
+            now=time(9, 35),
+            prev_days={"600001": 0},
+        )
         assert rows == []
 
     def test_below_limit_is_skipped(self):
-        rows = w.scan_round({"600001": _rec(price=10.95)}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 0})
+        rows = w.scan_round(
+            {"600001": _rec(price=10.95)},
+            d=date(2026, 10, 23),
+            now=time(9, 35),
+            prev_days={"600001": 0},
+        )
         assert rows == []
 
     def test_missing_price_is_skipped(self):
-        rows = w.scan_round({"600001": _rec(price=None)}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 0})
+        rows = w.scan_round(
+            {"600001": _rec(price=None)},
+            d=date(2026, 10, 23),
+            now=time(9, 35),
+            prev_days={"600001": 0},
+        )
         assert rows == []
 
     def test_entry_falls_back_to_prev_close(self):
-        rows = w.scan_round({"600001": _rec(limit_price=None)}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 0})
+        rows = w.scan_round(
+            {"600001": _rec(limit_price=None)},
+            d=date(2026, 10, 23),
+            now=time(9, 35),
+            prev_days={"600001": 0},
+        )
         assert len(rows) == 1
         assert rows[0]["entry_px"] == 11.0  # 10.0 × 1.1
 
     def test_name_absent_when_unknown(self):
-        rows = w.scan_round({"600001": _rec()}, d=date(2026, 10, 23),
-                            now=time(9, 35), prev_days={"600001": 0}, names={})
+        rows = w.scan_round(
+            {"600001": _rec()},
+            d=date(2026, 10, 23),
+            now=time(9, 35),
+            prev_days={"600001": 0},
+            names={},
+        )
         assert rows[0]["name"] is None
 
 
 def _two_rounds(monkeypatch, *, now_rec=None, prev_rec=None, count=None):
     """桩掉跨轮读取：返回「最新一轮 + 上一轮」（都能封住，除非显式给空）。"""
-    at_now = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)   # 北京 09:35
+    at_now = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)  # 北京 09:35
     at_prev = datetime(2026, 10, 23, 1, 33, tzinfo=UTC)  # 北京 09:33
     calls = {"count": count}
     cur = {"600001": _rec()} if now_rec is None else now_rec
@@ -270,8 +318,9 @@ class TestRunRound:
         calls = _two_rounds(monkeypatch)
         monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
         monkeypatch.setattr(w, "_names", lambda codes: {"600001": "测试一号"})
-        monkeypatch.setattr(w.loader, "insert_triggers",
-                            lambda rows: pytest.fail("dry-run 不许写库"))
+        monkeypatch.setattr(
+            w.loader, "insert_triggers", lambda rows: pytest.fail("dry-run 不许写库")
+        )
         out = w.run_round(dry_run=True)
         assert calls["count"] >= 2, "默认应取两轮做确认"
         assert out["triggers"] == 1
@@ -298,8 +347,11 @@ class TestRunRound:
     def test_single_round_cannot_confirm(self, monkeypatch):
         """只有一轮时无法确认：宁可漏，不可假触发（首轮 09:32 就属于这种）。"""
         at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
-        monkeypatch.setattr(w.cpt_intraday, "fetch_rounds_from_cpt",
-                            lambda want=2, codes=None: [(at, {"600001": _rec()})])
+        monkeypatch.setattr(
+            w.cpt_intraday,
+            "fetch_rounds_from_cpt",
+            lambda want=2, codes=None: [(at, {"600001": _rec()})],
+        )
         monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
         monkeypatch.setattr(w, "_names", lambda codes: {})
         out = w.run_round(dry_run=True)
@@ -316,10 +368,14 @@ class TestRunRound:
 
     def test_confirm_ticks_one_needs_no_history(self, monkeypatch):
         at = datetime(2026, 10, 23, 1, 35, tzinfo=UTC)
-        monkeypatch.setattr(w.cpt_intraday, "fetch_rounds_from_cpt",
-                            lambda *a, **k: pytest.fail("单轮模式不该查多轮"))
-        monkeypatch.setattr(w.cpt_intraday, "fetch_round_from_cpt",
-                            lambda: (at, {"600001": _rec()}))
+        monkeypatch.setattr(
+            w.cpt_intraday,
+            "fetch_rounds_from_cpt",
+            lambda *a, **k: pytest.fail("单轮模式不该查多轮"),
+        )
+        monkeypatch.setattr(
+            w.cpt_intraday, "fetch_round_from_cpt", lambda: (at, {"600001": _rec()})
+        )
         monkeypatch.setattr(w, "prev_days_of", lambda d, codes: {"600001": 0})
         monkeypatch.setattr(w, "_names", lambda codes: {})
         out = w.run_round(dry_run=True, confirm_ticks=1)
@@ -345,9 +401,15 @@ class TestConfirmTicksPure:
     D = date(2026, 10, 23)
 
     def _rows(self, *, prev_round, ticks=2, rec=None):
-        return w.scan_round(rec if rec is not None else {"600001": _rec()},
-                            d=self.D, now=time(9, 35), prev_days={"600001": 0},
-                            names={}, prev_round=prev_round, confirm_ticks=ticks)
+        return w.scan_round(
+            rec if rec is not None else {"600001": _rec()},
+            d=self.D,
+            now=time(9, 35),
+            prev_days={"600001": 0},
+            names={},
+            prev_round=prev_round,
+            confirm_ticks=ticks,
+        )
 
     def test_two_rounds_confirm(self):
         rows = self._rows(prev_round=(time(9, 33), {"600001": _rec()}))
@@ -396,8 +458,9 @@ class TestSession:
 
     def test_lunch_break_is_out_of_session(self):
         """午休不扫：CPT 11:30–13:00 本来就不落轮次，扫了只会刷假告警。"""
-        lunch = [datetime(2026, 10, 23, h, m, tzinfo=w._BJ)
-                 for h, m in ((11, 33), (12, 0), (12, 57))]
+        lunch = [
+            datetime(2026, 10, 23, h, m, tzinfo=w._BJ) for h, m in ((11, 33), (12, 0), (12, 57))
+        ]
         assert [w.in_session(t, trading_day=True) for t in lunch] == [False] * 3
         assert w.in_session(datetime(2026, 10, 23, 11, 32, tzinfo=w._BJ), trading_day=True)
         assert w.in_session(datetime(2026, 10, 23, 12, 58, tzinfo=w._BJ), trading_day=True)
@@ -414,8 +477,7 @@ class TestLoop:
     def test_runs_inside_session(self, monkeypatch):
         calls = []
         monkeypatch.setattr(w, "in_session", lambda now: True)
-        monkeypatch.setattr(w, "run_round",
-                            lambda **k: calls.append(k.get("dry_run")))
+        monkeypatch.setattr(w, "run_round", lambda **k: calls.append(k.get("dry_run")))
         w.loop(dry_run=True, max_rounds=2, sleep=lambda s: None)
         assert calls == [True, True]
 
@@ -430,7 +492,6 @@ class TestLoop:
         monkeypatch.setattr(w, "run_round", _boom)
         assert w.loop(max_rounds=3, sleep=lambda s: None) == 0
         assert len(calls) == 3
-
 
 
 class TestRoundAge:
@@ -459,13 +520,18 @@ class TestLoopAlarm:
 
     def test_alarm_when_round_is_stale(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: True)
-        monkeypatch.setattr(w, "run_round", lambda **kw: {
-            "round_at": datetime(2026, 10, 23, 1, 20, tzinfo=ZoneInfo("UTC")),  # 北京 09:20
-        })
+        monkeypatch.setattr(
+            w,
+            "run_round",
+            lambda **kw: {
+                "round_at": datetime(2026, 10, 23, 1, 20, tzinfo=ZoneInfo("UTC")),  # 北京 09:20
+            },
+        )
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         w.loop(
-            max_rounds=1, sleep=lambda s: None,
+            max_rounds=1,
+            sleep=lambda s: None,
             now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=ZoneInfo("Asia/Shanghai"))),
         )
         assert len(alarms) == 1
@@ -474,13 +540,18 @@ class TestLoopAlarm:
 
     def test_no_alarm_when_round_is_fresh(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: True)
-        monkeypatch.setattr(w, "run_round", lambda **kw: {
-            "round_at": datetime(2026, 10, 23, 1, 38, tzinfo=ZoneInfo("UTC")),  # 北京 09:38
-        })
+        monkeypatch.setattr(
+            w,
+            "run_round",
+            lambda **kw: {
+                "round_at": datetime(2026, 10, 23, 1, 38, tzinfo=ZoneInfo("UTC")),  # 北京 09:38
+            },
+        )
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         w.loop(
-            max_rounds=1, sleep=lambda s: None,
+            max_rounds=1,
+            sleep=lambda s: None,
             now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=ZoneInfo("Asia/Shanghai"))),
         )
         assert alarms == []
@@ -491,7 +562,8 @@ class TestLoopAlarm:
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         w.loop(
-            max_rounds=1, sleep=lambda s: None,
+            max_rounds=1,
+            sleep=lambda s: None,
             now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=ZoneInfo("Asia/Shanghai"))),
         )
         assert len(alarms) == 1
@@ -504,10 +576,11 @@ class TestLoopAlarm:
         monkeypatch.setattr(w, "_alarm", alarms.append)
         tz = ZoneInfo("Asia/Shanghai")
         w.loop(
-            max_rounds=3, sleep=lambda s: None,
+            max_rounds=3,
+            sleep=lambda s: None,
             now_fn=self._clock(
                 datetime(2026, 10, 23, 9, 40, tzinfo=tz),
-                datetime(2026, 10, 23, 9, 45, tzinfo=tz),   # 5 分钟后：压住
+                datetime(2026, 10, 23, 9, 45, tzinfo=tz),  # 5 分钟后：压住
                 datetime(2026, 10, 23, 10, 15, tzinfo=tz),  # 35 分钟后：再报
             ),
         )
@@ -523,34 +596,47 @@ class TestAlarmGrace:
 
     def test_no_alarm_before_grace(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: True)
-        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0})
+        monkeypatch.setattr(
+            w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0}
+        )
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         w.loop(
-            max_rounds=2, sleep=lambda s: None,
-            now_fn=self._clock(datetime(2026, 10, 23, 9, 26, tzinfo=w._BJ),
-                               datetime(2026, 10, 23, 9, 30, tzinfo=w._BJ)),
+            max_rounds=2,
+            sleep=lambda s: None,
+            now_fn=self._clock(
+                datetime(2026, 10, 23, 9, 26, tzinfo=w._BJ),
+                datetime(2026, 10, 23, 9, 30, tzinfo=w._BJ),
+            ),
         )
         assert alarms == []
 
     def test_alarm_after_grace(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: True)
-        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0})
+        monkeypatch.setattr(
+            w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0}
+        )
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         w.loop(
-            max_rounds=1, sleep=lambda s: None,
+            max_rounds=1,
+            sleep=lambda s: None,
             now_fn=self._clock(datetime(2026, 10, 23, 9, 36, tzinfo=w._BJ)),
         )
         assert len(alarms) == 1
 
     def test_alarm_result_is_logged(self, monkeypatch, caplog):
         monkeypatch.setattr(w, "is_trading_day", lambda d: True)
-        monkeypatch.setattr(w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0})
+        monkeypatch.setattr(
+            w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0}
+        )
         monkeypatch.setattr(w, "_alarm", lambda text: False)
         with caplog.at_level("WARNING"):
-            w.loop(max_rounds=1, sleep=lambda s: None,
-                   now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=w._BJ)))
+            w.loop(
+                max_rounds=1,
+                sleep=lambda s: None,
+                now_fn=self._clock(datetime(2026, 10, 23, 9, 40, tzinfo=w._BJ)),
+            )
         assert "卡死告警已触发" in caplog.text
         assert "推送未配置/失败" in caplog.text
 
@@ -570,22 +656,26 @@ class TestLoopSettle:
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         tz = ZoneInfo("Asia/Shanghai")
-        times = iter([
-            datetime(2026, 10, 23, 17, 40, tzinfo=tz),
-            datetime(2026, 10, 23, 18, 10, tzinfo=tz),
-        ])
+        times = iter(
+            [
+                datetime(2026, 10, 23, 17, 40, tzinfo=tz),
+                datetime(2026, 10, 23, 18, 10, tzinfo=tz),
+            ]
+        )
         w.loop(max_rounds=2, sleep=lambda s: None, now_fn=lambda: next(times))
-        assert calls == [date(2026, 10, 23)]      # 同一天只结一次
+        assert calls == [date(2026, 10, 23)]  # 同一天只结一次
         assert len(alarms) == 1 and "结算 2 条" in alarms[0]
 
     def test_no_settle_before_close(self, monkeypatch):
         monkeypatch.setattr(w, "is_trading_day", lambda d: False)
         calls: list[date] = []
-        monkeypatch.setattr(w, "settle_pending",
-                            lambda **kw: calls.append(kw.get("as_of")) or [])
+        monkeypatch.setattr(w, "settle_pending", lambda **kw: calls.append(kw.get("as_of")) or [])
         tz = ZoneInfo("Asia/Shanghai")
-        w.loop(max_rounds=1, sleep=lambda s: None,
-               now_fn=lambda: datetime(2026, 10, 23, 17, 0, tzinfo=tz))
+        w.loop(
+            max_rounds=1,
+            sleep=lambda s: None,
+            now_fn=lambda: datetime(2026, 10, 23, 17, 0, tzinfo=tz),
+        )
         assert calls == []
 
     def test_no_settle_when_nothing_triggered(self, monkeypatch):
@@ -594,8 +684,11 @@ class TestLoopSettle:
         alarms: list[str] = []
         monkeypatch.setattr(w, "_alarm", alarms.append)
         tz = ZoneInfo("Asia/Shanghai")
-        w.loop(max_rounds=1, sleep=lambda s: None,
-               now_fn=lambda: datetime(2026, 10, 23, 18, 0, tzinfo=tz))
+        w.loop(
+            max_rounds=1,
+            sleep=lambda s: None,
+            now_fn=lambda: datetime(2026, 10, 23, 18, 0, tzinfo=tz),
+        )
         assert alarms == []
 
 

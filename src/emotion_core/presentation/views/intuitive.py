@@ -1,4 +1,5 @@
 """直观层视图：今日结论 + 观察名单（A 止血后不出买卖点）。"""
+
 from __future__ import annotations
 
 

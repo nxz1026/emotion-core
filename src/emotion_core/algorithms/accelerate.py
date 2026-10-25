@@ -50,7 +50,7 @@ import pandas as pd
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
 
-_STREAK_WINDOW = 10                # 连续一字回溯上限（自然窗口，够覆盖极端高度）
+_STREAK_WINDOW = 10  # 连续一字回溯上限（自然窗口，够覆盖极端高度）
 
 
 def _cfg(name: str, default: Any) -> Any:
@@ -58,15 +58,17 @@ def _cfg(name: str, default: Any) -> Any:
     return getattr(CONFIG, name, default)
 
 
-ACCEL_HEIGHT_GAP: int = _cfg("ACCEL_HEIGHT_GAP", 2)              # lkl ACCEL_HEIGHT_GAP
-ACCEL_ONEWORD_DAYS: int = _cfg("ACCEL_ONEWORD_DAYS", 2)          # lkl ACCEL_ONEWORD_DAYS
-ACCEL_ONEWORD_RATIO: float = _cfg("ACCEL_ONEWORD_RATIO", 0.35)   # lkl ACCEL_ONEWORD_RATIO
-ACCEL_BASELINE_WINDOW: int = _cfg("ACCEL_BASELINE_WINDOW", 30)   # lkl ACCEL_BASELINE_WINDOW
+ACCEL_HEIGHT_GAP: int = _cfg("ACCEL_HEIGHT_GAP", 2)  # lkl ACCEL_HEIGHT_GAP
+ACCEL_ONEWORD_DAYS: int = _cfg("ACCEL_ONEWORD_DAYS", 2)  # lkl ACCEL_ONEWORD_DAYS
+ACCEL_ONEWORD_RATIO: float = _cfg("ACCEL_ONEWORD_RATIO", 0.35)  # lkl ACCEL_ONEWORD_RATIO
+ACCEL_BASELINE_WINDOW: int = _cfg("ACCEL_BASELINE_WINDOW", 30)  # lkl ACCEL_BASELINE_WINDOW
 
 # W2 次新剔除共享 SQL 片段：引用处需先铺好 %s=目标日期、%s=自然日门槛、%s=窗口边缘
 # （与 lkl NEW_ISSUER_FILTER 字面量等价；口径：first_bar_date 缺失 → 视作次新剔除）。
-_NEW_ISSUER_FILTER = ("(s.first_bar_date IS NOT NULL AND s.first_bar_date <="
-                      " GREATEST(%s::date - %s * interval '1 day', %s::date))")
+_NEW_ISSUER_FILTER = (
+    "(s.first_bar_date IS NOT NULL AND s.first_bar_date <="
+    " GREATEST(%s::date - %s * interval '1 day', %s::date))"
+)
 # 次新过滤参数（顺序同 _NEW_ISSUER_FILTER 的占位符）
 _NEW_ISSUER_PARAMS: tuple[Any, ...] = (CONFIG.NEW_ISSUER_MIN_DAYS, CONFIG.NEW_ISSUER_FLOOR)
 
@@ -88,10 +90,10 @@ def heights(trade_date: date) -> tuple[int, int]:
         " WHERE d.date = %s AND d.cont_days >= 1"
         f" AND left(d.code, 3) IN ({_ph()})"
         f" AND {_NEW_ISSUER_FILTER}",
-        (trade_date, *CONFIG.BOARD_PREFIXES, trade_date, *_NEW_ISSUER_PARAMS))
+        (trade_date, *CONFIG.BOARD_PREFIXES, trade_date, *_NEW_ISSUER_PARAMS),
+    )
     r = df.iloc[0]
-    return (int(r["h"]) if pd.notna(r["h"]) else 0,
-            int(r["th"]) if pd.notna(r["th"]) else 0)
+    return (int(r["h"]) if pd.notna(r["h"]) else 0, int(r["th"]) if pd.notna(r["th"]) else 0)
 
 
 def oneword_ratio(trade_date: date) -> float | None:
@@ -105,7 +107,8 @@ def oneword_ratio(trade_date: date) -> float | None:
         " FROM derived_bar d JOIN stock_basic s ON s.code = d.code"
         " WHERE d.date = %s AND left(d.code, 3) IN (" + _ph() + ")"
         f" AND {_NEW_ISSUER_FILTER}",
-        (trade_date, *CONFIG.BOARD_PREFIXES, trade_date, *_NEW_ISSUER_PARAMS))
+        (trade_date, *CONFIG.BOARD_PREFIXES, trade_date, *_NEW_ISSUER_PARAMS),
+    )
     zt = int(df["zt"].iloc[0] or 0)
     if zt == 0:
         return None
@@ -131,14 +134,20 @@ def _top_streak(trade_date: date, nominal_h: int) -> int:
         f" AND code IN (SELECT code FROM derived_bar WHERE date = %s"
         f"              AND cont_days = %s AND left(code, 3) IN ({_ph()}))"
         " ORDER BY code, date",
-        (since, trade_date, trade_date, nominal_h, *CONFIG.BOARD_PREFIXES))
+        (since, trade_date, trade_date, nominal_h, *CONFIG.BOARD_PREFIXES),
+    )
     if df.empty:
         return 0
     # V3：市场日历升序列表——该股相邻两行中间隔了其他交易日 = 停牌缺行，
     # 断档归零（此前 zip 只走存在的行，停牌前后两段一字被误拼成连续）
-    cal = sorted(set(query_df(
-        "SELECT DISTINCT date FROM derived_bar"
-        " WHERE date BETWEEN %s AND %s", (since, trade_date))["date"]))
+    cal = sorted(
+        set(
+            query_df(
+                "SELECT DISTINCT date FROM derived_bar WHERE date BETWEEN %s AND %s",
+                (since, trade_date),
+            )["date"]
+        )
+    )
     pos = {d: i for i, d in enumerate(cal)}
     best = 0
     for _, g in df.groupby("code"):
@@ -147,15 +156,14 @@ def _top_streak(trade_date: date, nominal_h: int) -> int:
         last_idx = None
         for r in seq.itertuples():
             if last_idx is not None and pos[r.date] - last_idx > 1:
-                n = 0                     # 中间存在停牌缺行 → 断档
+                n = 0  # 中间存在停牌缺行 → 断档
             n = n + 1 if (r.is_one_word and r.is_limit_up) else 0
             last_idx = pos[r.date]
         best = max(best, n)
     return best
 
 
-def _baseline_ratio(trade_date: date,
-                    prior_ratios: list | None = None) -> float | None:
+def _baseline_ratio(trade_date: date, prior_ratios: list | None = None) -> float | None:
     """前 ACCEL_BASELINE_WINDOW 交易日一字占比中位数（不含当日）。
 
     A1（审计 P1-1）：prior_ratios 传入时纯内存滚动计算（最新在前），
@@ -164,17 +172,17 @@ def _baseline_ratio(trade_date: date,
     预热期（样本不足窗口长度）无基线 → None，A3 不成立。
     """
     if prior_ratios is not None:
-        vals = [r for r in prior_ratios[:ACCEL_BASELINE_WINDOW]
-                if r is not None and not pd.isna(r)]
+        vals = [r for r in prior_ratios[:ACCEL_BASELINE_WINDOW] if r is not None and not pd.isna(r)]
         if len(vals) < ACCEL_BASELINE_WINDOW:
             return None
         return round(float(pd.Series(vals, dtype=float).median()), 4)
     df = query_df(
         "SELECT oneword_ratio FROM market_stat WHERE date < %s"
         " AND oneword_ratio IS NOT NULL ORDER BY date DESC LIMIT %s",
-        (trade_date, ACCEL_BASELINE_WINDOW))
+        (trade_date, ACCEL_BASELINE_WINDOW),
+    )
     if len(df) < ACCEL_BASELINE_WINDOW:
-        return None                      # 预热期无基线，A3 不成立
+        return None  # 预热期无基线，A3 不成立
     return round(float(df["oneword_ratio"].astype(float).median()), 4)
 
 
@@ -184,8 +192,7 @@ def _hit(a1: bool, a2: bool, a3: bool) -> bool:
     return a1 and (a2 or a3)
 
 
-def detect(trade_date: date,
-           prior_ratios: list | None = None) -> tuple[bool, str, dict]:
+def detect(trade_date: date, prior_ratios: list | None = None) -> tuple[bool, str, dict]:
     """返回 (是否加速, 说明, 实测值)。实测值供 dragon_env 与报告复用。
 
     A1：prior_ratios 传入时 A3 基线纯内存滚动（最新在前），不读库——
@@ -198,15 +205,24 @@ def detect(trade_date: date,
     gap = nominal_h - tradable_h
     a1 = gap >= ACCEL_HEIGHT_GAP
     a2 = streak >= ACCEL_ONEWORD_DAYS
-    a3 = (ratio is not None and base is not None
-          and ratio >= ACCEL_ONEWORD_RATIO and ratio > base)
+    a3 = ratio is not None and base is not None and ratio >= ACCEL_ONEWORD_RATIO and ratio > base
     hit = _hit(a1, a2, a3)
-    facts = {"nominal_h": nominal_h, "tradable_h": tradable_h, "gap": gap,
-             "streak": streak, "oneword_ratio": ratio, "baseline_ratio": base,
-             "a1": a1, "a2": a2, "a3": a3}
-    reason = (f"A1高度背离{gap}(阈{ACCEL_HEIGHT_GAP})={'✓' if a1 else '✗'} "
-              f"A2连续一字{streak}日(阈{ACCEL_ONEWORD_DAYS})={'✓' if a2 else '✗'} "
-              f"A3一字占比{ratio if ratio is not None else '—'}"
-              f"/基线{base if base is not None else '—'}"
-              f"(阈{ACCEL_ONEWORD_RATIO})={'✓' if a3 else '✗'}")
+    facts = {
+        "nominal_h": nominal_h,
+        "tradable_h": tradable_h,
+        "gap": gap,
+        "streak": streak,
+        "oneword_ratio": ratio,
+        "baseline_ratio": base,
+        "a1": a1,
+        "a2": a2,
+        "a3": a3,
+    }
+    reason = (
+        f"A1高度背离{gap}(阈{ACCEL_HEIGHT_GAP})={'✓' if a1 else '✗'} "
+        f"A2连续一字{streak}日(阈{ACCEL_ONEWORD_DAYS})={'✓' if a2 else '✗'} "
+        f"A3一字占比{ratio if ratio is not None else '—'}"
+        f"/基线{base if base is not None else '—'}"
+        f"(阈{ACCEL_ONEWORD_RATIO})={'✓' if a3 else '✗'}"
+    )
     return hit, reason, facts

@@ -1,10 +1,10 @@
 """presentation/snapshot.py 快照日期与日历视图测试。"""
+
 from __future__ import annotations
 
 from datetime import date
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import pytest
 
 from emotion_core.presentation import snapshot
@@ -48,11 +48,15 @@ class TestLatestDate:
 
 class TestResolveDate:
     def test_empty_returns_fallback(self):
-        with patch("emotion_core.presentation.snapshot.latest_date", return_value=date(2024, 6, 10)):
+        with patch(
+            "emotion_core.presentation.snapshot.latest_date", return_value=date(2024, 6, 10)
+        ):
             assert snapshot.resolve_date("") == date(2024, 6, 10)
 
     def test_invalid_returns_fallback(self):
-        with patch("emotion_core.presentation.snapshot.latest_date", return_value=date(2024, 6, 10)):
+        with patch(
+            "emotion_core.presentation.snapshot.latest_date", return_value=date(2024, 6, 10)
+        ):
             assert snapshot.resolve_date("bad-date") == date(2024, 6, 10)
 
     def test_valid_trading_day(self):
@@ -60,8 +64,10 @@ class TestResolveDate:
             assert snapshot.resolve_date("2024-06-15") == date(2024, 6, 15)
 
     def test_non_trading_day_fallback(self):
-        with patch("emotion_core.presentation.snapshot.latest_date", return_value=date(2024, 6, 10)), \
-             patch("emotion_core.presentation.snapshot.is_trading_day", return_value=False):
+        with (
+            patch("emotion_core.presentation.snapshot.latest_date", return_value=date(2024, 6, 10)),
+            patch("emotion_core.presentation.snapshot.is_trading_day", return_value=False),
+        ):
             assert snapshot.resolve_date("2024-06-15") == date(2024, 6, 10)
 
 

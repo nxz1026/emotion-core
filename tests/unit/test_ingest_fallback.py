@@ -14,14 +14,15 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import patch
 
 import pandas as pd
 import pytest
 import requests
 
 from emotion_core.data.providers.base import (
-    BAR_COLS, DataError, FetchError, ProviderError, valid_frame,
+    DataError,
+    FetchError,
+    ProviderError,
 )
 from emotion_core.data.providers import eastmoney as em_provider
 from emotion_core.services import ingest
@@ -29,6 +30,7 @@ from emotion_core.utils.fetch import fetch_json, retry_fetch
 
 
 # ── helpers ───────────────────────────────────────────────────────────
+
 
 class _FakeResp:
     """伪造 requests.Response。"""
@@ -65,6 +67,7 @@ def _stock_basic_df():
 
 # ── 1. _em_clist: EM 502 → 回退新浪 ──────────────────────────────────
 
+
 class TestEmClistFallback:
     """_em_clist 在 EM FetchError 后回退新浪全市场源。"""
 
@@ -77,16 +80,34 @@ class TestEmClistFallback:
                 raise requests.HTTPError(f"502 mock for {url}")
             if "sina" in url:
                 sina_calls.append(url)
-                return _FakeResp(json_data=[
-                    {"symbol": "sh600519", "name": "贵州茅台",
-                     "open": 1800, "high": 1850, "low": 1790, "trade": 1840,
-                     "settlement": 1830, "volume": "3098122",
-                     "amount": "570000000", "turnoverratio": "0.4"},
-                    {"symbol": "sz000001", "name": "平安银行",
-                     "open": 12, "high": 13, "low": 11.5, "trade": 12.5,
-                     "settlement": 12.2, "volume": "1000000",
-                     "amount": "12500000", "turnoverratio": "1.2"},
-                ])
+                return _FakeResp(
+                    json_data=[
+                        {
+                            "symbol": "sh600519",
+                            "name": "贵州茅台",
+                            "open": 1800,
+                            "high": 1850,
+                            "low": 1790,
+                            "trade": 1840,
+                            "settlement": 1830,
+                            "volume": "3098122",
+                            "amount": "570000000",
+                            "turnoverratio": "0.4",
+                        },
+                        {
+                            "symbol": "sz000001",
+                            "name": "平安银行",
+                            "open": 12,
+                            "high": 13,
+                            "low": 11.5,
+                            "trade": 12.5,
+                            "settlement": 12.2,
+                            "volume": "1000000",
+                            "amount": "12500000",
+                            "turnoverratio": "1.2",
+                        },
+                    ]
+                )
             return _FakeResp(status=404)
 
         monkeypatch.setattr(ingest.requests, "get", mock_get)
@@ -110,6 +131,7 @@ class TestEmClistFallback:
 
 
 # ── 2. snapshot_daily 日期守卫 ────────────────────────────────────────
+
 
 class TestSnapshotDailyGuard:
     """snapshot_daily 的 EM 日期守卫拒绝陈旧数据。"""
@@ -136,10 +158,8 @@ class TestSnapshotDailyGuard:
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", [])
         # 主源与备源都钉成空帧：EM 空帧自 2026-10-13 起会回退新浪（见 `_em_clist` V3），
         # 只钉 `_em_clist_paged` 会让这里真的去打新浪接口。
-        monkeypatch.setattr(em_provider, "_em_clist_paged",
-                            lambda *a, **kw: pd.DataFrame())
-        monkeypatch.setattr(em_provider, "_sina_clist",
-                            lambda *a, **kw: pd.DataFrame())
+        monkeypatch.setattr(em_provider, "_em_clist_paged", lambda *a, **kw: pd.DataFrame())
+        monkeypatch.setattr(em_provider, "_sina_clist", lambda *a, **kw: pd.DataFrame())
 
         with pytest.raises(Exception) as exc_info:
             ingest.snapshot_daily(date(2026, 9, 29))
@@ -147,6 +167,7 @@ class TestSnapshotDailyGuard:
 
 
 # ── 3. _fallback_rows: 多源补齐 ──────────────────────────────────────
+
 
 class TestFallbackRows:
     """_fallback_rows 按配置链补齐主源缺口。"""
@@ -164,18 +185,30 @@ class TestFallbackRows:
             name = "good"
 
             def fetch_daily_bars(self, code, start, end):
-                return pd.DataFrame({
-                    "code": [code], "date": [start],
-                    "open": [100], "high": [110], "low": [90], "close": [105],
-                    "pre_close": [100], "volume": [1000], "amount": [100000],
-                    "turnover_rate": [1.0],
-                })
+                return pd.DataFrame(
+                    {
+                        "code": [code],
+                        "date": [start],
+                        "open": [100],
+                        "high": [110],
+                        "low": [90],
+                        "close": [105],
+                        "pre_close": [100],
+                        "volume": [1000],
+                        "amount": [100000],
+                        "turnover_rate": [1.0],
+                    }
+                )
 
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", ["failing", "good"])
-        monkeypatch.setattr(ingest, "_provider_registry", lambda: {
-            "failing": _FailingProvider(),
-            "good": _GoodProvider(),
-        })
+        monkeypatch.setattr(
+            ingest,
+            "_provider_registry",
+            lambda: {
+                "failing": _FailingProvider(),
+                "good": _GoodProvider(),
+            },
+        )
 
         rows = ingest._fallback_rows(["600519"], date(2026, 9, 29), date(2026, 9, 29), set())
         assert len(rows) == 1, "good 源应补上 failing 源的缺口"
@@ -190,9 +223,13 @@ class TestFallbackRows:
                 return pd.DataFrame()  # 空帧 → valid_frame 失败
 
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", ["bad"])
-        monkeypatch.setattr(ingest, "_provider_registry", lambda: {
-            "bad": _BadFrameProvider(),
-        })
+        monkeypatch.setattr(
+            ingest,
+            "_provider_registry",
+            lambda: {
+                "bad": _BadFrameProvider(),
+            },
+        )
 
         rows = ingest._fallback_rows(["600519"], date(2026, 9, 29), date(2026, 9, 29), set())
         assert rows == [], "空帧应被跳过"
@@ -204,20 +241,35 @@ class TestFallbackRows:
             name = "good"
 
             def fetch_daily_bars(self, code, start, end):
-                return pd.DataFrame({
-                    "code": [code], "date": [start],
-                    "open": [100], "high": [110], "low": [90], "close": [105],
-                    "pre_close": [100], "volume": [1000], "amount": [100000],
-                    "turnover_rate": [1.0],
-                })
+                return pd.DataFrame(
+                    {
+                        "code": [code],
+                        "date": [start],
+                        "open": [100],
+                        "high": [110],
+                        "low": [90],
+                        "close": [105],
+                        "pre_close": [100],
+                        "volume": [1000],
+                        "amount": [100000],
+                        "turnover_rate": [1.0],
+                    }
+                )
 
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", ["good"])
-        monkeypatch.setattr(ingest, "_provider_registry", lambda: {
-            "good": _GoodProvider(),
-        })
+        monkeypatch.setattr(
+            ingest,
+            "_provider_registry",
+            lambda: {
+                "good": _GoodProvider(),
+            },
+        )
 
         rows = ingest._fallback_rows(
-            ["600519", "000001"], date(2026, 9, 29), date(2026, 9, 29), set(),
+            ["600519", "000001"],
+            date(2026, 9, 29),
+            date(2026, 9, 29),
+            set(),
         )
         assert len(rows) == 2, "两个 code 都应由备源补齐"
 
@@ -231,20 +283,34 @@ class TestFallbackRows:
 
             def fetch_daily_bars(self, code, start, end):
                 calls.append(code)
-                return pd.DataFrame({
-                    "code": [code], "date": [start],
-                    "open": [100], "high": [110], "low": [90], "close": [105],
-                    "pre_close": [100], "volume": [1000], "amount": [100000],
-                    "turnover_rate": [1.0],
-                })
+                return pd.DataFrame(
+                    {
+                        "code": [code],
+                        "date": [start],
+                        "open": [100],
+                        "high": [110],
+                        "low": [90],
+                        "close": [105],
+                        "pre_close": [100],
+                        "volume": [1000],
+                        "amount": [100000],
+                        "turnover_rate": [1.0],
+                    }
+                )
 
         monkeypatch.setattr(ingest, "_INGEST_FALLBACK_CHAIN", ["good"])
-        monkeypatch.setattr(ingest, "_provider_registry", lambda: {
-            "good": _GoodProvider(),
-        })
+        monkeypatch.setattr(
+            ingest,
+            "_provider_registry",
+            lambda: {
+                "good": _GoodProvider(),
+            },
+        )
 
         rows = ingest._fallback_rows(
-            ["600519", "000001"], date(2026, 9, 29), date(2026, 9, 29),
+            ["600519", "000001"],
+            date(2026, 9, 29),
+            date(2026, 9, 29),
             primary={"600519"},
         )
         assert "600519" not in calls, "已覆盖的 code 不应重复拉"
@@ -253,6 +319,7 @@ class TestFallbackRows:
 
 
 # ── 4. _retry 语义 ────────────────────────────────────────────────────
+
 
 class TestRetry:
     """retry_fetch 的重试与异常传播语义。"""
@@ -287,6 +354,7 @@ class TestRetry:
 
     def test_successful_call_returns(self):
         """正常返回时应立即返回，不重试。"""
+
         def good_fn(*a, **kw):
             return {"ok": True}
 
@@ -295,6 +363,7 @@ class TestRetry:
 
 
 # ── 5. fetch_limit_pool A7 护栏 ───────────────────────────────────────
+
 
 class TestFetchLimitPoolGuard:
     """fetch_limit_pool 三池全败抛 RuntimeError（A7 护栏）。"""
@@ -325,6 +394,7 @@ class TestFetchLimitPoolGuard:
 
 
 # ── 6. _get_json 异常分层 ─────────────────────────────────────────────
+
 
 class TestGetJsonErrorSplit:
     """fetch_json 的 FetchError / DataError 分层语义。"""
@@ -372,14 +442,15 @@ class TestGetJsonErrorSplit:
 
 # ── 4. _upsert_rows：daily_bar 写库前自检挂钩（2026-10-17 护栏） ──────────
 
+
 class _FakeCursor:
-    def executemany(self, sql, rows):      # noqa: ANN001, ANN201
+    def executemany(self, sql, rows):  # noqa: ANN001, ANN201
         self.rows = rows
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *a):                # noqa: ANN002
+    def __exit__(self, *a):  # noqa: ANN002
         return False
 
 
@@ -390,7 +461,7 @@ class _FakeConn:
     def __enter__(self):
         return self
 
-    def __exit__(self, *a):                # noqa: ANN002
+    def __exit__(self, *a):  # noqa: ANN002
         return False
 
 
@@ -411,8 +482,7 @@ class TestUpsertRowsBarGuard:
 
         monkeypatch.setattr(bar_guard, "check_bars", _fake_check)
         monkeypatch.setattr(ingest, "transaction", _fake_transaction)
-        rows = [("600000", date(2026, 9, 29), 10.0, 10.5, 9.5, 10.2, 10.0,
-                 1000.0, 1000.0, 0.05)]
+        rows = [("600000", date(2026, 9, 29), 10.0, 10.5, 9.5, 10.2, 10.0, 1000.0, 1000.0, 0.05)]
         ingest._upsert_rows("daily_bar", ingest.BAR_COLS, rows, ["code", "date"])
         assert called == [rows]
 
@@ -425,10 +495,12 @@ class TestUpsertRowsBarGuard:
         monkeypatch.setattr(bar_guard, "check_bars", _boom)
         monkeypatch.setattr(ingest, "transaction", _fake_transaction)
         with pytest.raises(bar_guard.BarGuardError):
-            ingest._upsert_rows("daily_bar", ingest.BAR_COLS,
-                                [("600000", date(2026, 9, 29), 10.0, 10.5, 9.5,
-                                  10.2, 10.0, 1000.0, 1000.0, 0.05)],
-                                ["code", "date"])
+            ingest._upsert_rows(
+                "daily_bar",
+                ingest.BAR_COLS,
+                [("600000", date(2026, 9, 29), 10.0, 10.5, 9.5, 10.2, 10.0, 1000.0, 1000.0, 0.05)],
+                ["code", "date"],
+            )
 
     def test_other_tables_not_guarded(self, monkeypatch):
         from emotion_core.data import bar_guard
@@ -438,6 +510,7 @@ class TestUpsertRowsBarGuard:
 
         monkeypatch.setattr(bar_guard, "check_bars", _boom)
         monkeypatch.setattr(ingest, "transaction", _fake_transaction)
-        n = ingest._upsert_rows("hot_rank", ["code", "date"],
-                                [("600000", date(2026, 9, 29))], ["code", "date"])
+        n = ingest._upsert_rows(
+            "hot_rank", ["code", "date"], [("600000", date(2026, 9, 29))], ["code", "date"]
+        )
         assert n == 1

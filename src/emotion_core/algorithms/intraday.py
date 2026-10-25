@@ -162,8 +162,7 @@ def limit_price(code: str, pre_close: float, *, name: str | None = None) -> floa
     if pre_close is None or pre_close <= 0:
         return None
     pct_milli = int(round(board_pct_limit(code, name=name) * 10))
-    cents = price_util.limit_up_price_cents(
-        int(round(pre_close * 100)), code, pct_milli=pct_milli)
+    cents = price_util.limit_up_price_cents(int(round(pre_close * 100)), code, pct_milli=pct_milli)
     return cents / 100
 
 

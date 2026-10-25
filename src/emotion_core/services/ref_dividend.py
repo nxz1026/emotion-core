@@ -11,6 +11,7 @@ Wind 每次调用消耗真实额度。分红除权回填是低频运维任务（
 - 批量串行，每次调用间隔 0.5s 避免限流
 - 落库时记录原始响应与配额消耗
 """
+
 from __future__ import annotations
 
 import logging
@@ -87,9 +88,7 @@ def backfill_dividend(
     if codes is None:
         with db_connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT code FROM stock_basic WHERE list_date < '2024-01-01' LIMIT 500"
-                )
+                cur.execute("SELECT code FROM stock_basic WHERE list_date < '2024-01-01' LIMIT 500")
                 codes = [row[0] for row in cur.fetchall()]
 
     inserted = 0
@@ -178,6 +177,7 @@ def _upsert_events(code: str, events: list[dict]) -> None:
 def _extract_digit(text: str, keyword: str) -> float | None:
     """从描述文本中提取 keyword 后的数字。"""
     import re
+
     pattern = rf"{keyword}\s*([0-9.]+)"
     m = re.search(pattern, text)
     if m:

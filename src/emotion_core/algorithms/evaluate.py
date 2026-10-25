@@ -44,7 +44,7 @@ from emotion_core.utils.db import query_df
 
 log = logging.getLogger(__name__)
 
-Row = tuple[str, bool | None, str]                     # (标签, 通过?, 说明)
+Row = tuple[str, bool | None, str]  # (标签, 通过?, 说明)
 
 
 def _cfg(name: str, default: Any) -> Any:
@@ -52,8 +52,9 @@ def _cfg(name: str, default: Any) -> Any:
     return getattr(CONFIG, name, default)
 
 
-def replay(start: date, end: date, min_days: int | None = None,
-           as_of: date | None = None) -> pd.DataFrame:
+def replay(
+    start: date, end: date, min_days: int | None = None, as_of: date | None = None
+) -> pd.DataFrame:
     """逐日重放：窗口非NONE + 唯一最高板 + 五条件 → 信号明细（含未过项）。
 
     W4（二轮审计 P0-4/c5）：加 c5_verifiable 列——信号日距今超
@@ -76,43 +77,51 @@ def replay(start: date, end: date, min_days: int | None = None,
         cand = ladder.sole_top(ladder.build(d), min_days=md)
         if cand is None:
             continue
-        cl, rows = entry._evaluate(cand, window, min_days=md,
-                                   diverge_min=entry.DIVERGE_MIN_TURNOVER,
-                                   as_of=base)
+        cl, rows = entry._evaluate(
+            cand, window, min_days=md, diverge_min=entry.DIVERGE_MIN_TURNOVER, as_of=base
+        )
         conds, warns = _split_rows(rows)
         # P1-1：passed 只走唯一聚合器 entry.passed_of（与实盘同一规则）
         passed = entry.passed_of(cl)
         # P2-12：point-in-time 漂移标注——当前 ST 或上市/股本变更晚于
         # 信号日的样本，历史换手率与过滤口径已漂移，标不可比较
         pit_drift = bool(_pit_drift(cand.code, d))
-        out.append({"date": d, "code": cand.code,
-                    "name": entry._candidate_view(cand).get("name", ""),
-                    "cont_days": cand.cont_days, "window": window,
-                    "passed": passed,
-                    "fails": [n for n, ok, _ in conds if ok is False],
-                    "unknown": [n for n, ok, _ in conds if ok is None],
-                    "warn_notes": [t for _, _, t in warns],
-                    "c5_verifiable": d >= oldest,
-                    "pit_drift": pit_drift})
+        out.append(
+            {
+                "date": d,
+                "code": cand.code,
+                "name": entry._candidate_view(cand).get("name", ""),
+                "cont_days": cand.cont_days,
+                "window": window,
+                "passed": passed,
+                "fails": [n for n, ok, _ in conds if ok is False],
+                "unknown": [n for n, ok, _ in conds if ok is None],
+                "warn_notes": [t for _, _, t in warns],
+                "c5_verifiable": d >= oldest,
+                "pit_drift": pit_drift,
+            }
+        )
     return pd.DataFrame(out)
 
 
 def _split_rows(rows: list[Row]) -> tuple[list[Row], list[Row]]:
     """条件行 / W- 警告行分离（= lkl entry.split_checklist 的行语义）。"""
-    return ([r for r in rows if not r[0].startswith("W")],
-            [r for r in rows if r[0].startswith("W")])
+    return (
+        [r for r in rows if not r[0].startswith("W")],
+        [r for r in rows if r[0].startswith("W")],
+    )
 
 
 def _next_bars(code: str, d0: date, n: int = 5) -> pd.DataFrame:
     return query_df(
         f"SELECT date, open, high, low, close FROM daily_bar"
         f" WHERE code = %s AND date > %s ORDER BY date LIMIT {int(n)}",
-        (code, d0))
+        (code, d0),
+    )
 
 
 def _limit_up_on(code: str, d: date) -> bool:
-    df = query_df("SELECT is_limit_up FROM derived_bar"
-                  " WHERE code = %s AND date = %s", (code, d))
+    df = query_df("SELECT is_limit_up FROM derived_bar WHERE code = %s AND date = %s", (code, d))
     return False if df.empty else bool(df["is_limit_up"].iloc[0])
 
 
@@ -123,8 +132,7 @@ def _rule_ret(code: str, d0: date, ebbs: list[date] | None = None) -> float | No
     此前正式口径只取 A，退潮日的收益被错记为持有。E=None（无退潮/
     清仓日在窗外）时回落 A；影子口径 D/E 明细见 _exit_family。"""
     fam = _exit_family(code, d0, ebbs)
-    return fam.get("E_退潮清仓") if fam.get("E_退潮清仓") is not None \
-        else fam.get("A_断板开盘")
+    return fam.get("E_退潮清仓") if fam.get("E_退潮清仓") is not None else fam.get("A_断板开盘")
 
 
 def forward_stats(sigs: pd.DataFrame) -> pd.DataFrame:
@@ -132,15 +140,13 @@ def forward_stats(sigs: pd.DataFrame) -> pd.DataFrame:
     rows = []
     ebbs = ebb_days(sigs["date"].min() if not sigs.empty else date(2020, 1, 1))
     for s in sigs.itertuples():
-        bdf = query_df("SELECT close FROM daily_bar WHERE code=%s AND date=%s",
-                       (s.code, s.date))
-        if bdf.empty:                   # V4：基准价缺失保护（此前中断整个 replay）
+        bdf = query_df("SELECT close FROM daily_bar WHERE code=%s AND date=%s", (s.code, s.date))
+        if bdf.empty:  # V4：基准价缺失保护（此前中断整个 replay）
             log.warning("forward_stats %s %s：基准日无行情，跳过", s.code, s.date)
             continue
         base = bdf["close"].iloc[0]
         nb = _next_bars(s.code, s.date)
-        r = {"date": s.date, "code": s.code, "window": s.window,
-             "cont_days": s.cont_days}
+        r = {"date": s.date, "code": s.code, "window": s.window, "cont_days": s.cont_days}
         if nb.empty:
             rows.append(r | {"t1_gap": None})
             continue
@@ -151,10 +157,8 @@ def forward_stats(sigs: pd.DataFrame) -> pd.DataFrame:
         for h in (3, 5):
             w = nb.head(h)
             full = len(w) == h
-            r[f"max_up{h}"] = (round(float(w["high"].max() / base - 1) * 100, 2)
-                               if full else None)
-            r[f"max_dd{h}"] = (round(float(w["low"].min() / base - 1) * 100, 2)
-                               if full else None)
+            r[f"max_up{h}"] = round(float(w["high"].max() / base - 1) * 100, 2) if full else None
+            r[f"max_dd{h}"] = round(float(w["low"].min() / base - 1) * 100, 2) if full else None
         r["rule_ret"] = _rule_ret(s.code, s.date, ebbs)
         rows.append(r)
     return pd.DataFrame(rows)
@@ -166,8 +170,7 @@ def _pit_drift(code: str, d: date) -> bool:
     当前 is_st=True（历史可能不 ST）或上市日不早于信号日
     （股本/口径在窗口内变更）→ True，统计时应排除或单列。
     """
-    r = query_df("SELECT is_st, first_bar_date FROM stock_basic"
-                 " WHERE code = %s", (code,))
+    r = query_df("SELECT is_st, first_bar_date FROM stock_basic WHERE code = %s", (code,))
     if r.empty:
         return False
     st_now = bool(r["is_st"].iloc[0])
@@ -178,13 +181,13 @@ def _pit_drift(code: str, d: date) -> bool:
 def ebb_days(start: date) -> list[date]:
     """P3-5：退潮日全序列（自 start 起）——一次性预取注入，替代
     _ebb_exit 内部逐信号查库（此前纯 mock 测试也连真库）。"""
-    df = query_df("SELECT date FROM market_stat WHERE date >= %s"
-                  " AND force_liquidate ORDER BY date", (start,))
+    df = query_df(
+        "SELECT date FROM market_stat WHERE date >= %s AND force_liquidate ORDER BY date", (start,)
+    )
     return list(df["date"])
 
 
-def _ebb_exit(nb: pd.DataFrame, d0: date, ret,
-              ebbs: list[date] | None = None) -> float | None:
+def _ebb_exit(nb: pd.DataFrame, d0: date, ret, ebbs: list[date] | None = None) -> float | None:
     """V4：信号后首个强制清仓日收盘强平；清仓日在前向窗外 → None(pending)。
 
     ebbs：调用方注入的退潮日序列（replay/report 预取一次）；
@@ -216,7 +219,7 @@ def _exit_family(code: str, d0: date, ebbs: list[date] | None = None) -> dict:
         return {}
     entry_p = float(nb["open"].iloc[0])
     n = len(nb)
-    if n < 2:                       # V4②：单 bar = 当日买当日卖，制度非法
+    if n < 2:  # V4②：单 bar = 当日买当日卖，制度非法
         return {}
     lim = [_limit_up_on(code, d) for d in nb["date"]]
     fee = _cfg("FEE_COMMISSION", 0.0002) * 2 + _cfg("FEE_STAMP", 0.0005)
@@ -229,14 +232,18 @@ def _exit_family(code: str, d0: date, ebbs: list[date] | None = None) -> dict:
         return ret(float(nb["open"].iloc[idx])) if idx is not None else None
 
     fb = next((i for i in range(1, n) if not lim[i - 1]), None)
-    a = bounded_ret(fb) if fb is not None else None    # 窗内未断板 → pending
+    a = bounded_ret(fb) if fb is not None else None  # 窗内未断板 → pending
     brk = next((i for i in range(n) if not lim[i]), None)
     si = 1 if brk == 0 else brk
     b = ret(float(nb["close"].iloc[si])) if si is not None else None
-    c = ret(float(nb["close"].iloc[1]))               # n>=2 保证 T+2 合法
+    c = ret(float(nb["close"].iloc[1]))  # n>=2 保证 T+2 合法
     # V4（二轮审计）：E 退潮清仓腿——对齐实盘 exit.suggestions 优先级
     # （退潮清仓 > 断板卖出）；回测缺此腿导致强制清仓日的收益被错记为持有。
     e = _ebb_exit(nb, d0, ret, ebbs)
-    return {"A_断板开盘": a, "B_断板收盘": b, "C_两日收盘": c,
-            "D_半仓": round(0.5 * c + 0.5 * b, 2) if b is not None else None,
-            "E_退潮清仓": e}
+    return {
+        "A_断板开盘": a,
+        "B_断板收盘": b,
+        "C_两日收盘": c,
+        "D_半仓": round(0.5 * c + 0.5 * b, 2) if b is not None else None,
+        "E_退潮清仓": e,
+    }

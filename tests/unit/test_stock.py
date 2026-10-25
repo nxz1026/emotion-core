@@ -1,4 +1,5 @@
 """algorithms/stock.py 个股诊断判定层测试。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -7,9 +8,6 @@ from emotion_core.algorithms.stock import (
     STANCE_AVOID,
     STANCE_WATCH,
     STANCE_LOW_ABSORB,
-    HIGH_CONT,
-    NEAR_HIGH_PCT,
-    BOMB_MANY,
     _pct,
     _ok,
     layer_label,
@@ -89,20 +87,22 @@ class TestTrendMetrics:
     def _make_series(self, n=25):
         series = []
         for i in range(n):
-            series.append({
-                "close": 10.0 + i * 0.1,
-                "high": 10.5 + i * 0.1,
-                "low": 9.5 + i * 0.1,
-                "volume": 1000.0 + i * 100,
-                "pct_chg": 0.01,
-                "turnover_rate": 0.05,
-                "amplitude": 0.02,
-                "is_limit_up": i == n - 1,
-                "is_one_word": False,
-                "is_exchange": True,
-                "is_limit_down": False,
-                "cont_days": 3,
-            })
+            series.append(
+                {
+                    "close": 10.0 + i * 0.1,
+                    "high": 10.5 + i * 0.1,
+                    "low": 9.5 + i * 0.1,
+                    "volume": 1000.0 + i * 100,
+                    "pct_chg": 0.01,
+                    "turnover_rate": 0.05,
+                    "amplitude": 0.02,
+                    "is_limit_up": i == n - 1,
+                    "is_one_word": False,
+                    "is_exchange": True,
+                    "is_limit_down": False,
+                    "cont_days": 3,
+                }
+            )
         return series
 
     def test_basic(self):
@@ -134,7 +134,13 @@ class TestTrendMetrics:
 
 class TestAttachVolumeRatio:
     def test_basic(self):
-        series = [{"volume": 1000}, {"volume": 2000}, {"volume": 3000}, {"volume": 4000}, {"volume": 5000}]
+        series = [
+            {"volume": 1000},
+            {"volume": 2000},
+            {"volume": 3000},
+            {"volume": 4000},
+            {"volume": 5000},
+        ]
         result = attach_volume_ratio(series, window=2)
         assert len(result) == 5
         assert all("vol_ratio5" in r for r in result)
@@ -209,7 +215,9 @@ class TestRiskTags:
         assert any("高位" in t.get("name", "") for t in tags)
 
     def test_no_tags(self):
-        tags = risk_tags({"name": "贵州茅台"}, {"cont_days": 2}, {"bomb_n": 0}, {}, None, date(2024, 6, 15))
+        tags = risk_tags(
+            {"name": "贵州茅台"}, {"cont_days": 2}, {"bomb_n": 0}, {}, None, date(2024, 6, 15)
+        )
         assert len(tags) == 0
 
 
@@ -229,31 +237,49 @@ class TestVerdict:
         }
 
     def test_st_avoid(self):
-        result = verdict({"name": "ST华海"}, self._basic_trend(), {}, {}, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "ST华海"},
+            self._basic_trend(),
+            {},
+            {},
+            None,
+            None,
+            None,
+            None,
+            date(2024, 6, 15),
+        )
         assert result["stance"] == STANCE_AVOID
 
     def test_limit_down_avoid(self):
         trend = self._basic_trend()
         trend["is_limit_down"] = True
-        result = verdict({"name": "贵州茅台"}, trend, {}, {}, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"}, trend, {}, {}, None, None, None, None, date(2024, 6, 15)
+        )
         assert result["stance"] == STANCE_AVOID
 
     def test_buy_window_none(self):
         trend = self._basic_trend()
         env = {"buy_window": "NONE", "phase": "冰点"}
-        result = verdict({"name": "贵州茅台"}, trend, {}, env, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"}, trend, {}, env, None, None, None, None, date(2024, 6, 15)
+        )
         assert result["stance"] == STANCE_AVOID
 
     def test_force_liquidate(self):
         trend = self._basic_trend()
         env = {"buy_window": "STANDARD", "force_liquidate": True}
-        result = verdict({"name": "贵州茅台"}, trend, {}, env, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"}, trend, {}, env, None, None, None, None, date(2024, 6, 15)
+        )
         assert result["stance"] == STANCE_AVOID
 
     def test_non_limit_up_above_ma20(self):
         trend = self._basic_trend()
         env = {"buy_window": "STANDARD", "phase": "发酵"}
-        result = verdict({"name": "贵州茅台"}, trend, {}, env, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"}, trend, {}, env, None, None, None, None, date(2024, 6, 15)
+        )
         assert result["stance"] == STANCE_WATCH
 
     def test_exchange_board_buy(self):
@@ -263,7 +289,9 @@ class TestVerdict:
         trend["is_limit_up"] = True
         env = {"buy_window": "STANDARD", "phase": "发酵"}
         promo = {"rate": 50, "total": 100, "perf_median": 2.0}
-        result = verdict({"name": "贵州茅台"}, trend, {}, env, promo, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"}, trend, {}, env, promo, None, None, None, date(2024, 6, 15)
+        )
         assert result["stance"] == STANCE_BUY
 
     def test_one_word_low_absorb(self):
@@ -273,17 +301,39 @@ class TestVerdict:
         trend["is_limit_up"] = True
         env = {"buy_window": "STANDARD", "phase": "发酵"}
         promo = {"rate": 50, "total": 100, "perf_median": 2.0}
-        result = verdict({"name": "贵州茅台"}, trend, {}, env, promo, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"}, trend, {}, env, promo, None, None, None, date(2024, 6, 15)
+        )
         assert result["stance"] == STANCE_LOW_ABSORB
 
     def test_has_disclaimer(self):
-        result = verdict({"name": "贵州茅台"}, self._basic_trend(), {}, {}, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"},
+            self._basic_trend(),
+            {},
+            {},
+            None,
+            None,
+            None,
+            None,
+            date(2024, 6, 15),
+        )
         assert "disclaimer" in result
         assert "非投资建议" in result["disclaimer"]
 
     def test_has_context(self):
         env = {"buy_window": "STANDARD", "phase": "发酵", "limit_up_count": 50}
-        result = verdict({"name": "贵州茅台"}, self._basic_trend(), {}, env, None, None, None, None, date(2024, 6, 15))
+        result = verdict(
+            {"name": "贵州茅台"},
+            self._basic_trend(),
+            {},
+            env,
+            None,
+            None,
+            None,
+            None,
+            date(2024, 6, 15),
+        )
         assert "context" in result
 
 

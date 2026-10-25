@@ -1,4 +1,5 @@
 """domain/bar.py 单元测试：Bar / DerivedBar 数据类构造与字段。"""
+
 from __future__ import annotations
 
 from datetime import date

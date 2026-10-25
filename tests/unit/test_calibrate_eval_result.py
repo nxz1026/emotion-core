@@ -4,6 +4,7 @@
 `calibrate.proposal()` 在写报告的同时落一行（params=窗口与数据起点、
 result=markdown + 提案 + 样本统计、config_hash=产出时的配置指纹）。
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ def _fake_tx(rec: list):
         def execute(self, sql, params=()):
             rec.append((sql, params))
             return SimpleNamespace(rowcount=1)
+
     yield _Conn()
 
 
@@ -34,7 +36,8 @@ def test_persist_eval_result_sql_and_params(monkeypatch):
     monkeypatch.setattr(calibrate, "transaction", lambda: _fake_tx(rec))
 
     n = calibrate._persist_eval_result(
-        "calib", date(2026, 8, 1), D, {"days": 60}, {"markdown": "# 提案"})
+        "calib", date(2026, 8, 1), D, {"days": 60}, {"markdown": "# 提案"}
+    )
 
     sql, params = rec[0]
     assert "INSERT INTO eval_result" in sql
@@ -49,9 +52,11 @@ def test_persist_eval_result_sql_and_params(monkeypatch):
 
 def test_proposal_writes_report_and_eval_result(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(calibrate, "_quality_stats",
-                        lambda end, days: (pd.DataFrame(), pd.DataFrame(),
-                                           date(2026, 8, 1)))
+    monkeypatch.setattr(
+        calibrate,
+        "_quality_stats",
+        lambda end, days: (pd.DataFrame(), pd.DataFrame(), date(2026, 8, 1)),
+    )
     monkeypatch.setattr(calibrate, "_threshold_sensitivity", lambda: "② 段")
     monkeypatch.setattr(calibrate, "_outcome_summary", lambda: "③ 段")
     monkeypatch.setattr(calibrate, "_proposals", lambda f, r, d: ["维持现行参数"])

@@ -1,10 +1,9 @@
 """data/cleanup.py 历史数据清理测试。"""
+
 from __future__ import annotations
 
-from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from emotion_core.data import cleanup
 
@@ -59,9 +58,12 @@ class TestCleanup:
         mock_cursor.rowcount = 5
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-        with patch("emotion_core.data.cleanup.transaction", return_value=MagicMock(
-            __enter__=MagicMock(return_value=mock_conn),
-            __exit__=MagicMock(return_value=False),
-        )):
+        with patch(
+            "emotion_core.data.cleanup.transaction",
+            return_value=MagicMock(
+                __enter__=MagicMock(return_value=mock_conn),
+                __exit__=MagicMock(return_value=False),
+            ),
+        ):
             result = cleanup.cleanup()
             assert isinstance(result, dict)

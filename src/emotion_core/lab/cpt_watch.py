@@ -258,11 +258,7 @@ def evaluate(
     rows: list[DayStat] = []
     for d in days:
         st = stats.get(d)
-        rows.append(
-            st
-            if st is not None
-            else DayStat(day=d, ok=0, empty=0, error=0, skipped=0)
-        )
+        rows.append(st if st is not None else DayStat(day=d, ok=0, empty=0, error=0, skipped=0))
 
     streak = 0
     for st in reversed(rows):
@@ -301,6 +297,7 @@ def render_text(res: WatchResult) -> str:
             f"{d.error:>5}  {d.skipped:>7}  {'是' if d.is_clean() else '否'}"
         )
     return "\n".join(lines)
+
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="CPT 盘中采集观察期监控（只读）")

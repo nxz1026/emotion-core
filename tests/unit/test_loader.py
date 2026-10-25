@@ -16,7 +16,6 @@ from contextlib import contextmanager
 from datetime import date
 from unittest.mock import patch
 
-import pytest
 
 from emotion_core.data import loader
 from emotion_core.domain.ladder import LadderDay
@@ -25,6 +24,7 @@ from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
 
 
 # ── helpers ───────────────────────────────────────────────────────────
+
 
 class FakeConn:
     """内存 DB 替身：记录 execute/executemany 调用，返回预设值。"""
@@ -104,6 +104,7 @@ def _patch_db(conn: FakeConn):
 
 # ── 1. replace_ladder_day ─────────────────────────────────────────────
 
+
 class TestReplaceLadderDay:
     """replace_ladder_day: DELETE + INSERT 同事务，空 rows → 仅 DELETE。"""
 
@@ -114,9 +115,16 @@ class TestReplaceLadderDay:
             p.start()
         try:
             rows = [
-                LadderDay(date=date(2026, 9, 29), code="600519", cont_days=3,
-                          is_exchange=False, is_top=True, is_sole_top=False,
-                          y_top_group_count=5, y_top_survivor_count=3),
+                LadderDay(
+                    date=date(2026, 9, 29),
+                    code="600519",
+                    cont_days=3,
+                    is_exchange=False,
+                    is_top=True,
+                    is_sole_top=False,
+                    y_top_group_count=5,
+                    y_top_survivor_count=3,
+                ),
             ]
             n = loader.replace_ladder_day(date(2026, 9, 29), rows)
 
@@ -150,9 +158,16 @@ class TestReplaceLadderDay:
             p.start()
         try:
             rows = [
-                LadderDay(date=date(2026, 9, 29), code="000001", cont_days=2,
-                          is_exchange=True, is_top=False, is_sole_top=False,
-                          y_top_group_count=0, y_top_survivor_count=0),
+                LadderDay(
+                    date=date(2026, 9, 29),
+                    code="000001",
+                    cont_days=2,
+                    is_exchange=True,
+                    is_top=False,
+                    is_sole_top=False,
+                    y_top_group_count=0,
+                    y_top_survivor_count=0,
+                ),
             ]
             loader.replace_ladder_day(date(2026, 9, 29), rows)
 
@@ -163,7 +178,6 @@ class TestReplaceLadderDay:
             for p in patches:
                 p.stop()
 
-
     def test_writes_is_suspended_flag(self):
         """R67-2：第 9 列 is_suspended 落库；未标注的行默认 False。"""
         conn = FakeConn()
@@ -172,13 +186,27 @@ class TestReplaceLadderDay:
             p.start()
         try:
             rows = [
-                LadderDay(date=date(2026, 10, 14), code="600825", cont_days=10,
-                          is_exchange=False, is_top=False, is_sole_top=False,
-                          y_top_group_count=0, y_top_survivor_count=0,
-                          is_suspended=True),
-                LadderDay(date=date(2026, 10, 14), code="002952", cont_days=4,
-                          is_exchange=True, is_top=True, is_sole_top=True,
-                          y_top_group_count=1, y_top_survivor_count=1),
+                LadderDay(
+                    date=date(2026, 10, 14),
+                    code="600825",
+                    cont_days=10,
+                    is_exchange=False,
+                    is_top=False,
+                    is_sole_top=False,
+                    y_top_group_count=0,
+                    y_top_survivor_count=0,
+                    is_suspended=True,
+                ),
+                LadderDay(
+                    date=date(2026, 10, 14),
+                    code="002952",
+                    cont_days=4,
+                    is_exchange=True,
+                    is_top=True,
+                    is_sole_top=True,
+                    y_top_group_count=1,
+                    y_top_survivor_count=1,
+                ),
             ]
             loader.replace_ladder_day(date(2026, 10, 14), rows)
 
@@ -191,6 +219,7 @@ class TestReplaceLadderDay:
 
 
 # ── 1b. load_suspended_candidates ─────────────────────────────────────
+
 
 class TestLoadSuspendedCandidates:
     """R67-2 旁路：停牌但仍有连板身位的 (code, prev_cont_days)。"""
@@ -254,13 +283,15 @@ class TestLoadSuspendedCandidates:
 
     def test_params_carry_date_and_board_prefixes(self):
         from emotion_core.utils.config import CONFIG
+
         _, conn = self._run([])
         params = conn.execute_calls[0][1]
         assert params[0] == date(2026, 10, 14)
-        assert params[1:1 + len(CONFIG.BOARD_PREFIXES)] == tuple(CONFIG.BOARD_PREFIXES)
+        assert params[1 : 1 + len(CONFIG.BOARD_PREFIXES)] == tuple(CONFIG.BOARD_PREFIXES)
 
 
 # ── 2. upsert_promotion_day ───────────────────────────────────────────
+
 
 class TestUpsertPromotionDay:
     """upsert_promotion_day: 列集与 promotion._INSERT_SQL 一致。"""
@@ -272,10 +303,17 @@ class TestUpsertPromotionDay:
             p.start()
         try:
             rows = [
-                {"date": date(2026, 9, 29), "layer": 1, "promote_from": "A",
-                 "promote_nominal": 10, "promote_exchange": 5,
-                 "rate_nominal": 0.5, "rate_exchange": 0.25,
-                 "divergence": 0.1, "fail_perf": 0.0},
+                {
+                    "date": date(2026, 9, 29),
+                    "layer": 1,
+                    "promote_from": "A",
+                    "promote_nominal": 10,
+                    "promote_exchange": 5,
+                    "rate_nominal": 0.5,
+                    "rate_exchange": 0.25,
+                    "divergence": 0.1,
+                    "fail_perf": 0.0,
+                },
             ]
             n = loader.upsert_promotion_day(rows)
 
@@ -307,14 +345,23 @@ class TestUpsertPromotionDay:
             p.start()
         try:
             rows = [
-                {"date": date(2026, 9, 29), "layer": 1, "promote_from": "A",
-                 "promote_nominal": 10, "promote_exchange": 5,
-                 "rate_nominal": None, "rate_exchange": None,
-                 "divergence": None, "fail_perf": None},
+                {
+                    "date": date(2026, 9, 29),
+                    "layer": 1,
+                    "promote_from": "A",
+                    "promote_nominal": 10,
+                    "promote_exchange": 5,
+                    "rate_nominal": None,
+                    "rate_exchange": None,
+                    "divergence": None,
+                    "fail_perf": None,
+                },
             ]
             loader.upsert_promotion_day(rows)
 
-            delete_calls = [sql for sql, _ in conn.execute_calls if "DELETE FROM promotion_day" in sql]
+            delete_calls = [
+                sql for sql, _ in conn.execute_calls if "DELETE FROM promotion_day" in sql
+            ]
             assert len(delete_calls) == 1
         finally:
             for p in patches:
@@ -323,16 +370,23 @@ class TestUpsertPromotionDay:
 
 # ── 3. insert_signal ──────────────────────────────────────────────────
 
+
 class TestInsertSignal:
     """insert_signal: ON CONFLICT 用 (confirm_date, code, action)。"""
 
     def _make_signal(self, action=Action.BUY, source=SignalSource.LIVE):
         return Signal(
-            code="600519", date=date(2026, 9, 29),
+            code="600519",
+            date=date(2026, 9, 29),
             action=action,
-            checklist=Checklist(c1_uniqueness=None, c2_exchange=None,
-                                c3_elimination=None, c4_min_days=None,
-                                c5_strength_diverge=None, w1_crowding=None),
+            checklist=Checklist(
+                c1_uniqueness=None,
+                c2_exchange=None,
+                c3_elimination=None,
+                c4_min_days=None,
+                c5_strength_diverge=None,
+                w1_crowding=None,
+            ),
             source=source,
         )
 
@@ -369,6 +423,7 @@ class TestInsertSignal:
 
 # ── 4. count_derived_rows ─────────────────────────────────────────────
 
+
 class TestCountDerivedRows:
     """count_derived_rows: 返回值即上游完整性凭证。"""
 
@@ -399,6 +454,7 @@ class TestCountDerivedRows:
 
 # ── 5. update_market_stat_ecosystem ───────────────────────────────────
 
+
 class TestUpdateMarketStatEcosystem:
     """update_market_stat_ecosystem: UPDATE 字段正确。"""
 
@@ -424,6 +480,7 @@ class TestUpdateMarketStatEcosystem:
 
 # ── 6. upsert_market_stat ─────────────────────────────────────────────
 
+
 class TestUpsertMarketStat:
     """upsert_market_stat: INSERT ON CONFLICT (date) DO UPDATE。"""
 
@@ -434,10 +491,16 @@ class TestUpsertMarketStat:
             p.start()
         try:
             stat = MarketStat(
-                date=date(2026, 9, 29), phase=Phase.ICE,
-                buy_window=1, limit_up_count=20, bomb_count=3,
-                limit_down_count=5, max_height=3,
-                force_liquidate=False, bomb_threshold=0.1, has_candidate=True,
+                date=date(2026, 9, 29),
+                phase=Phase.ICE,
+                buy_window=1,
+                limit_up_count=20,
+                bomb_count=3,
+                limit_down_count=5,
+                max_height=3,
+                force_liquidate=False,
+                bomb_threshold=0.1,
+                has_candidate=True,
             )
             rc = loader.upsert_market_stat(stat)
 

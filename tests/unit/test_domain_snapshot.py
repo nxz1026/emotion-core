@@ -1,4 +1,5 @@
 """domain/snapshot.py 单元测试：展示层视图模型。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -67,11 +68,17 @@ class TestLadderSnapshot:
 
     def test_construction_with_rows(self):
         from emotion_core.domain.ladder import LadderDay
+
         rows = (
             LadderDay(
-                date=D, code="002952", cont_days=5,
-                is_exchange=True, is_top=True, is_sole_top=True,
-                y_top_group_count=3, y_top_survivor_count=1,
+                date=D,
+                code="002952",
+                cont_days=5,
+                is_exchange=True,
+                is_top=True,
+                is_sole_top=True,
+                y_top_group_count=3,
+                y_top_survivor_count=1,
             ),
         )
         snap = LadderSnapshot(date=D, rows=rows)

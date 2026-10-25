@@ -55,7 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     out = score.run(start, end, persist=not args.dry_run)
     log.info(
         "基线：n=%s 成交率=%s%% 每信号=%s%% 胜率=%s%% LCB=%s%%",
-        out["n"], out["fill_rate"], out["expectancy"], out["win_rate"], out["lcb"],
+        out["n"],
+        out["fill_rate"],
+        out["expectancy"],
+        out["win_rate"],
+        out["lcb"],
     )
     if args.no_search:
         return 0

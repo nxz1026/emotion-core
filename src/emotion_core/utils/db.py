@@ -20,6 +20,7 @@ source 会执行文件内容（`$RDSHOST=x` 在 shell 里语法错误），子�
 - 本模块是全项目唯一 psycopg 连接入口；DataFrame 由原生 cursor 装配，不引 SQLAlchemy。
 - 策略阈值住 utils/config.py（config_hash 只覆盖策略值）；数据库口径住本文件，两者不混。
 """
+
 from __future__ import annotations
 
 import logging
@@ -148,15 +149,19 @@ def transaction() -> Iterator[psycopg.Connection[Any]]:
         conn.close()
 
 
-def _fetch_df(conn: psycopg.Connection[Any], sql: str,
-              params: Sequence[Any] | Mapping[str, Any]) -> pd.DataFrame:
+def _fetch_df(
+    conn: psycopg.Connection[Any], sql: str, params: Sequence[Any] | Mapping[str, Any]
+) -> pd.DataFrame:
     cur = conn.execute(sql, params)
     cols = [desc.name for desc in cur.description or ()]
     return pd.DataFrame(cur.fetchall(), columns=cols)
 
 
-def query_df(sql: str, params: Sequence[Any] | Mapping[str, Any] = (),
-             conn: psycopg.Connection[Any] | None = None) -> pd.DataFrame:
+def query_df(
+    sql: str,
+    params: Sequence[Any] | Mapping[str, Any] = (),
+    conn: psycopg.Connection[Any] | None = None,
+) -> pd.DataFrame:
     """查询返回 DataFrame（原生 cursor，不依赖 SQLAlchemy）。
 
     传 conn 则复用调用方连接/事务（多次查询共享同一快照），否则自开自关。
@@ -167,8 +172,11 @@ def query_df(sql: str, params: Sequence[Any] | Mapping[str, Any] = (),
         return _fetch_df(auto, sql, params)
 
 
-def execute(sql: str, params: Sequence[Any] | Mapping[str, Any] = (),
-            conn: psycopg.Connection[Any] | None = None) -> int:
+def execute(
+    sql: str,
+    params: Sequence[Any] | Mapping[str, Any] = (),
+    conn: psycopg.Connection[Any] | None = None,
+) -> int:
     """执行单条语句，返回受影响行数。
 
     传 conn 则不提交（由调用方控制事务）；否则自开事务，正常退出提交、异常回滚。

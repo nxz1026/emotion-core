@@ -49,7 +49,8 @@ def _capture_logs(monkeypatch):
         llm.LLMClient,
         "_log_call",
         lambda self, reply, purpose, latency, status, err="": logged.append(
-            status + (f":{err}" if err else "")),
+            status + (f":{err}" if err else "")
+        ),
     )
     return logged
 
@@ -140,6 +141,8 @@ def test_dotenv_platform_key_beats_apikey_file(monkeypatch, tmp_path):
     monkeypatch.setattr(llm_backend, "LLM_KEY_FILES", [str(key_file)])
     monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
     assert resolve_key("fast") == "dotenv-secret"
+
+
 def test_agnes_profile_params_key_and_unknown_fallback(monkeypatch):
     params = llm.resolve_params("agnes")
     assert params.base_url == "https://apihub.agnes-ai.com/v1"
@@ -162,6 +165,8 @@ def test_401_falls_back_and_unknown_profile_warns(monkeypatch, caplog):
 
     assert llm.LLMClient("fast", max_retry=0).chat([]).text == "default"
     assert len(calls) == 2
+
+
 def test_fallback_rebuilds_payload_for_each_profile(monkeypatch):
     monkeypatch.setenv("LKL_LLM_CHAIN", "smart,fast")
     calls = _post_mock(monkeypatch, [FakeResp({}, 401), FakeResp(OK_FAST)])
@@ -199,9 +204,9 @@ def test_latency_is_recorded_for_success_and_failure(monkeypatch):
     calls = _post_mock(monkeypatch, [FakeResp({}, 401), FakeResp(OK_DEFAULT)])
     logged = []
     monkeypatch.setattr(
-        llm.LLMClient, "_log_call",
-        lambda self, reply, purpose, latency, status, err="":
-        logged.append((status, latency)),
+        llm.LLMClient,
+        "_log_call",
+        lambda self, reply, purpose, latency, status, err="": logged.append((status, latency)),
     )
 
     assert llm.LLMClient("fast", max_retry=0).chat([]).text == "default"
@@ -235,6 +240,7 @@ def test_same_client_concurrent_calls_do_not_mix_payloads(monkeypatch):
 
 # ── 2026-09-28：本机密钥统一放 ~/.env（平台名键），新增解析来源 ─────────────
 
+
 def test_env_file_key_is_used_when_shared_env_missing(monkeypatch, tmp_path):
     """共享环境变量没有时，按 profile 从 ~/.env 这类 dotenv 文件取平台密钥。"""
     monkeypatch.delenv("LKL_LLM_API_KEY", raising=False)
@@ -246,7 +252,9 @@ def test_env_file_key_is_used_when_shared_env_missing(monkeypatch, tmp_path):
         "警告：本文件包含真实密钥\n"
         "# 注释行\n"
         "SENSEN_API_KEY=sk-from-dotenv\n"
-        "AGNES_API_KEY=agnes-from-dotenv\n", encoding="utf-8")
+        "AGNES_API_KEY=agnes-from-dotenv\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
 
     assert resolve_key("smart") == "sk-from-dotenv"
@@ -259,7 +267,7 @@ def test_shared_env_still_beats_dotenv_file(monkeypatch, tmp_path):
     envf = tmp_path / ".env"
     envf.write_text("SENSEN_API_KEY=sk-from-dotenv\n", encoding="utf-8")
     monkeypatch.setattr(llm_backend, "LLM_ENV_FILES", [str(envf)])
-    assert resolve_key("smart") == "shared-secret"      # autouse fixture 设的
+    assert resolve_key("smart") == "shared-secret"  # autouse fixture 设的
 
 
 def test_profile_specific_env_beats_dotenv_file(monkeypatch, tmp_path):

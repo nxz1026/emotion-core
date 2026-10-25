@@ -5,9 +5,9 @@
     Python: (pre_close_cents * (1000 + pct_milli) + 500) // 1000
     等价：pre_close=10.00 元=1000 分, 主板 → 1100 分 ✓
 """
+
 from __future__ import annotations
 
-import pytest
 
 from emotion_core.utils.price import (
     board_pct_milli,

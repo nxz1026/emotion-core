@@ -22,11 +22,11 @@ lkl 依赖替换：
 
 源实测记录（本机海外 IP，2026-08-31 / 2026-09-24）逐字保留在注释里，勿改。
 """
+
 from __future__ import annotations
 
 import logging
 import re
-import time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
@@ -56,18 +56,23 @@ _TIME_SLEEP: float = getattr(CONFIG, "TIME_SLEEP", 0.5)
 # fs = 深主板/创业板/沪主板/科创板。
 _EM_CLIST = "https://push2delay.eastmoney.com/api/qt/clist/get"
 _EM_FS_ALL_A = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
-_SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
-             "f2": "close", "f18": "pre_close", "f5": "volume",
-             "f6": "amount", "f8": "turnover_rate"}
+_SPOT_MAP = {
+    "f12": "code",
+    "f17": "open",
+    "f15": "high",
+    "f16": "low",
+    "f2": "close",
+    "f18": "pre_close",
+    "f5": "volume",
+    "f6": "amount",
+    "f8": "turnover_rate",
+}
 
 
 # FetchError / DataError 的唯一定义处已上移到 `data.providers.base`（2026-09-29
 # 架构守护）：本模块只 import 同名再导出，异常对象与 `services/ingest.py` 那份是
 # **同一个类**，`except DataError` 的语义不变（原先两份定义反而是隐患：跨模块抛出的
 # DataError 在另一侧的 except 里捕获不到）。
-
-
-
 
 
 # ── 新浪全市场源：EM clist 高频 502 时的回退 ────────────────────────────
@@ -77,36 +82,47 @@ _SPOT_MAP = {"f12": "code", "f17": "open", "f15": "high", "f16": "low",
 # 502 由东财自身 nginx 返回），但配 FETCH_RETRY=3 后单次调用仍有约
 # 0.8³≈51% 概率三次全挂。新浪 / 腾讯 HTTP 源同期 100% 正常，故守卫与快照
 # 双线回退到新浪——回退的目的是**让守卫可靠**，不是"EM 永远不通"。
-_SINA_CLIST = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-               "Market_Center.getHQNodeData")
+_SINA_CLIST = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
 _SINA_QUOTE = "https://hq.sinajs.cn/list="
 # 新浪指数日K：最后一根的日期 = 最近一个「已完成」交易日。用于盘前判定
 # （hq.sinajs.cn 的日期字段是「当前交易日」，盘前已翻新但无成交）。
-_SINA_KLINE = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-               "CN_MarketData.getKLineData")
-_SINA_HEADERS = {"User-Agent": "Mozilla/5.0",
-                 "Referer": "https://finance.sina.com.cn"}
+_SINA_KLINE = (
+    "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
+)
+_SINA_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
 #: A股收盘时间（北京时间），表示成「距零点的分钟数」。行情时间 >= 它才算
 #: 「当日已收完」。**故意用整数而非 datetime.time**：本模块 `import time`
 #: （标准库）给 `_retry` 用，若 `from datetime import time` 会把它覆盖掉，
 #: `time.sleep` 随即 AttributeError，整条管道直接死。
 _SINA_SESSION_END_MIN = 15 * 60
-_SINA_TO_EM = {"code": "f12", "name": "f14", "open": "f17", "high": "f15",
-               "low": "f16", "trade": "f2", "settlement": "f18",
-               "volume": "f5", "amount": "f6", "turnoverratio": "f8",
-               "mktcap": "f20", "nmc": "f21"}
+_SINA_TO_EM = {
+    "code": "f12",
+    "name": "f14",
+    "open": "f17",
+    "high": "f15",
+    "low": "f16",
+    "trade": "f2",
+    "settlement": "f18",
+    "volume": "f5",
+    "amount": "f6",
+    "turnoverratio": "f8",
+    "mktcap": "f20",
+    "nmc": "f21",
+}
 #: 新浪 → EM 的**单位**换算（EM 侧一律为 1）。这张表必须和 `_SINA_TO_EM` 成对看：
 #: 只加映射不改这里＝静默的量纲错误——数字都在，只是差 100 / 10000 倍，不报错。
 #: 2026-10-12 实测（新浪 hs_a 剔北交所 5223 条，mktcap 缺失 0 条）：600519
 #: mktcap=161010510.2088 万元 ÷ trade=1288.0 → 12.50 亿股（公开 12.56 亿）；
 #: 000001 mktcap=22763142.046254 万元 ÷ 11.73 → 194.06 亿股（公开 194.06 亿，
 #: 精确吻合）。故新浪市值单位确定为**万元**。
-_SINA_UNIT_SCALE = {"f5": 1 / 100.0,      # 股 → 手
-                    "f20": 10000.0,       # 万元 → 元（总市值）
-                    "f21": 10000.0}       # 万元 → 元（流通市值）
-
-
-
+_SINA_UNIT_SCALE = {
+    "f5": 1 / 100.0,  # 股 → 手
+    "f20": 10000.0,  # 万元 → 元（总市值）
+    "f21": 10000.0,
+}  # 万元 → 元（流通市值）
 
 
 def _reject_zero_prices(rows: list[dict]) -> None:
@@ -125,11 +141,11 @@ def _reject_zero_prices(rows: list[dict]) -> None:
     if priced * 2 < len(rows):
         raise DataError(
             f"新浪全市场快照价格异常：{len(rows) - priced}/{len(rows)} 行收盘价为空或 0"
-            "（疑似盘前或接口异常），拒绝入库")
+            "（疑似盘前或接口异常），拒绝入库"
+        )
 
 
-def _sina_clist(fields: list[str], page: int = 100,
-                max_pages: int = 80) -> pd.DataFrame:
+def _sina_clist(fields: list[str], page: int = 100, max_pages: int = 80) -> pd.DataFrame:
     """新浪全市场行情分页拉取 → DataFrame（列名为 EM f 码，供 _em_clist 回退）。
 
     口径对齐（2026-09-24 实测）：新浪 node=hs_a 共 5567 条，含北交所 346 条；
@@ -150,12 +166,14 @@ def _sina_clist(fields: list[str], page: int = 100,
     pn = 1
     while True:
         params = {"page": pn, "num": page, "sort": "symbol", "asc": 1, "node": "hs_a"}
-        rows = retry_fetch(fetch_json_list, _SINA_CLIST, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP)
+        rows = retry_fetch(
+            fetch_json_list, _SINA_CLIST, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP
+        )
         if not rows:
             break
         for r in rows:
             if str(r.get("symbol") or "").startswith("bj"):
-                continue                      # 北交所不在原股票池口径内
+                continue  # 北交所不在原股票池口径内
             item = {f: r.get(src[f]) for f in want}
             for f, scale in _SINA_UNIT_SCALE.items():
                 if item.get(f) is None:
@@ -174,8 +192,9 @@ def _sina_clist(fields: list[str], page: int = 100,
     return pd.DataFrame(out)
 
 
-def _em_clist_paged(fs: str, fields: list[str], page: int = 100,
-                    max_pages: int = 80) -> pd.DataFrame:
+def _em_clist_paged(
+    fs: str, fields: list[str], page: int = 100, max_pages: int = 80
+) -> pd.DataFrame:
     """EM clist 分页拉取（服务端单页上限100）→ DataFrame（字段名为 f 码）。
 
     V1（二轮审计）：分页上限防 total 异常时的死循环。
@@ -188,22 +207,34 @@ def _em_clist_paged(fs: str, fields: list[str], page: int = 100,
     out: list[dict] = []
     pn, total = 1, None
     while True:
-        params = {"pn": pn, "pz": page, "po": 1, "np": 1, "fltt": 2, "invt": 2,
-                  "fid": "f12", "fs": fs, "fields": ",".join(fields)}
-        data = retry_fetch(fetch_json, _EM_CLIST, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP).get("data") or {}
+        params = {
+            "pn": pn,
+            "pz": page,
+            "po": 1,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f12",
+            "fs": fs,
+            "fields": ",".join(fields),
+        }
+        data = (
+            retry_fetch(
+                fetch_json, _EM_CLIST, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP
+            ).get("data")
+            or {}
+        )
         diff = data.get("diff") or []
         out.extend(diff)
         total = data.get("total") or 0
         if not diff or len(out) >= total or pn >= max_pages:
             if pn >= max_pages and len(out) < total:
-                log.warning("EM clist 分页达上限 %d 页：取 %d/%d 条",
-                            max_pages, len(out), total)
+                log.warning("EM clist 分页达上限 %d 页：取 %d/%d 条", max_pages, len(out), total)
             return pd.DataFrame(out)
         pn += 1
 
 
-def _em_clist(fs: str, fields: list[str], page: int = 100,
-              max_pages: int = 80) -> pd.DataFrame:
+def _em_clist(fs: str, fields: list[str], page: int = 100, max_pages: int = 80) -> pd.DataFrame:
     """全市场行情列表：优先 EM，网络层失败（FetchError）回退新浪同口径源。
 
     V2（09-24）：EM clist 对本机 IP 高频 502（实测失败率 80%），此前守卫先崩、
@@ -234,15 +265,30 @@ def _em_data_date_em() -> date:
     那只票的时间戳，该票长期停牌则整条 daily 链天天静默 SKIP；现拉一页
     100 只取 f124 众数日期，单票停牌不再影响守卫。
     """
-    params = {"pn": 1, "pz": 100, "po": 1, "np": 1, "fltt": 2, "invt": 2,
-              "fid": "f12", "fs": _EM_FS_ALL_A, "fields": "f12,f124"}
-    diff = (retry_fetch(fetch_json, _EM_CLIST, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP).get("data")
-            or {}).get("diff") or []
+    params = {
+        "pn": 1,
+        "pz": 100,
+        "po": 1,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": "f12",
+        "fs": _EM_FS_ALL_A,
+        "fields": "f12,f124",
+    }
+    diff = (
+        retry_fetch(
+            fetch_json, _EM_CLIST, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP
+        ).get("data")
+        or {}
+    ).get("diff") or []
     if not diff:
         raise RuntimeError("EM clist 守卫请求返回空")
-    dates = [datetime.fromtimestamp(int(d["f124"]),
-                                    timezone(timedelta(hours=8))).date()
-             for d in diff if d.get("f124")]
+    dates = [
+        datetime.fromtimestamp(int(d["f124"]), timezone(timedelta(hours=8))).date()
+        for d in diff
+        if d.get("f124")
+    ]
     if not dates:
         raise RuntimeError("EM clist 守卫请求 f124 全空")
     # 众数：抗单票停牌。P3（三轮审计）：max(set,...) 在并列时按 set 迭代
@@ -251,8 +297,7 @@ def _em_data_date_em() -> date:
     top_n = max(cnt.values())
     winners = sorted(d for d, c in cnt.items() if c == top_n)
     if len(winners) > 1:
-        log.warning("EM 日期计数并列 %s（数据不一致），取最新 %s",
-                    winners, winners[-1])
+        log.warning("EM 日期计数并列 %s（数据不一致），取最新 %s", winners, winners[-1])
     return winners[-1]
 
 
@@ -275,8 +320,7 @@ def snapshot_data_date(frame: pd.DataFrame) -> date | None:
         if v is None or (isinstance(v, float) and v != v):
             continue
         try:
-            dates.append(datetime.fromtimestamp(
-                int(v), timezone(timedelta(hours=8))).date())
+            dates.append(datetime.fromtimestamp(int(v), timezone(timedelta(hours=8))).date())
         except (TypeError, ValueError, OSError):
             continue
     if not dates:
@@ -336,9 +380,9 @@ def _sina_session_closed(vol: float | None, minutes: int | None) -> bool | None:
     if vol is None and minutes is None:
         return None
     if vol == 0:
-        return False                      # 当日尚无成交（盘前/集合竞价前）
+        return False  # 当日尚无成交（盘前/集合竞价前）
     if minutes is not None and minutes > 0 and minutes < _SINA_SESSION_END_MIN:
-        return False                      # 盘中：半截行情不能当已完成
+        return False  # 盘中：半截行情不能当已完成
     return True
 
 
@@ -350,7 +394,9 @@ def _sina_last_bar_date(symbol: str = "sh000001") -> date:
     已经产生了 K 线的那一天。
     """
     params = {"symbol": symbol, "scale": 240, "ma": "no", "datalen": 2}
-    rows = retry_fetch(fetch_json_list, _SINA_KLINE, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP)
+    rows = retry_fetch(
+        fetch_json_list, _SINA_KLINE, params, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP
+    )
     days = [r.get("day") for r in rows if r.get("day")]
     if not days:
         raise RuntimeError("新浪日K守卫响应为空")
@@ -376,8 +422,7 @@ def _sina_data_date() -> date:
     yyyy-MM-dd，不按下标取。
     """
     try:
-        resp = requests.get(_SINA_QUOTE + "sh000001", timeout=15,
-                            headers=_SINA_HEADERS)
+        resp = requests.get(_SINA_QUOTE + "sh000001", timeout=15, headers=_SINA_HEADERS)
         resp.raise_for_status()
     except requests.RequestException as exc:
         raise FetchError("新浪守卫请求失败", exc) from exc
@@ -389,8 +434,13 @@ def _sina_data_date() -> date:
     vol, mins = _sina_index_volume(text), _sina_quote_minutes(text)
     if _sina_session_closed(vol, mins) is False:
         last = _sina_last_bar_date()
-        log.warning("新浪指数当日行情未收完（成交量=%s 时间分钟=%s），"
-                    "日期字段 %s 改用最近已完成交易日 %s", vol, mins, d, last)
+        log.warning(
+            "新浪指数当日行情未收完（成交量=%s 时间分钟=%s），日期字段 %s 改用最近已完成交易日 %s",
+            vol,
+            mins,
+            d,
+            last,
+        )
         return last
     return d
 
@@ -407,20 +457,17 @@ def _downgrade_open_session(d: date) -> date:
     沿用 d，不引入 SKIP 风险。
     """
     try:
-        resp = requests.get(_SINA_QUOTE + "sh000001", timeout=15,
-                            headers=_SINA_HEADERS)
+        resp = requests.get(_SINA_QUOTE + "sh000001", timeout=15, headers=_SINA_HEADERS)
         resp.raise_for_status()
     except requests.RequestException as exc:
         log.warning("收盘状态探测失败（%s），沿用行情源日期 %s", exc, d)
         return d
     text = resp.content.decode("gbk", "replace")
-    closed = _sina_session_closed(_sina_index_volume(text),
-                                  _sina_quote_minutes(text))
+    closed = _sina_session_closed(_sina_index_volume(text), _sina_quote_minutes(text))
     if closed is not False:
         return d
     last = _sina_last_bar_date()
-    log.warning("行情源日期 %s 属当日但未收完（盘前/盘中），改用最近已完成交易日 %s",
-                d, last)
+    log.warning("行情源日期 %s 属当日但未收完（盘前/盘中），改用最近已完成交易日 %s", d, last)
     return last
 
 
@@ -438,11 +485,8 @@ def em_data_date() -> date:
         d = _em_data_date_em()
     except (FetchError, RuntimeError) as exc:
         log.warning("EM 守卫不可用（%s），回退新浪交易日源", exc)
-        return _sina_data_date()      # 内部已做收盘判定
+        return _sina_data_date()  # 内部已做收盘判定
     return _downgrade_open_session(d)
-
-
-
 
 
 class EastmoneyProvider:
@@ -464,8 +508,7 @@ class EastmoneyProvider:
             raw = _em_clist(_EM_FS_ALL_A, [*_SPOT_MAP, "f124"])
             src_date = snapshot_data_date(raw)
             if src_date is not None and src_date != end:
-                raise DataError(
-                    f"快照自带日期 {src_date} ≠ 请求 {end}（拒绝按请求日期盖章）")
+                raise DataError(f"快照自带日期 {src_date} ≠ 请求 {end}（拒绝按请求日期盖章）")
             raw = raw.rename(columns=_SPOT_MAP)
             raw = raw[raw["code"].astype(str).str.zfill(6) == code]
             raw["date"] = end

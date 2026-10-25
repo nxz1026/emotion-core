@@ -5,6 +5,7 @@
 的是「市场处于 未知 / 今日无推荐」——最后快照其实是 09-24。用户要在日历里选历史
 日期回看，所以每个 loader 都必须能接受 `trade_date`。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -100,7 +101,8 @@ def load_top_ladder(trade_date: date | None = None, limit: int = 10) -> list[dic
            FROM derived_bar v JOIN stock_basic s ON s.code = v.code
            WHERE v.date = %s AND v.is_limit_up
            ORDER BY v.cont_days DESC, v.code LIMIT %s""",
-        (trade_date, limit))
+        (trade_date, limit),
+    )
     return df.to_dict("records")
 
 
@@ -113,10 +115,8 @@ def load_signal_counts(trade_date: date | None = None) -> dict:
         return int(df.iloc[0]["n"]) if not df.empty else 0
 
     return {
-        "day": _one("SELECT count(*) AS n FROM signal WHERE confirm_date = %s",
-                    (trade_date,)),
+        "day": _one("SELECT count(*) AS n FROM signal WHERE confirm_date = %s", (trade_date,)),
         "total": _one("SELECT count(*) AS n FROM signal", ()),
-        "ladder_day": _one("SELECT count(*) AS n FROM ladder_day WHERE date = %s",
-                           (trade_date,)),
+        "ladder_day": _one("SELECT count(*) AS n FROM ladder_day WHERE date = %s", (trade_date,)),
         "ladder_total": _one("SELECT count(*) AS n FROM ladder_day", ()),
     }

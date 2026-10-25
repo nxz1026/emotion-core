@@ -36,7 +36,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from emotion_core.domain.bar import DerivedBar
@@ -58,21 +58,26 @@ SELECT code, date, is_limit_up, is_limit_down, is_one_word, is_exchange,
 FROM derived_bar WHERE date = %s AND code = %s
 """
 
-_OPEN_SQL = ("SELECT open, low, pre_close, close"
-             " FROM daily_bar WHERE date = %s AND code = %s")
+_OPEN_SQL = "SELECT open, low, pre_close, close FROM daily_bar WHERE date = %s AND code = %s"
 
-_POSITION_SQL = ("SELECT code, entry_date FROM position"
-                 " WHERE status = 'OPEN' ORDER BY entry_date")
+_POSITION_SQL = "SELECT code, entry_date FROM position WHERE status = 'OPEN' ORDER BY entry_date"
 
 # SELL 建议不参与 checklist 判定（lkl 的 SELL 行 checklist 为空）：六项 UNKNOWN。
 # Checklist.passed（滤 None 后 all）空真——只表示「无否决条件」，不代表卖出被核验过。
-_NO_CHECKLIST = Checklist(c1_uniqueness=None, c2_exchange=None, c3_elimination=None,
-                          c4_min_days=None, c5_strength_diverge=None, w1_crowding=None)
+_NO_CHECKLIST = Checklist(
+    c1_uniqueness=None,
+    c2_exchange=None,
+    c3_elimination=None,
+    c4_min_days=None,
+    c5_strength_diverge=None,
+    w1_crowding=None,
+)
 
 
 @dataclass(frozen=True)
 class Holding:
     """持仓最小投影：exit 判定只读 code / entry_date。"""
+
     code: str
     entry_date: date
 
@@ -80,6 +85,7 @@ class Holding:
 @dataclass(frozen=True)
 class SellSignal(Signal):
     """SELL 信号 = domain.Signal + 卖出契约三列（reason / buy_window / exec_hint）。"""
+
     reason: str = ""
     buy_window: str = ""
     exec_hint: str = EXEC_CLOSE_ALL
@@ -91,11 +97,18 @@ def _derived(trade_date: date, code: str) -> DerivedBar | None:
         r = conn.execute(_DERIVED_SQL, (trade_date, code)).fetchone()
     if r is None:
         return None
-    return DerivedBar(code=r[0], date=r[1], is_limit_up=bool(r[2]),
-                      is_limit_down=bool(r[3]), is_one_word=bool(r[4]),
-                      is_exchange=bool(r[5]), is_bomb=bool(r[6]),
-                      touched_limit=bool(r[7]), cont_days=int(r[8]),
-                      amplitude=None if r[9] is None else float(r[9]))
+    return DerivedBar(
+        code=r[0],
+        date=r[1],
+        is_limit_up=bool(r[2]),
+        is_limit_down=bool(r[3]),
+        is_one_word=bool(r[4]),
+        is_exchange=bool(r[5]),
+        is_bomb=bool(r[6]),
+        touched_limit=bool(r[7]),
+        cont_days=int(r[8]),
+        amplitude=None if r[9] is None else float(r[9]),
+    )
 
 
 def _open_bar(trade_date: date, code: str) -> tuple[float, float, float | None, float] | None:
@@ -104,8 +117,7 @@ def _open_bar(trade_date: date, code: str) -> tuple[float, float, float | None, 
         r = conn.execute(_OPEN_SQL, (trade_date, code)).fetchone()
     if r is None:
         return None
-    return (float(r[0]), float(r[1]),
-            None if r[2] is None else float(r[2]), float(r[3]))
+    return (float(r[0]), float(r[1]), None if r[2] is None else float(r[2]), float(r[3]))
 
 
 def _open_locked_limit_down(trade_date: date, code: str) -> bool:
@@ -134,10 +146,16 @@ def _open_positions() -> list[Holding]:
 
 def _sell_signal(code: str, when: date, reason: str, buy_window: str) -> SellSignal:
     """构造 SELL 信号：exec_hint 恒 CLOSE_ALL（契约 v2），source 恒 live。"""
-    return SellSignal(code=code, date=when, action=Action.SELL,
-                      checklist=_NO_CHECKLIST, source=SignalSource.LIVE,
-                      reason=reason, buy_window=buy_window,
-                      exec_hint=EXEC_CLOSE_ALL)
+    return SellSignal(
+        code=code,
+        date=when,
+        action=Action.SELL,
+        checklist=_NO_CHECKLIST,
+        source=SignalSource.LIVE,
+        reason=reason,
+        buy_window=buy_window,
+        exec_hint=EXEC_CLOSE_ALL,
+    )
 
 
 def held_days(entry_date: date, trade_date: date) -> int:
@@ -167,15 +185,18 @@ def _sell(pos: Holding, trade_date: date) -> SellSignal | None:
         return None
     if n >= FORCE_AFTER_DAYS:
         return _sell_signal(
-            pos.code, trade_date,
-            f"强制了结（口径B：原定建仓后第{SELL_AFTER_DAYS}个交易日开盘卖，"
-            f"已持有{n}个交易日）", "")
+            pos.code,
+            trade_date,
+            f"强制了结（口径B：原定建仓后第{SELL_AFTER_DAYS}个交易日开盘卖，已持有{n}个交易日）",
+            "",
+        )
     if _open_locked_limit_down(trade_date, pos.code):
-        return None          # 开盘跌停封死，卖不掉 → 顺延到下一交易日（届时强制了结）
+        return None  # 开盘跌停封死，卖不掉 → 顺延到下一交易日（届时强制了结）
     day = _derived(trade_date, pos.code)
     hit = "开盘卖出" if day is None or not day.is_limit_up else "开盘卖出（昨日封板也照卖）"
-    return _sell_signal(pos.code, trade_date,
-                        f"T+2 {hit}（口径B：隔夜 alpha 收敛，不持有到断板）", "")
+    return _sell_signal(
+        pos.code, trade_date, f"T+2 {hit}（口径B：隔夜 alpha 收敛，不持有到断板）", ""
+    )
 
 
 def suggestions(trade_date: date) -> list[Signal]:

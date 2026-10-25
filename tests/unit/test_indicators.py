@@ -1,4 +1,5 @@
 """indicators.py 判据计算测试。"""
+
 from __future__ import annotations
 
 from datetime import date

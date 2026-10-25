@@ -355,10 +355,13 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
             continue
         # R67-3 第二层硬闸门：当日停牌/无行情的票，即使 LLM 给 BUY/WATCH 也不落库。
         if not _has_tradable_bar(trade_date, code):
-            log.warning("策略信号丢弃（当日无行情）：%s/%s action=%s",
-                        skill.name, code, parsed.get("action"))
-            skipped.append({"strategy": skill.name, "code": code,
-                            "reason": "no_bar_today"})
+            log.warning(
+                "策略信号丢弃（当日无行情）：%s/%s action=%s",
+                skill.name,
+                code,
+                parsed.get("action"),
+            )
+            skipped.append({"strategy": skill.name, "code": code, "reason": "no_bar_today"})
             continue
         items.append(_item(skill, code, parsed, reply, prompt_hash))
 
@@ -407,11 +410,14 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
                 continue  # 首轮 skipped 保留
             # R67-3 第二层硬闸门（补跑路径同主循环：显式 --codes 名单不过第一层）。
             if not _has_tradable_bar(trade_date, code):
-                log.warning("策略信号丢弃（当日无行情）：%s/%s action=%s",
-                            skill.name, code, parsed.get("action"))
+                log.warning(
+                    "策略信号丢弃（当日无行情）：%s/%s action=%s",
+                    skill.name,
+                    code,
+                    parsed.get("action"),
+                )
                 _drop_skipped(skipped, skill.name, code)  # 先移除首轮失败记录
-                skipped.append({"strategy": skill.name, "code": code,
-                                "reason": "no_bar_today"})
+                skipped.append({"strategy": skill.name, "code": code, "reason": "no_bar_today"})
                 continue
             items.append(_item(skill, code, parsed, reply, prompt_hash))
             _drop_skipped(skipped, skill.name, code)

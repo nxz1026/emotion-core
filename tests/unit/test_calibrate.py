@@ -1,8 +1,8 @@
 """calibrate 周度校准提案测试。"""
+
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -35,13 +35,15 @@ class TestRollingQuality:
 
 class TestThresholdSensitivity:
     def test_with_data(self, monkeypatch):
-        df = pd.DataFrame({
-            "bomb_rate": [0.3, 0.4],
-            "bomb_threshold": [0.35, 0.45],
-            "top_amplitude": [5.0, 6.0],
-            "limit_up_count": [50, 80],
-            "reason": ["正常", "无候选放宽"],
-        })
+        df = pd.DataFrame(
+            {
+                "bomb_rate": [0.3, 0.4],
+                "bomb_threshold": [0.35, 0.45],
+                "top_amplitude": [5.0, 6.0],
+                "limit_up_count": [50, 80],
+                "reason": ["正常", "无候选放宽"],
+            }
+        )
         monkeypatch.setattr(calibrate, "query_df", lambda sql: df)
         result = calibrate._threshold_sensitivity()
         assert "自适应炸板阈值带" in result
@@ -55,15 +57,17 @@ class TestOutcomeSummary:
         assert "前向5日齐的信号还没有" in result
 
     def test_with_data(self, monkeypatch):
-        df = pd.DataFrame({
-            "action": ["BUY", "BUY", "WATCH"],
-            "code": ["c1", "c2", "c3"],
-            "t1_gap": [0.01, 0.02, 0.0],
-            "t1_promote": [0.5, 0.7, 0.3],
-            "t5_close_ret": [0.03, 0.05, 0.01],
-            "max_up5": [0.05, 0.08, 0.02],
-            "max_dd5": [0.01, 0.02, 0.03],
-        })
+        df = pd.DataFrame(
+            {
+                "action": ["BUY", "BUY", "WATCH"],
+                "code": ["c1", "c2", "c3"],
+                "t1_gap": [0.01, 0.02, 0.0],
+                "t1_promote": [0.5, 0.7, 0.3],
+                "t5_close_ret": [0.03, 0.05, 0.01],
+                "max_up5": [0.05, 0.08, 0.02],
+                "max_dd5": [0.01, 0.02, 0.03],
+            }
+        )
         monkeypatch.setattr(calibrate, "query_df", lambda sql: df)
         result = calibrate._outcome_summary()
         assert "BUY" in result
@@ -73,26 +77,26 @@ class TestProposals:
     def test_stable(self, monkeypatch):
         full = pd.DataFrame({"t1_promote": [0.6] * 20})
         recent = pd.DataFrame({"t1_promote": [0.55] * 10})
-        monkeypatch.setattr(calibrate, "query_df", lambda sql: pd.DataFrame({
-            "lo": [0.3], "hi": [0.5]
-        }))
+        monkeypatch.setattr(
+            calibrate, "query_df", lambda sql: pd.DataFrame({"lo": [0.3], "hi": [0.5]})
+        )
         result = calibrate._proposals(full, recent, 60)
         assert any("无参数触发异常" in p for p in result)
 
     def test_decline_detected(self, monkeypatch):
         full = pd.DataFrame({"t1_promote": [0.7] * 20})
         recent = pd.DataFrame({"t1_promote": [0.4] * 10})
-        monkeypatch.setattr(calibrate, "query_df", lambda sql: pd.DataFrame({
-            "lo": [0.3], "hi": [0.5]
-        }))
+        monkeypatch.setattr(
+            calibrate, "query_df", lambda sql: pd.DataFrame({"lo": [0.3], "hi": [0.5]})
+        )
         result = calibrate._proposals(full, recent, 60)
         assert any("显著低于" in p for p in result)
 
     def test_threshold_breach(self, monkeypatch):
         full = pd.DataFrame({"t1_promote": [0.6] * 20})
         recent = pd.DataFrame({"t1_promote": [0.55] * 10})
-        monkeypatch.setattr(calibrate, "query_df", lambda sql: pd.DataFrame({
-            "lo": [0.1], "hi": [0.6]
-        }))
+        monkeypatch.setattr(
+            calibrate, "query_df", lambda sql: pd.DataFrame({"lo": [0.1], "hi": [0.6]})
+        )
         result = calibrate._proposals(full, recent, 60)
         assert any("越出" in p for p in result)

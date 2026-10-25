@@ -37,6 +37,7 @@ SQL 文本与参数顺序全部照搬；只读检查，不修任何东西。
    `doctor.run()` 里「日线双源」那一行**永远显示通过**——这不是「照搬」，
    是「把一个不生效的检查一起搬了过来」。见该函数 docstring。
 """
+
 from __future__ import annotations
 
 import logging
@@ -64,31 +65,32 @@ def _trade_dir() -> Path:
 
 def _check_db() -> tuple[bool, str]:
     try:
-        df = query_df("SELECT count(*) n FROM information_schema.tables"
-                      " WHERE table_schema='public'")
+        df = query_df(
+            "SELECT count(*) n FROM information_schema.tables WHERE table_schema='public'"
+        )
         n = int(df["n"].iloc[0])
         return (n >= 10, f"public 下 {n} 张表（≥10 为就绪）")
-    except Exception as exc:                     # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         return (False, f"连接失败：{exc}")
 
 
 def _check_calendar() -> tuple[bool, str]:
     try:
-        df = query_df("SELECT min(date) a, max(date) b,"
-                      " count(distinct date) n FROM daily_bar")
+        df = query_df("SELECT min(date) a, max(date) b, count(distinct date) n FROM daily_bar")
         r = df.iloc[0]
         if r["n"] == 0:
             return (False, "daily_bar 空——先跑 lkl fetch backfill")
         return (True, f"{r['a']} ~ {r['b']} 共 {int(r['n'])} 个交易日")
-    except Exception as exc:                     # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         return (False, f"查询失败：{exc}")
 
 
 def _check_tz() -> tuple[bool, str]:
     import datetime as dt
     from zoneinfo import ZoneInfo
+
     now = dt.datetime.now(ZoneInfo("Asia/Shanghai"))
-    utc_date_diff = now.date() != dt.datetime.now(dt.timezone.utc).date()
+    utc_date_diff = now.date() != dt.datetime.now(dt.UTC).date()
     note = f"Asia/Shanghai 当前 {now:%Y-%m-%d %H:%M}（与 UTC 日期差={utc_date_diff}）"
     return (True, note)
 
@@ -107,7 +109,7 @@ def _check_trade_dir() -> tuple[bool, str]:
         else:
             extra = "；⛔ HALTED 停机中" if halt.halted() else ""
         return (True, f"{p} 可写{extra}")
-    except Exception as exc:                     # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         return (False, f"{p} 不可写：{exc}")
 
 
@@ -153,9 +155,10 @@ def _check_provider_consistency(
             "pytdx": get_provider_fn("pytdx"),
             "sina": get_provider_fn("sina"),
         }
-        sample = query_df("SELECT code, max(date) AS date FROM daily_bar GROUP BY code"
-                          " ORDER BY code LIMIT %s",
-                          (_cfg("INGEST_DOCTOR_SAMPLE", 5),))
+        sample = query_df(
+            "SELECT code, max(date) AS date FROM daily_bar GROUP BY code ORDER BY code LIMIT %s",
+            (_cfg("INGEST_DOCTOR_SAMPLE", 5),),
+        )
         if sample.empty:
             return (True, "无日线样本，跳过备源体检")
         alerts, checked = [], 0
@@ -185,8 +188,11 @@ def _check_provider_consistency(
         if alerts:
             head = "、".join(alerts[:5])
             more = f"…（共 {len(alerts)} 组）" if len(alerts) > 5 else ""
-            return (False, f"抽样 {len(sample)} 只，比较 {checked} 组，"
-                           f"{len(alerts)} 组偏差 >0.5%{more}：{head}")
+            return (
+                False,
+                f"抽样 {len(sample)} 只，比较 {checked} 组，"
+                f"{len(alerts)} 组偏差 >0.5%{more}：{head}",
+            )
         return (True, f"抽样 {len(sample)} 只，比较 {checked} 组，告警 0 组")
     except Exception as exc:  # noqa: BLE001
         log.warning("日线双源体检跳过：%s", exc)

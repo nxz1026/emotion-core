@@ -1,11 +1,10 @@
 """services/gaps.py 单元测试：验证动态缺口扫描器的每个检查器。"""
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
@@ -32,15 +31,18 @@ class TestGapsScanner:
     def test_scan_gaps_no_duplicates(self):
         result = gaps_mod.scan_gaps()
         items = [g["item"] for g in result]
-        assert len(items) == len(set(items)), f"重复缺口: {[x for x in items if items.count(x) > 1]}"
+        assert len(items) == len(set(items)), (
+            f"重复缺口: {[x for x in items if items.count(x) > 1]}"
+        )
 
     def test_scan_gaps_c7_is_known_gap(self):
         """C7 北交所未过滤应该是已知缺口之一（market_service 不过滤 bj）。"""
         result = gaps_mod.scan_gaps()
         items = [g["item"] for g in result]
         # C7 可能以不同措辞出现
-        assert any("C7" in item or "北交所" in item or "bj" in item.lower() for item in items), \
+        assert any("C7" in item or "北交所" in item or "bj" in item.lower() for item in items), (
             f"未找到 C7 相关缺口，当前缺口: {items}"
+        )
 
     def test_scan_gaps_summary(self):
         result = gaps_mod.scan_gaps_summary()
@@ -93,4 +95,6 @@ class TestC7BjFilter:
         result = gaps_mod._check_c7_bj_filter()
         # 这个缺口应该存在（market_service 不过滤 bj）
         assert result is not None, "C7 bj 过滤缺口应存在但检查器返回 None"
-        assert "C7" in result["item"] or "北交所" in result["item"] or "bj" in result["item"].lower()
+        assert (
+            "C7" in result["item"] or "北交所" in result["item"] or "bj" in result["item"].lower()
+        )

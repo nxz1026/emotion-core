@@ -1,4 +1,5 @@
 """emotion-core 数据源 providers。"""
+
 from emotion_core.data.providers.base import (
     BAR_COLS,
     DailyBarProvider,

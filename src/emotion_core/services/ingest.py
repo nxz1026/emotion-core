@@ -20,6 +20,7 @@
 
 源实测记录（本机海外 IP，2026-08-31 / 2026-09-24）逐字保留在注释里，勿改。
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,25 +55,37 @@ def _cfg(name: str, default):
 _INGEST_FALLBACK_CHAIN: list[str] = _cfg("INGEST_FALLBACK_CHAIN", [])
 _POOL_RECENT_DAYS: int = _cfg("POOL_RECENT_DAYS", 30)
 _UPSERT_BATCH: int = _cfg("UPSERT_BATCH", 1000)
-_FETCH_RETRY: int = _cfg("FETCH_RETRY", 3)    # 单次拉取失败重试次数
+_FETCH_RETRY: int = _cfg("FETCH_RETRY", 3)  # 单次拉取失败重试次数
 _TIME_SLEEP: float = _cfg("TIME_SLEEP", 0.5)  # 抓取调用间隔（秒）
 
 
-BAR_COLS = ["code", "date", "open", "high", "low", "close",
-            "pre_close", "volume", "amount", "turnover_rate"]
+BAR_COLS = [
+    "code",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "volume",
+    "amount",
+    "turnover_rate",
+]
+
 
 def _provider_registry() -> dict:
     """惰性构建日线 Provider 注册表，避免默认路径新增导入副作用。"""
     from emotion_core.data.providers.eastmoney import PROVIDER as eastmoney
     from emotion_core.data.providers.pytdx_provider import PROVIDER as pytdx
     from emotion_core.data.providers.sina import PROVIDER as sina
+
     return {p.name: p for p in (eastmoney, pytdx, sina)}
 
 
-def _fallback_rows(codes: list[str], start: date, end: date,
-                   primary: set[str]) -> list[tuple]:
+def _fallback_rows(codes: list[str], start: date, end: date, primary: set[str]) -> list[tuple]:
     """按配置链补齐主源缺口；失败或不合格 Provider 只记录 warning。"""
     from emotion_core.data.providers.base import ProviderError, valid_frame
+
     rows: list[tuple] = []
     for name in _INGEST_FALLBACK_CHAIN:
         provider = _provider_registry().get(name)
@@ -102,8 +115,10 @@ def _daily_rows_from_em(frame: pd.DataFrame, trade_date: date) -> list[tuple]:
         out[col] = pd.to_numeric(out[col], errors="coerce")
     out = out.dropna(subset=["close", "pre_close"])
     out["date"] = trade_date
-    return [tuple(getattr(r, col) for col in BAR_COLS)
-            for r in out[BAR_COLS].itertuples(index=False)]
+    return [
+        tuple(getattr(r, col) for col in BAR_COLS) for r in out[BAR_COLS].itertuples(index=False)
+    ]
+
 
 # EM 行情列表 / 新浪回退源 的常量与取数实现（`_EM_CLIST`、`_EM_FS_ALL_A`、
 # `_SPOT_MAP`、`_SINA_CLIST`、`_SINA_TO_EM`、`_SINA_UNIT_SCALE`，以及
@@ -136,37 +151,45 @@ def _em_data_date_em() -> date:
     那只票的时间戳，该票长期停牌则整条 daily 链天天静默 SKIP；现拉一页
     100 只取 f124 众数日期，单票停牌不再影响守卫。
     """
-    params = {"pn": 1, "pz": 100, "po": 1, "np": 1, "fltt": 2, "invt": 2,
-              "fid": "f12", "fs": _EM_FS_ALL_A, "fields": "f12,f124"}
-    diff = (retry_fetch(fetch_json, _EM_CLIST, params).get("data")
-            or {}).get("diff") or []
+    params = {
+        "pn": 1,
+        "pz": 100,
+        "po": 1,
+        "np": 1,
+        "fltt": 2,
+        "invt": 2,
+        "fid": "f12",
+        "fs": _EM_FS_ALL_A,
+        "fields": "f12,f124",
+    }
+    diff = (retry_fetch(fetch_json, _EM_CLIST, params).get("data") or {}).get("diff") or []
     if not diff:
         raise RuntimeError("EM clist 守卫请求返回空")
-    dates = [datetime.fromtimestamp(int(d["f124"]),
-                                    timezone(timedelta(hours=8))).date()
-             for d in diff if d.get("f124")]
+    dates = [
+        datetime.fromtimestamp(int(d["f124"]), timezone(timedelta(hours=8))).date()
+        for d in diff
+        if d.get("f124")
+    ]
     if not dates:
         raise RuntimeError("EM clist 守卫请求 f124 全空")
     # 众数：抗单票停牌。P3（三轮审计）：max(set,...) 在并列时按 set 迭代
     # 序取值——结果不稳定。并列（多日期同票数）时取最新并告警。
     from collections import Counter
+
     cnt = Counter(dates)
     top_n = max(cnt.values())
     winners = sorted(d for d, c in cnt.items() if c == top_n)
     if len(winners) > 1:
-        log.warning("EM 日期计数并列 %s（数据不一致），取最新 %s",
-                    winners, winners[-1])
+        log.warning("EM 日期计数并列 %s（数据不一致），取最新 %s", winners, winners[-1])
     return winners[-1]
-
-
-
 
 
 _UPSERT_ALLOWED_TABLES = {"daily_bar", "limit_pool_em", "hot_rank"}
 
 
-def _upsert_rows(table: str, columns: Sequence[str], rows: list[tuple],
-                 conflict_cols: Sequence[str], conn=None) -> int:
+def _upsert_rows(
+    table: str, columns: Sequence[str], rows: list[tuple], conflict_cols: Sequence[str], conn=None
+) -> int:
     """通用幂等 upsert，返回写入行数（复刻 lkl utils/db.upsert_rows 写语义）。
 
     W3：可传入 transaction() 的共享连接，与 DELETE 同事务（防半新半旧）。
@@ -177,28 +200,31 @@ def _upsert_rows(table: str, columns: Sequence[str], rows: list[tuple],
         return 0
     # 行宽校验防错位静默写脏数据
     if len(rows[0]) != len(columns):
-        raise ValueError(f"upsert {table}：行宽 {len(rows[0])} != 列数 "
-                         f"{len(columns)}")
+        raise ValueError(f"upsert {table}：行宽 {len(rows[0])} != 列数 {len(columns)}")
     if table == "daily_bar":
         # 2026-10-17：日线多一道写库前自检（形状 / 顺延 / 整批自洽）。
         # 放在这里而不是各调用方，是因为本函数是 daily_bar 在 services 侧的
         # 唯一出口——快照、备源、逐股回填三条路都从这走。见 data/bar_guard.py。
         from emotion_core.data.bar_guard import check_bars
+
         check_bars(rows)
     updates = [c for c in columns if c not in conflict_cols]
     set_clause = ", ".join(f"{c}=EXCLUDED.{c}" for c in updates)
     placeholders = ", ".join(["%s"] * len(columns))
-    sql = (f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders}) "
-           f"ON CONFLICT ({', '.join(conflict_cols)}) "
-           + (f"DO UPDATE SET {set_clause}" if set_clause else "DO NOTHING"))
+    sql = (
+        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT ({', '.join(conflict_cols)}) "
+        + (f"DO UPDATE SET {set_clause}" if set_clause else "DO NOTHING")
+    )
     # 统一消毒：NaN / ±inf → NULL（PG numeric 可存 NaN/Inf，会击穿下游 ::bigint 转换）
-    clean = [tuple(None if isinstance(v, float) and not math.isfinite(v) else v
-                   for v in r) for r in rows]
+    clean = [
+        tuple(None if isinstance(v, float) and not math.isfinite(v) else v for v in r) for r in rows
+    ]
 
     def _write(c):
         with c.cursor() as cur:
             for i in range(0, len(clean), _UPSERT_BATCH):
-                cur.executemany(sql, clean[i:i + _UPSERT_BATCH])
+                cur.executemany(sql, clean[i : i + _UPSERT_BATCH])
 
     if conn is not None:
         _write(conn)
@@ -219,19 +245,18 @@ def _backfill_one(code: str, ext_start: date, end: date) -> tuple[str, int, str]
     try:
         rows, earliest = _hist_rows(code, ext_start, end)
         if earliest is not None and earliest > ext_start:
-            fb = query_df(
-                "SELECT first_bar_date fb FROM stock_basic WHERE code = %s",
-                (code,))["fb"]
-            listed_before = (not fb.empty and pd.notna(fb.iloc[0])
-                             and fb.iloc[0] < ext_start)
+            fb = query_df("SELECT first_bar_date fb FROM stock_basic WHERE code = %s", (code,))[
+                "fb"
+            ]
+            listed_before = not fb.empty and pd.notna(fb.iloc[0]) and fb.iloc[0] < ext_start
             if listed_before:
                 return code, 0, f"partial:{earliest.isoformat()}"
         n = _upsert_rows("daily_bar", BAR_COLS, rows, ["code", "date"])
     except NoDataError:
-        _mark_done("backfill_daily", code)      # 明确无数据：永久跳过
+        _mark_done("backfill_daily", code)  # 明确无数据：永久跳过
         return code, 0, "nodata"
     except Exception as exc:  # noqa: BLE001
-        return code, 0, str(exc)[:80]           # 其余一律可重试
+        return code, 0, str(exc)[:80]  # 其余一律可重试
     _mark_done("backfill_daily", code)
     return code, n, ""
 
@@ -253,16 +278,20 @@ def backfill_daily_bars(start: date, end: date, workers: int = 4) -> int:
                 failed.append(code)
                 log.warning("拉取失败 %s: %s", code, err)
             if i % 200 == 0:
-                log.info("进度 %d/%d 行数=%d 失败=%d 无数据=%d",
-                         i, len(pending), total, len(failed), nodata)
-    log.info("回填完成：行数=%d 失败=%d 无数据=%d %s",
-             total, len(failed), nodata, failed[:20])
+                log.info(
+                    "进度 %d/%d 行数=%d 失败=%d 无数据=%d",
+                    i,
+                    len(pending),
+                    total,
+                    len(failed),
+                    nodata,
+                )
+    log.info("回填完成：行数=%d 失败=%d 无数据=%d %s", total, len(failed), nodata, failed[:20])
     # V1（二轮审计）+ P1-6（三轮修正条件反转）：全部待拉都异常
     # （failed==pending）且零行入库 = TDX 全挂 → 必须中断；
     # 全部明确无数据（nodata==pending）是正常退出，不抛。
     if pending and total == 0 and len(failed) == len(pending):
-        raise RuntimeError(
-            f"回填全军覆没：{len(pending)} 只待拉全部异常 0 行入库（疑似 TDX 全挂）")
+        raise RuntimeError(f"回填全军覆没：{len(pending)} 只待拉全部异常 0 行入库（疑似 TDX 全挂）")
     return total
 
 
@@ -280,21 +309,34 @@ def snapshot_daily(trade_date: date) -> int:
     if em_date != trade_date:
         raise ValueError(
             f"snapshot 守卫：EM 最新数据日期 {em_date} ≠ 传入 {trade_date}，"
-            "拒绝把陈旧行情写进目标日期（daily.sh 外补数请核对日期）")
+            "拒绝把陈旧行情写进目标日期（daily.sh 外补数请核对日期）"
+        )
     if not _INGEST_FALLBACK_CHAIN:
         raw = _em_clist(_EM_FS_ALL_A, [*_SPOT_MAP, "f124"])
         src_date = snapshot_data_date(raw)
         if src_date is not None and src_date != trade_date:
             raise ValueError(
-                f"snapshot 守卫：快照自带日期 {src_date} ≠ 传入 {trade_date}，"
-                "拒绝按请求日期盖章")
+                f"snapshot 守卫：快照自带日期 {src_date} ≠ 传入 {trade_date}，拒绝按请求日期盖章"
+            )
         df = raw.rename(columns=_SPOT_MAP)
         for col in set(_SPOT_MAP.values()) - {"code"}:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.dropna(subset=["close", "pre_close"])
-        rows = [(r.code, trade_date, r.open, r.high, r.low, r.close,
-                 r.pre_close, r.volume, r.amount, r.turnover_rate)
-                for r in df.itertuples(index=False)]
+        rows = [
+            (
+                r.code,
+                trade_date,
+                r.open,
+                r.high,
+                r.low,
+                r.close,
+                r.pre_close,
+                r.volume,
+                r.amount,
+                r.turnover_rate,
+            )
+            for r in df.itertuples(index=False)
+        ]
         n = _upsert_rows("daily_bar", BAR_COLS, rows, ["code", "date"])
         log.info("snapshot %s 入库 %d 行", trade_date, n)
         return n
@@ -303,8 +345,8 @@ def snapshot_daily(trade_date: date) -> int:
         src_date = snapshot_data_date(em)
         if src_date is not None and src_date != trade_date:
             raise ValueError(
-                f"snapshot 守卫：快照自带日期 {src_date} ≠ 传入 {trade_date}，"
-                "拒绝按请求日期盖章")
+                f"snapshot 守卫：快照自带日期 {src_date} ≠ 传入 {trade_date}，拒绝按请求日期盖章"
+            )
     except ValueError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -321,18 +363,49 @@ def snapshot_daily(trade_date: date) -> int:
     return n
 
 
-_POOL_COLS = ["date", "code", "pool_type", "name", "cont_days_em",
-              "bomb_times", "first_seal", "last_seal", "turnover_rate"]
+_POOL_COLS = [
+    "date",
+    "code",
+    "pool_type",
+    "name",
+    "cont_days_em",
+    "bomb_times",
+    "first_seal",
+    "last_seal",
+    "turnover_rate",
+]
 # 池函数 + 源列→目标列映射（各池字段名不同，缺列补 None）
 _POOLS = {
-    "ZT": (ak.stock_zt_pool_em, {"名称": "name", "连板数": "cont_days_em",
-                                 "炸板次数": "bomb_times", "首次封板时间": "first_seal",
-                                 "最后封板时间": "last_seal", "换手率": "turnover_rate"}),
-    "ZB": (ak.stock_zt_pool_zbgc_em, {"名称": "name", "炸板次数": "bomb_times",
-                                      "首次封板时间": "first_seal", "换手率": "turnover_rate"}),
-    "DT": (ak.stock_zt_pool_dtgc_em, {"名称": "name", "连续跌停": "cont_days_em",
-                                      "开板次数": "bomb_times", "最后封板时间": "last_seal",
-                                      "换手率": "turnover_rate"}),
+    "ZT": (
+        ak.stock_zt_pool_em,
+        {
+            "名称": "name",
+            "连板数": "cont_days_em",
+            "炸板次数": "bomb_times",
+            "首次封板时间": "first_seal",
+            "最后封板时间": "last_seal",
+            "换手率": "turnover_rate",
+        },
+    ),
+    "ZB": (
+        ak.stock_zt_pool_zbgc_em,
+        {
+            "名称": "name",
+            "炸板次数": "bomb_times",
+            "首次封板时间": "first_seal",
+            "换手率": "turnover_rate",
+        },
+    ),
+    "DT": (
+        ak.stock_zt_pool_dtgc_em,
+        {
+            "名称": "name",
+            "连续跌停": "cont_days_em",
+            "开板次数": "bomb_times",
+            "最后封板时间": "last_seal",
+            "换手率": "turnover_rate",
+        },
+    ),
 }
 
 
@@ -373,10 +446,16 @@ def fetch_limit_pool(trade_date: date) -> int:
     if len(dead) == len(_POOLS):
         raise RuntimeError(
             f"东财三池全部无数据({ds})：失败={sorted(fails)} 空={sorted(empties)}"
-            f"——放弃出报告，待重跑")
+            f"——放弃出报告，待重跑"
+        )
     if dead:
-        log.warning("池 %s 无数据（失败=%s 空=%s），仅 %d 行入库（部分对账）",
-                    sorted(dead), sorted(fails), sorted(empties), total)
+        log.warning(
+            "池 %s 无数据（失败=%s 空=%s），仅 %d 行入库（部分对账）",
+            sorted(dead),
+            sorted(fails),
+            sorted(empties),
+            total,
+        )
     return total
 
 
@@ -394,21 +473,32 @@ def _upsert_pool(df, trade_date: date, ptype: str, mapping: dict) -> int:
         if not code.isdigit() or code == "000000":
             bad += 1
             continue
-        rows.append((trade_date, code, ptype, str(_src(mapping, d, "name") or ""),
-                     _to_int(_src(mapping, d, "cont_days_em")),
-                     _to_int(_src(mapping, d, "bomb_times")),
-                     str(_src(mapping, d, "first_seal") or ""),
-                     str(_src(mapping, d, "last_seal") or ""),
-                     _to_float(_src(mapping, d, "turnover_rate"))))
+        rows.append(
+            (
+                trade_date,
+                code,
+                ptype,
+                str(_src(mapping, d, "name") or ""),
+                _to_int(_src(mapping, d, "cont_days_em")),
+                _to_int(_src(mapping, d, "bomb_times")),
+                str(_src(mapping, d, "first_seal") or ""),
+                str(_src(mapping, d, "last_seal") or ""),
+                _to_float(_src(mapping, d, "turnover_rate")),
+            )
+        )
     if bad:
         log.warning("pool %s %s：%d 行代码无效被丢弃", trade_date, ptype, bad)
     # P1-9：同日同池先删后插（单事务原子替换）——旧版纯 upsert，
     # 源端减少的票（炸板回封后移出 ZB）会永久留库成幽灵行。
     with transaction() as conn:
-        execute("DELETE FROM limit_pool_em WHERE date=%s AND pool_type=%s",
-                (trade_date, ptype), conn=conn)
-        n = _upsert_rows("limit_pool_em", _POOL_COLS, rows,
-                         ["date", "code", "pool_type"], conn=conn)
+        execute(
+            "DELETE FROM limit_pool_em WHERE date=%s AND pool_type=%s",
+            (trade_date, ptype),
+            conn=conn,
+        )
+        n = _upsert_rows(
+            "limit_pool_em", _POOL_COLS, rows, ["date", "code", "pool_type"], conn=conn
+        )
     return n
 
 
@@ -434,7 +524,9 @@ def verify_pre_close(trade_date: date) -> pd.DataFrame:
         "  SELECT close FROM daily_bar x"
         "  WHERE x.code = d.code AND x.date < d.date"
         "  ORDER BY x.date DESC LIMIT 1) p ON true "
-        "WHERE d.date = %s AND abs(d.pre_close - p.close) > 0.011", (trade_date,))
+        "WHERE d.date = %s AND abs(d.pre_close - p.close) > 0.011",
+        (trade_date,),
+    )
 
 
 def refresh_first_bar() -> int:
@@ -442,7 +534,8 @@ def refresh_first_bar() -> int:
     return execute(
         "UPDATE stock_basic s SET first_bar_date = f.mn FROM"
         " (SELECT code, min(date) mn FROM daily_bar GROUP BY code) f"
-        " WHERE f.code = s.code")
+        " WHERE f.code = s.code"
+    )
 
 
 def sync_range(start: date, end: date) -> list[date]:
@@ -457,6 +550,7 @@ def sync_range(start: date, end: date) -> list[date]:
     CLI 据此返回非 0，避免「静默地把空池当成功」。
     """
     from emotion_core.utils.dates import trading_days
+
     days = trading_days(start, end)[-_POOL_RECENT_DAYS:]
     log.info("池同步 %d 天（EM 池历史上限 %d 日）", len(days), _POOL_RECENT_DAYS)
     failed: list[date] = []
@@ -476,8 +570,13 @@ def sync_range(start: date, end: date) -> list[date]:
 _HOT_COLS = ["date", "code", "rank"]
 # akshare 封装在拉完排名后还要合并行情字段（本 IP 下返回非 JSON 崩），自建单请求绕开。
 _EM_RANK_URL = "https://emappdata.eastmoney.com/stockrank/getAllCurrentList"
-_HOT_PAYLOAD = {"appId": "appId01", "globalId": "786e4c21-70dc-435a-93bb-38",
-                "marketType": "", "pageNo": 1, "pageSize": 100}
+_HOT_PAYLOAD = {
+    "appId": "appId01",
+    "globalId": "786e4c21-70dc-435a-93bb-38",
+    "marketType": "",
+    "pageNo": 1,
+    "pageSize": 100,
+}
 
 
 def _hot_current() -> list[dict]:
@@ -497,9 +596,13 @@ def fetch_hot_snapshot(trade_date: date) -> int:
     if em_date != trade_date:
         raise ValueError(
             f"hot 守卫：EM 最新数据日期 {em_date} ≠ 传入 {trade_date}，"
-            "人气榜为实时榜单，拒绝写历史日期")
-    rows = [(trade_date, d["sc"][2:].zfill(6), int(d["rk"]))
-            for d in retry_fetch(_hot_current, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP) if len(d.get("sc", "")) >= 8]
+            "人气榜为实时榜单，拒绝写历史日期"
+        )
+    rows = [
+        (trade_date, d["sc"][2:].zfill(6), int(d["rk"]))
+        for d in retry_fetch(_hot_current, fetch_retry=_FETCH_RETRY, time_sleep=_TIME_SLEEP)
+        if len(d.get("sc", "")) >= 8
+    ]
     n = _upsert_rows("hot_rank", _HOT_COLS, rows, ["date", "code"])
     log.info("hot snapshot %s：%d 行", trade_date, n)
     return n
@@ -545,7 +648,8 @@ def hot_universe(lookback_start: date) -> list[str]:
         "SELECT DISTINCT code FROM derived_bar"
         " WHERE cont_days >= 2 AND date >= %s"
         " UNION SELECT DISTINCT code FROM signal ORDER BY 1",
-        (lookback_start,))
+        (lookback_start,),
+    )
     return list(df["code"])
 
 
@@ -559,9 +663,9 @@ def backfill_hot_rank(codes: list[str], sleep: float = 0.3) -> int:
             fails.append(code)
             log.warning("hot %s fail: %s", code, str(exc)[:60])
         if i % 50 == 0:
-            log.info("hot 回填 %d/%d 行数=%d 失败=%d", i, len(codes),
-                     total, len(fails))
+            log.info("hot 回填 %d/%d 行数=%d 失败=%d", i, len(codes), total, len(fails))
         time.sleep(sleep)
-    log.info("hot_rank 回填完成：%d 票 %d 行，失败 %d: %s",
-             len(codes), total, len(fails), fails[:20])
+    log.info(
+        "hot_rank 回填完成：%d 票 %d 行，失败 %d: %s", len(codes), total, len(fails), fails[:20]
+    )
     return total

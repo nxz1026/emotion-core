@@ -10,6 +10,7 @@ basic auth 由 nginx 转发层处理（/etc/nginx/.htpasswd），
 
 Trade API（/api/trade/）：LKL-Trade 决策/结果 HTTP 交换。
 """
+
 from __future__ import annotations
 
 import json
@@ -42,13 +43,14 @@ ROUTES = {
     "logic": "logic",
     "algorithm": "algorithm",
     "strategy": "strategy",
-    "stock": "stock",          # 个股诊断（输入代码 → 分析数据 + 直观建议）
+    "stock": "stock",  # 个股诊断（输入代码 → 分析数据 + 直观建议）
 }
 
 
 def _json_default(obj):
     """把 Decimal/date 等 psycopg 取值转成 JSON 友好的类型。"""
     from decimal import Decimal
+
     if isinstance(obj, Decimal):
         return float(obj)
     if isinstance(obj, (date, datetime)):
@@ -91,6 +93,7 @@ def _query_date(parsed):
 def _query_arg(parsed, key: str, default: str = "") -> str:
     """取查询参数（含上面的 UTF-8 还原）。"""
     from urllib.parse import parse_qs
+
     raw = parse_qs(parsed.query).get(key, [default])[0]
     return _recover_utf8(raw)
 
@@ -165,6 +168,7 @@ def _opt_pct(parsed, key: str, lo: float, hi: float) -> float | None:
 def _opt_user(parsed, key: str = "user") -> str:
     """可选的用户标识；缺省 / 空 → ``"default"``。"""
     from emotion_core.services.cpt_client import DEFAULT_USER
+
     raw = _query_arg(parsed, key).strip()
     return raw if raw else DEFAULT_USER
 
@@ -183,12 +187,13 @@ def holding_payload(parsed) -> tuple[dict, int]:
         sizing_params = None
         rp = _opt_pct(parsed, "risk_pct", *sizing_mod.SIZING_BOUNDS["risk_pct"])
         lp = _opt_pct(parsed, "liq_pct", *sizing_mod.SIZING_BOUNDS["liq_pct"])
-        mp = _opt_pct(parsed, "max_position_pct",
-                      *sizing_mod.SIZING_BOUNDS["max_position_pct"])
+        mp = _opt_pct(parsed, "max_position_pct", *sizing_mod.SIZING_BOUNDS["max_position_pct"])
         if rp is not None or lp is not None or mp is not None:
-            sizing_params = {k: v for k, v in
-                             [("risk_pct", rp), ("liq_pct", lp),
-                              ("max_position_pct", mp)] if v is not None}
+            sizing_params = {
+                k: v
+                for k, v in [("risk_pct", rp), ("liq_pct", lp), ("max_position_pct", mp)]
+                if v is not None
+            }
         ensure_raw = _query_arg(parsed, "ensure_factors").strip().lower()
         dec = holding_service.decide(
             _query_arg(parsed, "code"),
@@ -220,18 +225,23 @@ def holdings_payload(parsed) -> tuple[dict, int]:
         sizing_params = None
         rp = _opt_pct(parsed, "risk_pct", *sizing_mod.SIZING_BOUNDS["risk_pct"])
         lp = _opt_pct(parsed, "liq_pct", *sizing_mod.SIZING_BOUNDS["liq_pct"])
-        mp = _opt_pct(parsed, "max_position_pct",
-                      *sizing_mod.SIZING_BOUNDS["max_position_pct"])
+        mp = _opt_pct(parsed, "max_position_pct", *sizing_mod.SIZING_BOUNDS["max_position_pct"])
         if rp is not None or lp is not None or mp is not None:
-            sizing_params = {k: v for k, v in
-                             [("risk_pct", rp), ("liq_pct", lp),
-                              ("max_position_pct", mp)] if v is not None}
-        items = [holding_service.to_payload(d) for d in holding_service.analyze_holdings(
-            capital=_opt_float(parsed, "capital"),
-            as_of=_opt_date(parsed, "as_of"),
-            use_cpt=_query_flag(parsed, "cpt"),
-            sizing_params=sizing_params,
-            cpt_user=_opt_user(parsed))]
+            sizing_params = {
+                k: v
+                for k, v in [("risk_pct", rp), ("liq_pct", lp), ("max_position_pct", mp)]
+                if v is not None
+            }
+        items = [
+            holding_service.to_payload(d)
+            for d in holding_service.analyze_holdings(
+                capital=_opt_float(parsed, "capital"),
+                as_of=_opt_date(parsed, "as_of"),
+                use_cpt=_query_flag(parsed, "cpt"),
+                sizing_params=sizing_params,
+                cpt_user=_opt_user(parsed),
+            )
+        ]
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}, 400
     return {
@@ -249,13 +259,13 @@ def watchlist_payload(parsed) -> tuple[dict, int]:
     恒只读；CPT 不可达 → `ok=True, items=[], cpt_available=False`。
     """
     from emotion_core.services import watchlist_service
+
     try:
         items, available = watchlist_service.list_codes(user=_opt_user(parsed))
     except Exception as exc:
         log.exception("watchlist list failed")
         return {"ok": False, "error": str(exc)}, 500
-    return {"ok": True, "items": items, "cpt_available": available,
-            "count": len(items)}, 200
+    return {"ok": True, "items": items, "cpt_available": available, "count": len(items)}, 200
 
 
 def cpt_points_payload(parsed) -> tuple[dict, int]:
@@ -274,11 +284,10 @@ def cpt_points_payload(parsed) -> tuple[dict, int]:
         ensure_raw = _query_arg(parsed, "ensure_factors").strip().lower()
         ensure_factors = ensure_raw in ("1", "true")
         user = _opt_user(parsed)
-        timeout = (cpt_client.CPT_ENSURE_TIMEOUT if ensure_factors
-                   else cpt_client.CPT_TIMEOUT)
-        snap = cpt_client.fetch_snapshot(code, timeout=timeout,
-                                         ensure_factors=True if ensure_factors else None,
-                                         user=user)
+        timeout = cpt_client.CPT_ENSURE_TIMEOUT if ensure_factors else cpt_client.CPT_TIMEOUT
+        snap = cpt_client.fetch_snapshot(
+            code, timeout=timeout, ensure_factors=True if ensure_factors else None, user=user
+        )
         if snap is None:
             return {"ok": True, "cpt_available": False, "code": code}, 200
         recommendation = cpt_client.fetch_recommendation(code, user=user)
@@ -286,8 +295,7 @@ def cpt_points_payload(parsed) -> tuple[dict, int]:
             return {"ok": True, "cpt_available": True, "code": code}, 200
         price_ratio = cpt_client.price_ratio_of(recommendation)
         overlays = cpt_client.snapshot_overlays(snap)
-        lv = (levels_mod.structure_levels(overlays, price_ratio, close=None)
-              if overlays else None)
+        lv = levels_mod.structure_levels(overlays, price_ratio, close=None) if overlays else None
         advice = cpt_client.track_advice(code, user=user)
         return {
             "ok": True,
@@ -302,7 +310,9 @@ def cpt_points_payload(parsed) -> tuple[dict, int]:
                 "target_price": lv.target_price if lv else None,
                 "basis": lv.basis if lv else None,
                 "detail": lv.detail if lv else None,
-            } if lv else None,
+            }
+            if lv
+            else None,
             "action": recommendation.get("action"),
             "signal_type": recommendation.get("signal_type"),
             "divergence_status": recommendation.get("divergence_status"),
@@ -324,6 +334,7 @@ def _handle_watchlist_post(handler) -> tuple[dict, int] | None:
     body ≤4 KiB；JSON 解析失败 → 400。返回 None 表示不是 watchlist 路由。
     """
     from emotion_core.services import watchlist_service
+
     content_length = int(handler.headers.get("Content-Length", 0))
     raw = handler.rfile.read(content_length) if content_length > 0 else b"{}"
     if content_length > 4096:
@@ -345,8 +356,7 @@ def _handle_watchlist_post(handler) -> tuple[dict, int] | None:
     elif action == "restore":
         ok, msg = watchlist_service.restore(code, user=user)
     else:
-        return {"ok": False,
-                "error": f"不支持的 action={action!r}（add/remove/restore）"}, 400
+        return {"ok": False, "error": f"不支持的 action={action!r}（add/remove/restore）"}, 400
     return {"ok": ok, "message": msg}, 200 if ok else 409
 
 
@@ -468,6 +478,7 @@ def _load_negative_expectation() -> dict:
     会让人以为系统比实际更差——同样不能用。
     """
     from emotion_core.algorithms import caliber_b
+
     try:
         summary = caliber_b.summarize(caliber_b.evaluate(None))
     except Exception as exc:  # noqa: BLE001 — 页面不许因为度量失败而 500
@@ -479,8 +490,12 @@ def _load_negative_expectation() -> dict:
         return {"mean": None, "median": None, "n": 0, "hit_rate": None}
     # mean 是「每信号」（未成交算 0），median/hit_rate 用「成交后」——
     # 每信号的中位恒为 0（六成信号买不到），摆出来会读成「不赚不赔」。
-    return {"mean": base["mean"], "median": base.get("median_filled"),
-            "n": base["n"], "hit_rate": base.get("win_rate_filled")}
+    return {
+        "mean": base["mean"],
+        "median": base.get("median_filled"),
+        "n": base["n"],
+        "hit_rate": base.get("win_rate_filled"),
+    }
 
 
 def _explain_no_buy(phase: str, market: dict, signal_counts: dict) -> str:
@@ -491,14 +506,12 @@ def _explain_no_buy(phase: str, market: dict, signal_counts: dict) -> str:
     """
     total = signal_counts.get("total", 0)
     if total == 0:
-        return ("signal 表里还没有观察记录（可能刚建库，或这几天都没出现"
-                "唯一换手高标）。")
+        return "signal 表里还没有观察记录（可能刚建库，或这几天都没出现唯一换手高标）。"
 
     reasons = []
     # 阶段解释（W8′：退潮已解禁，不再说「收紧买入窗口」）
     phase_explain = {
-        "退潮": "市场处于下跌期（退潮）——这个相位实测是能做的，没出信号说明"
-                "当天没有符合条件的高标",
+        "退潮": "市场处于下跌期（退潮）——这个相位实测是能做的，没出信号说明当天没有符合条件的高标",
         "冰点": "市场处于低迷期（冰点），连板高度太低，不产观察标的",
         "高潮": "市场虽处狂热期（高潮），但当天的高标多半是一字板或换手不够",
         "发酵": "市场在上升期（发酵）初期，还没有走出来的唯一高标",
@@ -522,13 +535,13 @@ def _load_logic_data(trade_date=None) -> dict:
         market = loaders.load_market_snapshot(trade_date)
         ladder = loaders.load_ladder(trade_date)
         # 获取晋级率数据
-        promotion = loaders.load_promotion(trade_date) if hasattr(loaders, 'load_promotion') else []
+        promotion = loaders.load_promotion(trade_date) if hasattr(loaders, "load_promotion") else []
         # 获取题材数据
-        themes = loaders.load_top_themes(trade_date) if hasattr(loaders, 'load_top_themes') else []
+        themes = loaders.load_top_themes(trade_date) if hasattr(loaders, "load_top_themes") else []
         # 获取人气榜
-        hot_rank = loaders.load_hot_rank(trade_date) if hasattr(loaders, 'load_hot_rank') else []
+        hot_rank = loaders.load_hot_rank(trade_date) if hasattr(loaders, "load_hot_rank") else []
         # 获取近10日趋势
-        trend = loaders.load_market_trend() if hasattr(loaders, 'load_market_trend') else []
+        trend = loaders.load_market_trend() if hasattr(loaders, "load_market_trend") else []
     except Exception as e:
         market, ladder, promotion, themes, hot_rank, trend = {}, [], [], [], [], []
         log.error("加载数据失败: %s", e)
@@ -564,12 +577,17 @@ def _limit_price_formula() -> str:
     utils/price.py 的分整数式不同源（审核文档 §9 第 4 条 / S5）。现改为引用
     实现名 + 由 board_pct_milli 现算出的板块取值，改实现即改文案。
     """
-    pcts = sorted({price_util.board_pct_milli(c)
-                   for c in ("600000", "300001", "680001",
-                             "bj430001", "430001")})
-    return ("(pre_close_cents * (1000 + pct) + 500) // 1000"
-            "（分整数；pct = utils/price.board_pct_milli(code) ∈ "
-            f"{pcts}）")
+    pcts = sorted(
+        {
+            price_util.board_pct_milli(c)
+            for c in ("600000", "300001", "680001", "bj430001", "430001")
+        }
+    )
+    return (
+        "(pre_close_cents * (1000 + pct) + 500) // 1000"
+        "（分整数；pct = utils/price.board_pct_milli(code) ∈ "
+        f"{pcts}）"
+    )
 
 
 def _load_algorithm_data(trade_date=None) -> dict:
@@ -585,11 +603,9 @@ def _load_algorithm_data(trade_date=None) -> dict:
 
     formulas = {
         "涨停价": _limit_price_formula(),
-        "is_limit_up": ("close_cents == utils/price.limit_up_price_cents("
-                        "pre_close_cents, code)"),
+        "is_limit_up": ("close_cents == utils/price.limit_up_price_cents(pre_close_cents, code)"),
         "is_one_word": "low_cents >= limit_up_price_cents(pre_close_cents, code)",
-        "is_exchange": ("is_limit_up AND low_cents < "
-                        "limit_up_price_cents(pre_close_cents, code)"),
+        "is_exchange": ("is_limit_up AND low_cents < limit_up_price_cents(pre_close_cents, code)"),
         "cont_days": "连续涨停天数（停牌断档不打断）",
         "phase": "优先级: 退潮 > 高潮 > 发酵 > 冰点",
         "promote_nominal": "今日 cont_days >= 昨日+1 的只数 / 昨日该层只数",
@@ -610,6 +626,7 @@ def _load_algorithm_data(trade_date=None) -> dict:
     # 动态缺口：从代码事实扫描，取代 algorithm.html 里的硬编码列表
     try:
         from emotion_core.services.gaps import scan_gaps
+
         gaps = scan_gaps()
     except Exception as exc:
         log.warning("server: scan_gaps 失败 — %s", exc)
@@ -638,14 +655,16 @@ def render_dashboard(layer: str, **extra) -> str:
         "selected_date": selected,
         "banner": banner,
         "calendar": snapshot.calendar_ctx(selected, extra.get("month")),
-        "calendar_open": layer == "intuitive",   # 直观层默认展开日历
+        "calendar_open": layer == "intuitive",  # 直观层默认展开日历
         "date_query": snapshot.date_links(selected)["date_query"],
         "request_path": _request_path(extra.get("path"), layer),
         "dates_total": len(snapshot.available_dates()),
-        "dates_min": (snapshot.available_dates()[-1].isoformat()
-                      if snapshot.available_dates() else ""),
-        "dates_max": (snapshot.available_dates()[0].isoformat()
-                      if snapshot.available_dates() else ""),
+        "dates_min": (
+            snapshot.available_dates()[-1].isoformat() if snapshot.available_dates() else ""
+        ),
+        "dates_max": (
+            snapshot.available_dates()[0].isoformat() if snapshot.available_dates() else ""
+        ),
         "recent_dates": snapshot.recent_snapshots_ctx(selected),
     }
 
@@ -662,8 +681,10 @@ def render_dashboard(layer: str, **extra) -> str:
             "prefill_date": selected.isoformat() if selected else "",
         }
     elif layer == "stock":
-        data = {"prefill_code": extra.get("code", ""),
-                "prefill_date": selected.isoformat() if selected else ""}
+        data = {
+            "prefill_code": extra.get("code", ""),
+            "prefill_date": selected.isoformat() if selected else "",
+        }
     else:
         data = {}
 
@@ -697,7 +718,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 静态文件（nginx 代理后前缀被剥掉，所以路径是 /static/...）
         if parsed.path.startswith("/static/"):
-            relative = parsed.path[len("/static/"):]
+            relative = parsed.path[len("/static/") :]
             content, content_type = get_static(relative)
             if content:
                 self.send_response(200)
@@ -712,6 +733,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         # API
         if parsed.path == "/api/strategy":
             from urllib.parse import parse_qs
+
             q = parse_qs(parsed.query)
             date = q.get("date", [""])[0]
             self._send_json(strategy_view.to_api(date))
@@ -721,34 +743,50 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/dates":
             dates = snapshot.available_dates()
-            self._send_json({
-                "dates": [d.isoformat() for d in dates],
-                "latest": dates[0].isoformat() if dates else None,
-                "selected": (snapshot.resolve_date(_query_arg(parsed, "date")) or
-                             (dates[0] if dates else None)),
-            })
+            self._send_json(
+                {
+                    "dates": [d.isoformat() for d in dates],
+                    "latest": dates[0].isoformat() if dates else None,
+                    "selected": (
+                        snapshot.resolve_date(_query_arg(parsed, "date"))
+                        or (dates[0] if dates else None)
+                    ),
+                }
+            )
             return
         if parsed.path == "/api/alerts":
             # 未确认告警（门户「今日速览」用：只暴露条数与摘要，不做确认操作）
             from emotion_core.algorithms import alerts as alerts_mod
+
             items = alerts_mod.pending(30)
             attention = [a for a in items if a["level"] in ("WARN", "ERROR")]
-            self._send_json({
-                "pending": len(items),
-                "attention": len(attention),
-                "items": [{"id": a["id"], "level": a["level"], "source": a["source"],
-                           "detail": a["detail"], "created_at": a["created_at"]}
-                          for a in items[:5]],
-            })
+            self._send_json(
+                {
+                    "pending": len(items),
+                    "attention": len(attention),
+                    "items": [
+                        {
+                            "id": a["id"],
+                            "level": a["level"],
+                            "source": a["source"],
+                            "detail": a["detail"],
+                            "created_at": a["created_at"],
+                        }
+                        for a in items[:5]
+                    ],
+                }
+            )
             return
         if parsed.path == "/api/stock":
             from emotion_core.services import stock_service
+
             code = _query_arg(parsed, "code")
             payload = stock_service.analyze(code, _query_date(parsed))
             self._send_json(payload, 200 if payload.get("ok") else 404)
             return
         if parsed.path == "/api/stock/llm":
             from emotion_core.services import stock_service
+
             code = _query_arg(parsed, "code")
             self._send_json(stock_service.llm_for(code, _query_date(parsed)))
             return
@@ -797,8 +835,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             # A5：持仓卡片因此渲染出字面量 `undefined · undefined`），监控也看不出
             # 接口调用失败。兜底只保留给上面的 `/api/status`。
             log.warning("未识别的 API 路径，返回 404：%s", parsed.path)
-            self._send_json({"ok": False,
-                             "error": f"未知 API 路径：{parsed.path}"}, 404)
+            self._send_json({"ok": False, "error": f"未知 API 路径：{parsed.path}"}, 404)
             return
 
         # Dashboard 页面
@@ -807,7 +844,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == "/" or path == BASE_PATH or path == BASE_PATH + "/":
             layer = "intuitive"
         elif path.startswith(BASE_PATH + "/"):
-            layer = path[len(BASE_PATH):].strip("/") or "intuitive"
+            layer = path[len(BASE_PATH) :].strip("/") or "intuitive"
         elif path.startswith("/"):
             layer = path.strip("/")
         else:
@@ -815,10 +852,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if layer in ROUTES:
             try:
-                extra = {"code": _query_arg(parsed, "code"),
-                         "date": _query_arg(parsed, "date"),
-                         "month": _query_arg(parsed, "month"),
-                         "path": parsed.path}
+                extra = {
+                    "code": _query_arg(parsed, "code"),
+                    "date": _query_arg(parsed, "date"),
+                    "month": _query_arg(parsed, "month"),
+                    "path": parsed.path,
+                }
                 html = render_dashboard(ROUTES[layer], **extra)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -868,16 +907,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _handle_status(self) -> None:
         """返回 emotion-core 状态数据（可带 ?date=）。"""
         try:
-            market = loaders.load_market_snapshot(snapshot.resolve_date(
-                _query_arg(urlparse(self.path), "date")))
-            self._send_json({
-                "ok": True,
-                "date": str(market.get("date", "")),
-                "phase": market.get("phase", ""),
-                "limit_up_count": market.get("limit_up_count"),
-                "max_limit_days": market.get("max_limit_days"),
-                "dragon_env": market.get("dragon_env", ""),
-            })
+            market = loaders.load_market_snapshot(
+                snapshot.resolve_date(_query_arg(urlparse(self.path), "date"))
+            )
+            self._send_json(
+                {
+                    "ok": True,
+                    "date": str(market.get("date", "")),
+                    "phase": market.get("phase", ""),
+                    "limit_up_count": market.get("limit_up_count"),
+                    "max_limit_days": market.get("max_limit_days"),
+                    "dragon_env": market.get("dragon_env", ""),
+                }
+            )
         except Exception as e:
             self._send_json({"ok": False, "error": str(e)})
 
@@ -886,8 +928,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False,
-                                    default=_json_default).encode())
+        self.wfile.write(json.dumps(data, ensure_ascii=False, default=_json_default).encode())
 
 
 def run_server(port: int = 8098) -> None:

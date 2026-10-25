@@ -1,4 +1,5 @@
 """ref_security_status ST 回填服务测试。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -8,7 +9,7 @@ import pytest
 
 from emotion_core.services import ref_security_status
 
-rs = ref_security_status   # 新用例用短名，旧用例保持原名
+rs = ref_security_status  # 新用例用短名，旧用例保持原名
 
 
 class TestParseEvents:
@@ -26,20 +27,28 @@ class TestParseEvents:
         """ST 变动格式：实施ST日期 + 实施ST后简称 + 实施ST原因。"""
         data = {
             "data": {
-                "data": [{
-                    "columns": [
-                        {"name": "Wind代码"},
-                        {"name": "证券简称"},
-                        {"name": "实施ST后简称"},
-                        {"name": "实施ST前简称"},
-                        {"name": "实施ST日期"},
-                        {"name": "实施ST原因"},
-                    ],
-                    "rows": [[
-                        "603729.SH", "ST龙韵", "ST龙韵", "龙韵股份",
-                        "2021-05-06", "被注册会计师出具无法表示意见的审计报告",
-                    ]],
-                }]
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "Wind代码"},
+                            {"name": "证券简称"},
+                            {"name": "实施ST后简称"},
+                            {"name": "实施ST前简称"},
+                            {"name": "实施ST日期"},
+                            {"name": "实施ST原因"},
+                        ],
+                        "rows": [
+                            [
+                                "603729.SH",
+                                "ST龙韵",
+                                "ST龙韵",
+                                "龙韵股份",
+                                "2021-05-06",
+                                "被注册会计师出具无法表示意见的审计报告",
+                            ]
+                        ],
+                    }
+                ]
             }
         }
         result = ref_security_status._parse_events(data)
@@ -53,20 +62,22 @@ class TestParseEvents:
         """多条 ST 变动记录。"""
         data = {
             "data": {
-                "data": [{
-                    "columns": [
-                        {"name": "Wind代码"},
-                        {"name": "证券简称"},
-                        {"name": "实施ST后简称"},
-                        {"name": "实施ST前简称"},
-                        {"name": "实施ST日期"},
-                        {"name": "实施ST原因"},
-                    ],
-                    "rows": [
-                        ["603729.SH", "ST龙韵", "ST龙韵", "龙韵股份", "2021-05-06", "原因A"],
-                        ["603729.SH", "ST龙韵", "ST龙韵", "龙韵股份", "2026-04-30", "原因B"],
-                    ],
-                }]
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "Wind代码"},
+                            {"name": "证券简称"},
+                            {"name": "实施ST后简称"},
+                            {"name": "实施ST前简称"},
+                            {"name": "实施ST日期"},
+                            {"name": "实施ST原因"},
+                        ],
+                        "rows": [
+                            ["603729.SH", "ST龙韵", "ST龙韵", "龙韵股份", "2021-05-06", "原因A"],
+                            ["603729.SH", "ST龙韵", "ST龙韵", "龙韵股份", "2026-04-30", "原因B"],
+                        ],
+                    }
+                ]
             }
         }
         result = ref_security_status._parse_events(data)
@@ -78,18 +89,26 @@ class TestParseEvents:
         """违规处分格式：ST 相关处分应保留。"""
         data = {
             "data": {
-                "data": [{
-                    "columns": [
-                        {"name": "Wind代码"},
-                        {"name": "证券简称"},
-                        {"name": "违规处分类型"},
-                        {"name": "违规公告日期"},
-                        {"name": "违规行为"},
-                    ],
-                    "rows": [[
-                        "600519.SH", "贵州茅台", "其他", "2026-03-13", "未公布",
-                    ]],
-                }]
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "Wind代码"},
+                            {"name": "证券简称"},
+                            {"name": "违规处分类型"},
+                            {"name": "违规公告日期"},
+                            {"name": "违规行为"},
+                        ],
+                        "rows": [
+                            [
+                                "600519.SH",
+                                "贵州茅台",
+                                "其他",
+                                "2026-03-13",
+                                "未公布",
+                            ]
+                        ],
+                    }
+                ]
             }
         }
         result = ref_security_status._parse_events(data)
@@ -100,18 +119,26 @@ class TestParseEvents:
         """违规处分格式：风险警示处分应保留。"""
         data = {
             "data": {
-                "data": [{
-                    "columns": [
-                        {"name": "Wind代码"},
-                        {"name": "证券简称"},
-                        {"name": "违规处分类型"},
-                        {"name": "违规公告日期"},
-                        {"name": "违规行为"},
-                    ],
-                    "rows": [[
-                        "600000.SH", "浦发银行", "风险警示", "2025-01-01", "财务问题",
-                    ]],
-                }]
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "Wind代码"},
+                            {"name": "证券简称"},
+                            {"name": "违规处分类型"},
+                            {"name": "违规公告日期"},
+                            {"name": "违规行为"},
+                        ],
+                        "rows": [
+                            [
+                                "600000.SH",
+                                "浦发银行",
+                                "风险警示",
+                                "2025-01-01",
+                                "财务问题",
+                            ]
+                        ],
+                    }
+                ]
             }
         }
         result = ref_security_status._parse_events(data)
@@ -148,20 +175,28 @@ class TestBackfillSecurityStatus:
         # 使用真实 ST 变动格式
         mock_call.data = {
             "data": {
-                "data": [{
-                    "columns": [
-                        {"name": "Wind代码"},
-                        {"name": "证券简称"},
-                        {"name": "实施ST后简称"},
-                        {"name": "实施ST前简称"},
-                        {"name": "实施ST日期"},
-                        {"name": "实施ST原因"},
-                    ],
-                    "rows": [[
-                        "603729.SH", "ST龙韵", "ST龙韵", "龙韵股份",
-                        "2021-05-06", "被注册会计师出具无法表示意见的审计报告",
-                    ]],
-                }]
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "Wind代码"},
+                            {"name": "证券简称"},
+                            {"name": "实施ST后简称"},
+                            {"name": "实施ST前简称"},
+                            {"name": "实施ST日期"},
+                            {"name": "实施ST原因"},
+                        ],
+                        "rows": [
+                            [
+                                "603729.SH",
+                                "ST龙韵",
+                                "ST龙韵",
+                                "龙韵股份",
+                                "2021-05-06",
+                                "被注册会计师出具无法表示意见的审计报告",
+                            ]
+                        ],
+                    }
+                ]
             }
         }
         mock_client.call.return_value = mock_call
@@ -192,16 +227,20 @@ class TestBackfillSecurityStatus:
         )
         assert skipped == 1
 
+
 class TestNormalizeStatus:
     """简称 → 风险警示档位。"""
 
-    @pytest.mark.parametrize("name,expected", [
-        ("ST东时", "ST"),
-        ("*ST美谷", "*ST"),
-        ("石药景峰", "NORMAL"),
-        ("", "NORMAL"),
-        (" st 东时 ", "ST"),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            ("ST东时", "ST"),
+            ("*ST美谷", "*ST"),
+            ("石药景峰", "NORMAL"),
+            ("", "NORMAL"),
+            (" st 东时 ", "ST"),
+        ],
+    )
     def test_normalize(self, name, expected):
         assert ref_security_status._normalize_status(name) == expected
 
@@ -210,25 +249,43 @@ class TestParseBulkRows:
     """search_stocks 批量行的两种列形。"""
 
     def test_implement_shape(self):
-        cols = ["Wind代码", "证券简称", "实施ST后简称", "实施ST前简称",
-                "实施ST日期", "实施ST原因"]
+        cols = ["Wind代码", "证券简称", "实施ST后简称", "实施ST前简称", "实施ST日期", "实施ST原因"]
         rows = [["603377.SH", "ST东时", "ST东时", "ST东时", "2025-04-30", "持续经营不确定"]]
         got = ref_security_status._parse_bulk_rows(cols, rows, "实施")
-        assert got == [{
-            "code": "603377", "date": date(2025, 4, 30), "kind": "实施",
-            "status": "ST", "reason": "持续经营不确定",
-        }]
+        assert got == [
+            {
+                "code": "603377",
+                "date": date(2025, 4, 30),
+                "kind": "实施",
+                "status": "ST",
+                "reason": "持续经营不确定",
+            }
+        ]
 
     def test_revert_shape(self):
-        cols = ["股票编号", "股票种类", "撤销ST后简称", "撤销ST前简称", "证券名称",
-                "撤销日期", "2025年撤销前简称", "2025年撤销后简称"]
-        rows = [["000908.SZ", "A股", "ST景峰", "*ST景峰", "石药景峰", "2025-06-16",
-                 "*ST景峰", "ST景峰"]]
+        cols = [
+            "股票编号",
+            "股票种类",
+            "撤销ST后简称",
+            "撤销ST前简称",
+            "证券名称",
+            "撤销日期",
+            "2025年撤销前简称",
+            "2025年撤销后简称",
+        ]
+        rows = [
+            ["000908.SZ", "A股", "ST景峰", "*ST景峰", "石药景峰", "2025-06-16", "*ST景峰", "ST景峰"]
+        ]
         got = ref_security_status._parse_bulk_rows(cols, rows, "撤销")
-        assert got == [{
-            "code": "000908", "date": date(2025, 6, 16), "kind": "撤销",
-            "status": "ST", "reason": "撤销ST：*ST景峰→ST景峰",
-        }]
+        assert got == [
+            {
+                "code": "000908",
+                "date": date(2025, 6, 16),
+                "kind": "撤销",
+                "status": "ST",
+                "reason": "撤销ST：*ST景峰→ST景峰",
+            }
+        ]
 
     def test_revert_minimal_shape_status_unknown(self):
         """精简列形（无「撤销ST后简称」）：证券名称是当前简称，不可用来推断档位。"""
@@ -262,20 +319,24 @@ class TestBuildIntervals:
         assert ref_security_status._build_intervals([]) == []
 
     def test_implement_then_revert(self):
-        got = ref_security_status._build_intervals([
-            self._ev(date(2025, 4, 30), "实施", "ST"),
-            self._ev(date(2026, 7, 30), "撤销", "NORMAL"),
-        ])
+        got = ref_security_status._build_intervals(
+            [
+                self._ev(date(2025, 4, 30), "实施", "ST"),
+                self._ev(date(2026, 7, 30), "撤销", "NORMAL"),
+            ]
+        )
         assert len(got) == 1
         assert got[0]["status"] == "ST"
         assert got[0]["effective_from"] == date(2025, 4, 30)
         assert got[0]["effective_to"] == date(2026, 7, 30)
 
     def test_star_st_downgrade_keeps_interval(self):
-        got = ref_security_status._build_intervals([
-            self._ev(date(2025, 1, 2), "实施", "*ST"),
-            self._ev(date(2025, 6, 16), "撤销", "ST"),
-        ])
+        got = ref_security_status._build_intervals(
+            [
+                self._ev(date(2025, 1, 2), "实施", "*ST"),
+                self._ev(date(2025, 6, 16), "撤销", "ST"),
+            ]
+        )
         assert [(i["status"], i["effective_from"], i["effective_to"]) for i in got] == [
             ("*ST", date(2025, 1, 2), date(2025, 6, 16)),
             ("ST", date(2025, 6, 16), None),
@@ -283,23 +344,37 @@ class TestBuildIntervals:
 
     def test_unknown_status_keeps_previous(self):
         """档位不可知时延续上一档位（保守：宁可多算 ST）。"""
-        got = ref_security_status._build_intervals([
-            self._ev(date(2025, 1, 2), "实施", "ST"),
-            {"code": "600000", "date": date(2025, 6, 16), "kind": "撤销",
-             "status": None, "reason": "r"},
-            {"code": "600000", "date": date(2026, 7, 30), "kind": "撤销",
-             "status": "NORMAL", "reason": "r"},
-        ])
+        got = ref_security_status._build_intervals(
+            [
+                self._ev(date(2025, 1, 2), "实施", "ST"),
+                {
+                    "code": "600000",
+                    "date": date(2025, 6, 16),
+                    "kind": "撤销",
+                    "status": None,
+                    "reason": "r",
+                },
+                {
+                    "code": "600000",
+                    "date": date(2026, 7, 30),
+                    "kind": "撤销",
+                    "status": "NORMAL",
+                    "reason": "r",
+                },
+            ]
+        )
         assert [(i["status"], i["effective_to"]) for i in got] == [
             ("ST", date(2025, 6, 16)),
             ("ST", date(2026, 7, 30)),
         ]
 
     def test_same_day_events_drop_zero_length(self):
-        got = ref_security_status._build_intervals([
-            self._ev(date(2025, 1, 2), "实施", "ST"),
-            self._ev(date(2025, 1, 2), "撤销", "NORMAL"),
-        ])
+        got = ref_security_status._build_intervals(
+            [
+                self._ev(date(2025, 1, 2), "实施", "ST"),
+                self._ev(date(2025, 1, 2), "撤销", "NORMAL"),
+            ]
+        )
         assert got == []
 
     def test_open_interval_when_still_st(self):
@@ -308,6 +383,7 @@ class TestBuildIntervals:
 
 
 # ─────────── 批量枚举：预算化 + 断点续跑（★2026-10-15 新增）───────────
+
 
 class TestWindowPlan:
     def test_seeds_first_then_half_year_windows(self):
@@ -359,10 +435,12 @@ class TestBudgetClient:
         assert rs._default_call_budget() == rs._DEFAULT_CALL_BUDGET
 
 
-_PLAN4 = [("seed:沪市主板", date(2024, 1, 1), date(2024, 1, 1)),
-          ("实施", date(2024, 1, 1), date(2024, 6, 30)),
-          ("撤销", date(2024, 1, 1), date(2024, 6, 30)),
-          ("实施", date(2024, 7, 1), date(2024, 12, 31))]
+_PLAN4 = [
+    ("seed:沪市主板", date(2024, 1, 1), date(2024, 1, 1)),
+    ("实施", date(2024, 1, 1), date(2024, 6, 30)),
+    ("撤销", date(2024, 1, 1), date(2024, 6, 30)),
+    ("实施", date(2024, 7, 1), date(2024, 12, 31)),
+]
 
 
 class TestBulkResume:
@@ -390,54 +468,60 @@ class TestBulkResume:
             client.call("stock_data", "search_stocks", {})
             if enum_error and kind == enum_error:
                 raise rs.WindSourceError("后端 502")
-            return [{"code": "600001", "date": s, "kind": kind,
-                     "status": "ST", "reason": "x"}]
+            return [{"code": "600001", "date": s, "kind": kind, "status": "ST", "reason": "x"}]
 
         monkeypatch.setattr(rs, "_mark_window", mark)
         monkeypatch.setattr(rs, "_fetch_with_retry", fetch)
         monkeypatch.setattr(rs, "_enumerate_window", enum)
-        monkeypatch.setattr(rs, "rebuild_intervals_from_events",
-                            lambda: rebuilt.append(1) or (9, 9))
+        monkeypatch.setattr(
+            rs, "rebuild_intervals_from_events", lambda: rebuilt.append(1) or (9, 9)
+        )
         return marks, rebuilt, state
 
     def test_budget_exhausted_stops_and_never_rebuilds(self, monkeypatch):
         marks, rebuilt, state = self._wire(monkeypatch)
         assert rs.backfill_security_status_bulk(
-            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0,
-            budget_calls=2) == (0, 0)
-        assert [m[3] for m in marks] == [rs._WINDOW_OK, rs._WINDOW_OK,
-                                        rs._WINDOW_EXHAUSTED]
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0, budget_calls=2
+        ) == (0, 0)
+        assert [m[3] for m in marks] == [rs._WINDOW_OK, rs._WINDOW_OK, rs._WINDOW_EXHAUSTED]
         assert rebuilt == []
-        assert len(state) == 2                     # 只完成前两个窗口
+        assert len(state) == 2  # 只完成前两个窗口
 
     def test_resume_carries_progress_and_rebuilds(self, monkeypatch):
-        ok = {("seed:沪市主板", date(2024, 1, 1), date(2024, 1, 1)): rs._WINDOW_OK,
-              ("实施", date(2024, 1, 1), date(2024, 6, 30)): rs._WINDOW_OK}
+        ok = {
+            ("seed:沪市主板", date(2024, 1, 1), date(2024, 1, 1)): rs._WINDOW_OK,
+            ("实施", date(2024, 1, 1), date(2024, 6, 30)): rs._WINDOW_OK,
+        }
         marks, rebuilt, state = self._wire(monkeypatch, ok=ok)
         assert rs.backfill_security_status_bulk(
-            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0) == (9, 9)
-        assert [m[0] for m in marks] == ["撤销", "实施"]   # 已 ok 的窗口不重抓
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0
+        ) == (9, 9)
+        assert [m[0] for m in marks] == ["撤销", "实施"]  # 已 ok 的窗口不重抓
         assert rebuilt == [1]
         assert len(state) == 4
 
     def test_source_error_marks_window_and_keeps_going(self, monkeypatch):
         marks, rebuilt, _ = self._wire(monkeypatch, enum_error="撤销")
         assert rs.backfill_security_status_bulk(
-            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0) == (0, 0)
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0
+        ) == (0, 0)
         statuses = {m[0]: m[3] for m in marks if m[3] != rs._WINDOW_OK}
         assert statuses == {"撤销": rs._WINDOW_ERROR}
-        assert rebuilt == []                       # 有窗口没 ok ⇒ 不重建
+        assert rebuilt == []  # 有窗口没 ok ⇒ 不重建
 
     def test_wind_quota_marks_and_stops(self, monkeypatch):
         marks, rebuilt, _ = self._wire(monkeypatch)
+
         def enum(client, kind, s, e, **kw):
             if kind == "撤销":
                 raise rs.WindQuotaError("积分余额不足")
             client.call("stock_data", "search_stocks", {})
             return []
+
         monkeypatch.setattr(rs, "_enumerate_window", enum)
         assert rs.backfill_security_status_bulk(
-            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0) == (0, 0)
+            date(2024, 1, 1), date(2024, 12, 31), sleep_sec=0
+        ) == (0, 0)
         assert marks[-1][3] == rs._WINDOW_QUOTA
         assert rebuilt == []
 

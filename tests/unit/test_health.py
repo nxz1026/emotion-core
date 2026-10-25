@@ -11,6 +11,7 @@ health._recent_trading_days 换为记录调用参数的空表；health.alerts �
 record / push_pending_webhook 三入口；health.dates.today_sh（缺省交易日用例）。
 真实库对账另跑（编排者阶段）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,16 +30,16 @@ class FakeQuery:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple]] = []
-        self.report = None          # review_report max(date)
-        self.data = None            # derived_bar max(date)
-        self.outcome = None         # signal LEFT JOIN signal_outcome
-        self.trading = None         # trade_calendar（_recent_trading_days）
-        self.pool = None            # limit_pool_em max(date)（check_pool_stale）
+        self.report = None  # review_report max(date)
+        self.data = None  # derived_bar max(date)
+        self.outcome = None  # signal LEFT JOIN signal_outcome
+        self.trading = None  # trade_calendar（_recent_trading_days）
+        self.pool = None  # limit_pool_em max(date)（check_pool_stale）
         # ★2026-10-15 新增两条检查的桩
-        self.limit_ledger = None    # ref_limit_state_run 窗口（对账台账）
-        self.theme = None           # theme_tag max(date)
-        self.theme_cov = None       # theme_tag 覆盖率（tagged / primary）
-        self.daily_bar = None       # daily_bar 当日票数（仅 coverage 用）
+        self.limit_ledger = None  # ref_limit_state_run 窗口（对账台账）
+        self.theme = None  # theme_tag max(date)
+        self.theme_cov = None  # theme_tag 覆盖率（tagged / primary）
+        self.daily_bar = None  # daily_bar 当日票数（仅 coverage 用）
 
     @staticmethod
     def _frame(vals, col: str) -> pd.DataFrame:
@@ -55,8 +56,11 @@ class FakeQuery:
         if "FROM derived_bar" in sql:
             return self._frame(self.data, "d")
         if "FROM signal s" in sql:
-            return self.outcome if self.outcome is not None else pd.DataFrame(
-                columns=["confirm_date", "code"])
+            return (
+                self.outcome
+                if self.outcome is not None
+                else pd.DataFrame(columns=["confirm_date", "code"])
+            )
         if "FROM trade_calendar" in sql:
             # ⚠️ 2026-10-07：日历源从 daily_bar 改为 trade_calendar（治监控自噬）。
             # 这里**不**给 daily_bar 留分支 —— 一旦留了，日历又可以从被监控
@@ -67,14 +71,14 @@ class FakeQuery:
         if "FROM ref_limit_state_run" in sql:
             if isinstance(self.limit_ledger, pd.DataFrame):
                 return self.limit_ledger
-            return pd.DataFrame(self.limit_ledger or [],
-                                columns=["date", "direction", "status", "n_wind",
-                                         "n_only_wind", "n_only_self"])
+            return pd.DataFrame(
+                self.limit_ledger or [],
+                columns=["date", "direction", "status", "n_wind", "n_only_wind", "n_only_self"],
+            )
         if "FROM theme_tag" in sql and "count(DISTINCT code)" in sql:
             if isinstance(self.theme_cov, pd.DataFrame):
                 return self.theme_cov
-            return pd.DataFrame(self.theme_cov or [],
-                                columns=["tagged", "primary"])
+            return pd.DataFrame(self.theme_cov or [], columns=["tagged", "primary"])
         if "FROM theme_tag" in sql:
             return self._frame(self.theme, "d")
         if "FROM daily_bar" in sql and "count(DISTINCT code)" in sql:
@@ -99,15 +103,14 @@ class GapStub:
 class AlertsStub:
     """health.alerts 三入口替身（pending / record / push_pending_webhook）。"""
 
-    def __init__(self, pending_sources=(), raise_record=False,
-                 raise_webhook=False) -> None:
+    def __init__(self, pending_sources=(), raise_record=False, raise_webhook=False) -> None:
         self.pending_sources = list(pending_sources)
         self.raise_record = raise_record
         self.raise_webhook = raise_webhook
         self.pending_limits: list[int] = []
         self.recorded: list[tuple[str, str, str]] = []
-        self.pending_details: set[tuple[str, str]] = set()   # 已未确认的 (source, detail)
-        self.preacked: list[dict] = []        # 预置的未确认告警（record_dedup 之外的在库证据）
+        self.pending_details: set[tuple[str, str]] = set()  # 已未确认的 (source, detail)
+        self.preacked: list[dict] = []  # 预置的未确认告警（record_dedup 之外的在库证据）
         self.webhooks = 0
 
     def pending(self, limit: int = 100) -> list[dict]:
@@ -173,24 +176,46 @@ def alerts_stub(monkeypatch) -> AlertsStub:
 
 # ────────────────────────── 阈值 / CHECKS ──────────────────────────
 
+
 def test_thresholds_and_checks_order_locked():
-    assert (health.REPORT_GAP_DAYS, health.DATA_GAP_DAYS,
-            health.OUTCOME_STALE_DAYS, health.POOL_STALE_DAYS) == (2, 2, 6, 2)
-    assert (health.LIMIT_AUDIT_DAYS, health.LIMIT_AUDIT_STALE_DAYS,
-            health.LIMIT_AUDIT_ONLY_WIND_PCT) == (10, 3, 5.0)
-    assert (health.THEME_STALE_DAYS, health.THEME_COVERAGE_MIN_PCT,
-            health.THEME_PRIMARY_MIN_PCT) == (2, 40.0, 60.0)
-    assert [name for name, _ in health.CHECKS] == ["report", "data", "outcome",
-                                                  "pipeline", "pool",
-                                                  "limit_audit", "theme"]
+    assert (
+        health.REPORT_GAP_DAYS,
+        health.DATA_GAP_DAYS,
+        health.OUTCOME_STALE_DAYS,
+        health.POOL_STALE_DAYS,
+    ) == (2, 2, 6, 2)
+    assert (
+        health.LIMIT_AUDIT_DAYS,
+        health.LIMIT_AUDIT_STALE_DAYS,
+        health.LIMIT_AUDIT_ONLY_WIND_PCT,
+    ) == (10, 3, 5.0)
+    assert (
+        health.THEME_STALE_DAYS,
+        health.THEME_COVERAGE_MIN_PCT,
+        health.THEME_PRIMARY_MIN_PCT,
+    ) == (2, 40.0, 60.0)
+    assert [name for name, _ in health.CHECKS] == [
+        "report",
+        "data",
+        "outcome",
+        "pipeline",
+        "pool",
+        "limit_audit",
+        "theme",
+    ]
     assert [fn for _, fn in health.CHECKS] == [
-        health.check_report_gap, health.check_data_gap,
-        health.check_outcome_stale, health.check_pipeline_failed,
-        health.check_pool_stale, health.check_limit_state_audit,
-        health.check_theme_coverage]
+        health.check_report_gap,
+        health.check_data_gap,
+        health.check_outcome_stale,
+        health.check_pipeline_failed,
+        health.check_pool_stale,
+        health.check_limit_state_audit,
+        health.check_theme_coverage,
+    ]
 
 
 # ────────────────────────── _trading_gap ──────────────────────────
+
 
 class TestTradingGap:
     def test_since_none_returns_max_and_skips_calendar(self, gap):
@@ -198,8 +223,14 @@ class TestTradingGap:
         assert gap.calls == []
 
     def test_open_interval_excludes_endpoints(self, gap):
-        gap.days = [date(2026, 9, 18), date(2026, 9, 19), date(2026, 9, 22),
-                    date(2026, 9, 23), date(2026, 9, 24), D0]
+        gap.days = [
+            date(2026, 9, 18),
+            date(2026, 9, 19),
+            date(2026, 9, 22),
+            date(2026, 9, 23),
+            date(2026, 9, 24),
+            D0,
+        ]
         # (9-19, 9-25) 开区间：9-19（since）与 9-25（trade_date）均不计
         assert health._trading_gap(D0, date(2026, 9, 19)) == 3
         assert gap.calls == [(D0, 60)]
@@ -210,6 +241,7 @@ class TestTradingGap:
 
 
 # ────────────────────────── _recent_trading_days（自持 gap） ──────────────────────────
+
 
 class TestRecentTradingDays:
     def test_sql_locked_and_sorted_ascending(self, db):
@@ -225,15 +257,12 @@ class TestRecentTradingDays:
         先读 health.py 里 ``_recent_trading_days`` 的 docstring。
         """
         db.trading = [D0, date(2026, 9, 24), date(2026, 9, 23)]
-        assert health._recent_trading_days(D0, 3) == [
-            date(2026, 9, 23), date(2026, 9, 24), D0]
+        assert health._recent_trading_days(D0, 3) == [date(2026, 9, 23), date(2026, 9, 24), D0]
         sql, params = db.calls[0]
         # ⚠️ 必须来自独立于行情的日历表
         assert "FROM trade_calendar" in sql
         assert "is_open" in sql
-        assert "daily_bar" not in sql, (
-            "断档检查又改回从被监控表派生日历了 ⇒ 监控自噬"
-        )
+        assert "daily_bar" not in sql, "断档检查又改回从被监控表派生日历了 ⇒ 监控自噬"
         assert "WHERE is_open AND date <= %s" in sql
         assert "ORDER BY date DESC LIMIT %s" in sql
         assert params == (D0, 3)
@@ -241,10 +270,10 @@ class TestRecentTradingDays:
 
 # ────────────────────────── check_report_gap ──────────────────────────
 
+
 class TestCheckReportGap:
     def test_empty_df_never_produced(self, db, gap):
-        assert health.check_report_gap(D0) == \
-            f"从未产出报告（截至 {D0} 无 review_report 落盘）"
+        assert health.check_report_gap(D0) == f"从未产出报告（截至 {D0} 无 review_report 落盘）"
         sql, params = db.calls[0]
         assert sql == "SELECT max(date) AS d FROM review_report WHERE date < %s"
         assert params == (D0,)
@@ -252,26 +281,26 @@ class TestCheckReportGap:
 
     def test_null_last_never_produced(self, db, gap):
         db.report = [None]
-        assert health.check_report_gap(D0) == \
-            f"从未产出报告（截至 {D0} 无 review_report 落盘）"
+        assert health.check_report_gap(D0) == f"从未产出报告（截至 {D0} 无 review_report 落盘）"
 
     def test_gap_at_threshold_warns(self, db, gap):
         last = date(2026, 9, 22)
         db.report = [last]
         gap.days = [last, date(2026, 9, 23), date(2026, 9, 24), D0]
         assert health.check_report_gap(D0) == (
-            "报告断档：最近成功报告 2026-09-22 距今 2 个交易日（阈值 2），"
-            "疑似 daily.sh 未跑/中断")
+            "报告断档：最近成功报告 2026-09-22 距今 2 个交易日（阈值 2），疑似 daily.sh 未跑/中断"
+        )
         assert gap.calls == [(D0, 60)]
 
     def test_gap_below_threshold_returns_none(self, db, gap):
         last = date(2026, 9, 22)
         db.report = [last]
-        gap.days = [last, date(2026, 9, 23), D0]     # 开区间只 1 天 < 2
+        gap.days = [last, date(2026, 9, 23), D0]  # 开区间只 1 天 < 2
         assert health.check_report_gap(D0) is None
 
 
 # ────────────────────────── check_data_gap ──────────────────────────
+
 
 class TestCheckDataGap:
     def test_empty_df_no_history(self, db, gap):
@@ -290,7 +319,8 @@ class TestCheckDataGap:
         gap.days = [last, date(2026, 9, 23), date(2026, 9, 24), D0]
         assert health.check_data_gap(D0) == (
             "derived_bar 最近数据日 2026-09-22 距今 2 个交易日（阈值 2），"
-            "疑似 fetch/derive 采集停摆")
+            "疑似 fetch/derive 采集停摆"
+        )
         assert "采集停摆" in health.check_data_gap(D0)
 
     def test_gap_below_threshold_returns_none(self, db, gap):
@@ -302,17 +332,23 @@ class TestCheckDataGap:
 
 # ────────────────────────── check_outcome_stale ──────────────────────────
 
-SEVEN = [date(2026, 9, 16), date(2026, 9, 17), date(2026, 9, 18),
-         date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23),
-         date(2026, 9, 24)]
+SEVEN = [
+    date(2026, 9, 16),
+    date(2026, 9, 17),
+    date(2026, 9, 18),
+    date(2026, 9, 21),
+    date(2026, 9, 22),
+    date(2026, 9, 23),
+    date(2026, 9, 24),
+]
 
 
 class TestCheckOutcomeStale:
     def test_insufficient_history_returns_none_without_signal_query(self, db, gap):
-        gap.days = [date(2026, 9, 24), D0]           # 2 < 6+1
+        gap.days = [date(2026, 9, 24), D0]  # 2 < 6+1
         assert health.check_outcome_stale(D0) is None
         assert gap.calls == [(D0, health.OUTCOME_STALE_DAYS + 1)]
-        assert db.calls == []                        # 历史不足不查 signal
+        assert db.calls == []  # 历史不足不查 signal
 
     def test_empty_result_returns_none_but_predicates_locked(self, db, gap):
         gap.days = SEVEN
@@ -324,37 +360,54 @@ class TestCheckOutcomeStale:
         assert "s.confirm_date <= %s" in sql
         assert "(o.confirm_date IS NULL OR NOT o.complete)" in sql
         assert "ORDER BY s.confirm_date DESC LIMIT 5" in sql
-        assert params == (SEVEN[0],)                 # stale = cutoff[0]
+        assert params == (SEVEN[0],)  # stale = cutoff[0]
 
     def test_rows_render_names_joined_by_dunhao(self, db, gap):
         gap.days = SEVEN
-        db.outcome = pd.DataFrame({
-            "confirm_date": [date(2026, 9, 16), date(2026, 9, 17)],
-            "code": ["000017", "600371"]})
+        db.outcome = pd.DataFrame(
+            {"confirm_date": [date(2026, 9, 16), date(2026, 9, 17)], "code": ["000017", "600371"]}
+        )
         assert health.check_outcome_stale(D0) == (
             "2 条 ≥6 交易日前 BUY 信号无 complete outcome（L3 未回填）："
-            "2026-09-16 000017、2026-09-17 600371")
+            "2026-09-16 000017、2026-09-17 600371"
+        )
         assert db.calls[0][1] == (SEVEN[0],)
 
 
 # ────────────────────────── run ──────────────────────────
 
+
 class TestRun:
     def test_collects_in_checks_order_filtering_none(self, db, gap):
-        gap.days = [date(2026, 9, 11), date(2026, 9, 14), date(2026, 9, 15),
-                    date(2026, 9, 16), date(2026, 9, 17), date(2026, 9, 18),
-                    date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23),
-                    date(2026, 9, 24), D0]
-        db.report = [date(2026, 9, 11)]              # 断档（gap 10 ≥ 2）
-        db.data = [date(2026, 9, 24)]                # 未断档（gap 0 < 2）
-        db.pool = [date(2026, 9, 24)]                 # 与衍生层同步（gap 0 < 2）
-        db.outcome = pd.DataFrame({"confirm_date": [date(2026, 9, 11)],
-                                   "code": ["000017"]})
+        gap.days = [
+            date(2026, 9, 11),
+            date(2026, 9, 14),
+            date(2026, 9, 15),
+            date(2026, 9, 16),
+            date(2026, 9, 17),
+            date(2026, 9, 18),
+            date(2026, 9, 21),
+            date(2026, 9, 22),
+            date(2026, 9, 23),
+            date(2026, 9, 24),
+            D0,
+        ]
+        db.report = [date(2026, 9, 11)]  # 断档（gap 10 ≥ 2）
+        db.data = [date(2026, 9, 24)]  # 未断档（gap 0 < 2）
+        db.pool = [date(2026, 9, 24)]  # 与衍生层同步（gap 0 < 2）
+        db.outcome = pd.DataFrame({"confirm_date": [date(2026, 9, 11)], "code": ["000017"]})
         # ★2026-10-15 新增两条检查的「健康态」：台账有 ok 记录且与衍生层同步，
         # 题材有标签且覆盖率达标 —— 它们不该在这个用例里冒出来。
-        db.limit_ledger = [{"date": date(2026, 9, 24), "direction": "up",
-                            "status": "ok", "n_wind": 83, "n_only_wind": 2,
-                            "n_only_self": 0}]
+        db.limit_ledger = [
+            {
+                "date": date(2026, 9, 24),
+                "direction": "up",
+                "status": "ok",
+                "n_wind": 83,
+                "n_only_wind": 2,
+                "n_only_self": 0,
+            }
+        ]
         db.theme = [date(2026, 9, 24)]
         db.theme_cov = [{"tagged": 3265, "primary": 2749}]
         db.daily_bar = [5213]
@@ -375,6 +428,7 @@ class TestRun:
     def test_explicit_trade_date_skips_today_sh(self, monkeypatch):
         def boom():
             raise AssertionError("显式 trade_date 不应走 today_sh")
+
         monkeypatch.setattr(health.dates, "today_sh", boom)
         seen: list[date] = []
         monkeypatch.setattr(health, "CHECKS", (("x", lambda td: seen.append(td) or "d"),))
@@ -383,6 +437,7 @@ class TestRun:
 
 
 # ────────────────────────── record_once ──────────────────────────
+
 
 class TestRecordOnce:
     def test_distinct_details_all_enqueued(self, alerts_stub):
@@ -393,14 +448,13 @@ class TestRecordOnce:
         「从未产出报告」永久未 ack → health 整体失明。
         """
         assert health.record_once(["a", "b"]) == 2
-        assert alerts_stub.recorded == [("WARN", "health", "a"),
-                                       ("WARN", "health", "b")]
+        assert alerts_stub.recorded == [("WARN", "health", "a"), ("WARN", "health", "b")]
 
     def test_same_detail_deduped_across_rounds(self, alerts_stub):
         """同一 detail 跨轮不重复轰炸（真 dedup 语义，非 source 锁死）。"""
         assert health.record_once(["a", "b"]) == 2
         assert health.record_once(["a", "b"]) == 0
-        assert health.record_once(["b", "c"]) == 1       # 只 c 是新的
+        assert health.record_once(["b", "c"]) == 1  # 只 c 是新的
         assert alerts_stub.recorded[-1] == ("WARN", "health", "c")
 
     def test_no_pending_scan_anymore(self, alerts_stub):
@@ -415,18 +469,23 @@ class TestRecordOnce:
         未确认，09-29 又落 id=9「截至 2026-09-29 ...」——record_dedup 精确比对
         完全失效，告警表每天 +1 条同义垃圾。
         """
-        alerts_stub.preacked = [{"source": "health",
-                                 "detail": "从未产出报告（截至 2026-09-28 无 review_report 落盘）"}]
-        assert health.record_once(
-            ["从未产出报告（截至 2026-09-29 无 review_report 落盘）"]) == 0
+        alerts_stub.preacked = [
+            {"source": "health", "detail": "从未产出报告（截至 2026-09-28 无 review_report 落盘）"}
+        ]
+        assert health.record_once(["从未产出报告（截至 2026-09-29 无 review_report 落盘）"]) == 0
         assert alerts_stub.recorded == []
 
     def test_first_day_of_new_problem_still_enqueued(self, alerts_stub):
         """抹日期只用于判重，不影响「不同问题照样入队」。"""
-        alerts_stub.preacked = [{"source": "health",
-                                 "detail": "从未产出报告（截至 2026-09-28 无 review_report 落盘）"}]
-        assert health.record_once(
-            ["derived_bar 最近数据日 2026-09-29 距今 3 个交易日（阈值 2），疑似采集停摆"]) == 1
+        alerts_stub.preacked = [
+            {"source": "health", "detail": "从未产出报告（截至 2026-09-28 无 review_report 落盘）"}
+        ]
+        assert (
+            health.record_once(
+                ["derived_bar 最近数据日 2026-09-29 距今 3 个交易日（阈值 2），疑似采集停摆"]
+            )
+            == 1
+        )
 
     def test_other_source_alerts_ignored(self, alerts_stub):
         """只有 health source 参与判重——pipeline 的告警不该压制 health。"""
@@ -435,8 +494,10 @@ class TestRecordOnce:
 
     def test_pending_read_failure_degrades_to_in_round_dedup(self, alerts_stub, caplog):
         """读不到在库告警时不能崩，退化为本轮内去重。"""
+
         def boom(limit=100):
             raise RuntimeError("db down")
+
         alerts_stub.pending = boom
         with caplog.at_level(logging.WARNING, logger="emotion_core.health"):
             assert health.record_once(["a", "a", "b"]) == 2
@@ -444,8 +505,10 @@ class TestRecordOnce:
 
     def test_dedup_key_strips_dates_only(self):
         """只抹日期，不动其余文案——避免把不同问题误判成同一个。"""
-        assert health._dedup_key("报告断档：最近成功报告 2026-09-20 距今 3 个交易日") == \
-            "报告断档：最近成功报告 <date> 距今 3 个交易日"
+        assert (
+            health._dedup_key("报告断档：最近成功报告 2026-09-20 距今 3 个交易日")
+            == "报告断档：最近成功报告 <date> 距今 3 个交易日"
+        )
         assert health._dedup_key("a 2026-09-01 b 2026-10-02") == "a <date> b <date>"
         assert health._dedup_key("无日期文案") == "无日期文案"
 
@@ -458,15 +521,17 @@ class TestRecordOnce:
 
 # ────────────────────────── push ──────────────────────────
 
+
 class TestPush:
     def test_enqueue_before_webhook_and_returns_n(self, monkeypatch, alerts_stub):
         events: list[tuple] = []
-        monkeypatch.setattr(health, "run",
-                            lambda td: events.append(("run", td)) or ["d1"])
-        monkeypatch.setattr(health, "record_once",
-                            lambda details, td: events.append(("record", details, td)) or 7)
-        monkeypatch.setattr(alerts_stub, "push_pending_webhook",
-                            lambda: events.append(("webhook",)))
+        monkeypatch.setattr(health, "run", lambda td: events.append(("run", td)) or ["d1"])
+        monkeypatch.setattr(
+            health, "record_once", lambda details, td: events.append(("record", details, td)) or 7
+        )
+        monkeypatch.setattr(
+            alerts_stub, "push_pending_webhook", lambda: events.append(("webhook",))
+        )
         assert health.push(D0) == 7
         assert events == [("run", D0), ("record", ["d1"], D0), ("webhook",)]
 
@@ -481,39 +546,61 @@ class TestPush:
 
 # ────────────────────── check_pipeline_failed（2026-09-29 新增）──────────────────────
 
+
 class TestCheckPipelineFailed:
     def test_no_failed_step_returns_none(self, monkeypatch):
         monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [])
         assert health.check_pipeline_failed(D0) is None
 
     def test_failed_step_reports_step_and_date(self, monkeypatch):
-        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
-            {"step": "ladder", "status": "FAILED", "for_date": "2026-09-28",
-             "detail": "步骤 ladder 失败：'Connection' object has no attribute "
-                       "'executemany'"}])
+        monkeypatch.setattr(
+            health._pipeline_mod,
+            "failures",
+            lambda: [
+                {
+                    "step": "ladder",
+                    "status": "FAILED",
+                    "for_date": "2026-09-28",
+                    "detail": "步骤 ladder 失败：'Connection' object has no attribute "
+                    "'executemany'",
+                }
+            ],
+        )
         out = health.check_pipeline_failed(D0)
         assert "1 个步骤停在 FAILED" in out
         assert "ladder(2026-09-28)" in out
         assert "executemany" in out
 
     def test_missing_detail_and_date_tolerated(self, monkeypatch):
-        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
-            {"step": "sync", "status": "FAILED", "for_date": None, "detail": ""}])
+        monkeypatch.setattr(
+            health._pipeline_mod,
+            "failures",
+            lambda: [{"step": "sync", "status": "FAILED", "for_date": None, "detail": ""}],
+        )
         # 无日期→"无日期"，无 detail→不接冒号（names 段以右括号收尾）
         assert health.check_pipeline_failed(D0).endswith("sync(无日期)")
 
     def test_detail_truncated_to_120(self, monkeypatch):
         long = "x" * 500
-        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
-            {"step": "theme", "status": "FAILED", "for_date": "2026-09-28",
-             "detail": long}])
+        monkeypatch.setattr(
+            health._pipeline_mod,
+            "failures",
+            lambda: [
+                {"step": "theme", "status": "FAILED", "for_date": "2026-09-28", "detail": long}
+            ],
+        )
         out = health.check_pipeline_failed(D0)
         assert long not in out and ("x" * 120) in out
 
     def test_caps_listing_at_five(self, monkeypatch):
-        monkeypatch.setattr(health._pipeline_mod, "failures", lambda: [
-            {"step": f"s{i}", "status": "FAILED", "for_date": "2026-09-28",
-             "detail": ""} for i in range(9)])
+        monkeypatch.setattr(
+            health._pipeline_mod,
+            "failures",
+            lambda: [
+                {"step": f"s{i}", "status": "FAILED", "for_date": "2026-09-28", "detail": ""}
+                for i in range(9)
+            ],
+        )
         out = health.check_pipeline_failed(D0)
         assert "9 个步骤" in out
         assert "s4" in out and "s5" not in out
@@ -525,10 +612,17 @@ class TestCheckPipelineFailed:
 
 # ──────────────── check_limit_state_audit（★2026-10-15 新增）────────────────
 
+
 class TestCheckLimitStateAudit:
     def _ok(self, day, **kw):
-        row = {"date": day, "direction": "up", "status": "ok",
-               "n_wind": 83, "n_only_wind": 2, "n_only_self": 0}
+        row = {
+            "date": day,
+            "direction": "up",
+            "status": "ok",
+            "n_wind": 83,
+            "n_only_wind": 2,
+            "n_only_self": 0,
+        }
         row.update(kw)
         return row
 
@@ -572,8 +666,7 @@ class TestCheckLimitStateAudit:
 
     def test_bad_status_days_named_and_kept_out_of_pct(self, db, gap):
         """truncated/suspect 的计数不可信：只点名、不参与占比。"""
-        db.limit_ledger = [self._ok(D0, n_wind=100, n_only_wind=9,
-                                    status="suspect")]
+        db.limit_ledger = [self._ok(D0, n_wind=100, n_only_wind=9, status="suspect")]
         db.data = [D0]
         detail = health.check_limit_state_audit(D0)
         assert "1 天名单不全待重抓" in detail and "suspect" in detail
@@ -592,6 +685,7 @@ class TestCheckLimitStateAudit:
 
 # ──────────────── check_theme_coverage（★2026-10-15 新增）────────────────
 
+
 class TestCheckThemeCoverage:
     def test_no_theme_rows_ever_warns_not_self_produced(self, db, gap):
         assert "theme_tag 无任何数据" in health.check_theme_coverage(D0)
@@ -604,7 +698,7 @@ class TestCheckThemeCoverage:
         assert "当日空转（假 OK）" in detail
 
     def test_stale_beyond_threshold_warns(self, db, gap):
-        db.data = [date(2026, 9, 24)]      # 当日数据未落 ⇒ 不走「当日空转」分支
+        db.data = [date(2026, 9, 24)]  # 当日数据未落 ⇒ 不走「当日空转」分支
         db.theme = [date(2026, 9, 21)]
         gap.days = [date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24)]
         assert "题材断档" in health.check_theme_coverage(D0)
@@ -634,8 +728,7 @@ class TestCheckThemeCoverage:
         db.theme_cov = [{"tagged": 3265, "primary": 2749}]
         db.daily_bar = [5213]
         assert health.check_theme_coverage(D0) is None
-        cov_sql, cov_params = [c for c in db.calls
-                               if "count(primary_theme)" in c[0]][0]
+        cov_sql, cov_params = [c for c in db.calls if "count(primary_theme)" in c[0]][0]
         assert "WHERE date = %s" in cov_sql and cov_params == (day,)
 
     def test_included_in_run(self):

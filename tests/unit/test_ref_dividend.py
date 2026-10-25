@@ -1,9 +1,9 @@
 """ref_dividend 分红除权回填服务测试。"""
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from emotion_core.services import ref_dividend
 
@@ -19,10 +19,16 @@ class TestParseDividendEvents:
     def test_dividend_event(self):
         data = {
             "data": {
-                "data": [{
-                    "columns": [{"name": "事件类型"}, {"name": "事件日期"}, {"name": "事件描述"}],
-                    "rows": [["分红派息", "2024-06-15", "每股派0.5"]],
-                }]
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "事件类型"},
+                            {"name": "事件日期"},
+                            {"name": "事件描述"},
+                        ],
+                        "rows": [["分红派息", "2024-06-15", "每股派0.5"]],
+                    }
+                ]
             }
         }
         events = ref_dividend._parse_dividend_events(data)
@@ -32,10 +38,12 @@ class TestParseDividendEvents:
     def test_non_dividend_event_filtered(self):
         data = {
             "data": {
-                "data": [{
-                    "columns": [{"name": "事件类型"}, {"name": "事件日期"}],
-                    "rows": [["大宗交易", "2024-06-15"]],
-                }]
+                "data": [
+                    {
+                        "columns": [{"name": "事件类型"}, {"name": "事件日期"}],
+                        "rows": [["大宗交易", "2024-06-15"]],
+                    }
+                ]
             }
         }
         events = ref_dividend._parse_dividend_events(data)
@@ -77,10 +85,20 @@ class TestBackfillDividend:
         mock_client = MagicMock()
         mock_client.availability.return_value = (True, "ok")
         mock_call = MagicMock()
-        mock_call.data = {"data": {"data": [{
-            "columns": [{"name": "事件类型"}, {"name": "事件日期"}, {"name": "事件描述"}],
-            "rows": [["分红派息", "2024-06-15", "每股派0.5"]],
-        }]}}
+        mock_call.data = {
+            "data": {
+                "data": [
+                    {
+                        "columns": [
+                            {"name": "事件类型"},
+                            {"name": "事件日期"},
+                            {"name": "事件描述"},
+                        ],
+                        "rows": [["分红派息", "2024-06-15", "每股派0.5"]],
+                    }
+                ]
+            }
+        }
         mock_client.call.return_value = mock_call
 
         monkeypatch.setattr(ref_dividend, "_wind_client_or_none", lambda: mock_client)

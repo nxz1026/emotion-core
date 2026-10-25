@@ -1,7 +1,8 @@
 """utils/dates.py 单元测试：today_sh 纯函数。"""
+
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 
 from emotion_core.utils.dates import today_sh
 
@@ -15,13 +16,13 @@ class TestTodaySh:
 
     def test_matches_shanghai_today(self):
         """与手动计算的 Asia/Shanghai 日期一致。"""
-        expected = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+        expected = (datetime.now(UTC) + timedelta(hours=8)).date()
         assert today_sh() == expected
 
     def test_not_utc_today(self):
         """UTC 日期可能与上海日期不同（跨午夜时）。"""
         result = today_sh()
-        utc_today = datetime.now(timezone.utc).date()
+        utc_today = datetime.now(UTC).date()
         # 上海 = UTC+8，所以上海日期 >= UTC 日期
         assert result >= utc_today
         # 差距最多 1 天

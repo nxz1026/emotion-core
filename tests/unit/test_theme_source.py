@@ -1,4 +1,5 @@
 """data/theme_source.py 题材 Provider 测试。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -39,8 +40,15 @@ class TestWindProvider:
 
 
 def _node(code: str, name: str, count: int) -> ConceptNode:
-    return ConceptNode(node=code, name=name, member_count=count, pct_chg=1.5,
-                       amount=1e9, leading_code="600000", leading_name="浦发银行")
+    return ConceptNode(
+        node=code,
+        name=name,
+        member_count=count,
+        pct_chg=1.5,
+        amount=1e9,
+        leading_code="600000",
+        leading_name="浦发银行",
+    )
 
 
 class TestSinaConceptProvider:
@@ -62,7 +70,7 @@ class TestSinaConceptProvider:
         row = rows[0]
         assert row["code"] == "002886"
         assert row["tag_date"] == date(2026, 10, 14)
-        assert row["primary_theme"] == "华为汽车"      # 成员数最多者当主标签
+        assert row["primary_theme"] == "华为汽车"  # 成员数最多者当主标签
         assert row["secondary_themes"] == ["固态电池"]
         assert row["source"] == "sina_concept"
 
@@ -95,9 +103,15 @@ class TestSinaConceptProvider:
 
 class TestSinaConceptSpots:
     def test_spot_row_shape(self, monkeypatch):
-        node = ConceptNode(node="gn_hwqc", name="华为汽车", member_count=97,
-                           pct_chg=-2.559, amount=25497037032.0,
-                           leading_code="002886", leading_name="沃特股份")
+        node = ConceptNode(
+            node="gn_hwqc",
+            name="华为汽车",
+            member_count=97,
+            pct_chg=-2.559,
+            amount=25497037032.0,
+            leading_code="002886",
+            leading_name="沃特股份",
+        )
         monkeypatch.setattr(
             "emotion_core.data.providers.sina_concept.fetch_concept_nodes",
             lambda: [node],

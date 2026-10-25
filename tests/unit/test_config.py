@@ -1,11 +1,12 @@
 """utils/config.py 配置与 config_hash 测试。"""
+
 from __future__ import annotations
 
 import hashlib
 import json
 from datetime import date
 
-from emotion_core.utils.config import CONFIG, Config, config_hash
+from emotion_core.utils.config import CONFIG, config_hash
 
 
 class TestConfigDefaults:
@@ -51,6 +52,7 @@ class TestConfigHash:
         original = config_hash()
         # Create a modified config
         import dataclasses
+
         mod = dataclasses.replace(CONFIG, CLIMAX_ZT=999)
         payload = json.dumps(dataclasses.asdict(mod), default=str, sort_keys=True)
         modified_hash = hashlib.sha256(payload.encode()).hexdigest()[:12]

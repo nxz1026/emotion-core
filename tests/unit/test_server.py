@@ -1,9 +1,7 @@
 """展示层 web 服务（presentation.server）：静态文件 / 模板渲染 / 路由解析，不连库。"""
+
 from __future__ import annotations
 
-import os
-from types import SimpleNamespace
-from urllib.parse import urlparse
 
 from emotion_core.presentation import server
 
@@ -60,13 +58,19 @@ class TestRequestPath:
 
 class TestLoadIntuitiveData:
     def test_basic_shape(self, monkeypatch):
-        monkeypatch.setattr(server.loaders, "load_market_snapshot",
-                            lambda d: {"phase": "发酵", "date": "2026-09-25"})
+        monkeypatch.setattr(
+            server.loaders,
+            "load_market_snapshot",
+            lambda d: {"phase": "发酵", "date": "2026-09-25"},
+        )
         monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_signals", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
-        monkeypatch.setattr(server.loaders, "load_signal_counts",
-                            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+        monkeypatch.setattr(
+            server.loaders,
+            "load_signal_counts",
+            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        )
         data = server._load_intuitive_data()
         assert data["phase"] == "发酵"
         assert "phase_desc" in data
@@ -74,26 +78,37 @@ class TestLoadIntuitiveData:
 
     def test_phase_descriptions(self, monkeypatch):
         for phase, expected_word in [
-            ("发酵", "上升"), ("高潮", "狂热"), ("退潮", "观望"), ("冰点", "低迷")
+            ("发酵", "上升"),
+            ("高潮", "狂热"),
+            ("退潮", "观望"),
+            ("冰点", "低迷"),
         ]:
-            monkeypatch.setattr(server.loaders, "load_market_snapshot",
-                                lambda d, p=phase: {"phase": p})
+            monkeypatch.setattr(
+                server.loaders, "load_market_snapshot", lambda d, p=phase: {"phase": p}
+            )
             monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
             monkeypatch.setattr(server.loaders, "load_signals", lambda d: [])
             monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
-            monkeypatch.setattr(server.loaders, "load_signal_counts",
-                                lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+            monkeypatch.setattr(
+                server.loaders,
+                "load_signal_counts",
+                lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+            )
             data = server._load_intuitive_data()
             assert expected_word in data["phase_desc"]
 
     def test_dragon_env_descriptions(self, monkeypatch):
-        monkeypatch.setattr(server.loaders, "load_market_snapshot",
-                            lambda d: {"dragon_env": "FAVORABLE"})
+        monkeypatch.setattr(
+            server.loaders, "load_market_snapshot", lambda d: {"dragon_env": "FAVORABLE"}
+        )
         monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_signals", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
-        monkeypatch.setattr(server.loaders, "load_signal_counts",
-                            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+        monkeypatch.setattr(
+            server.loaders,
+            "load_signal_counts",
+            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        )
         data = server._load_intuitive_data()
         assert "积极" in data["dragon_desc"]
 
@@ -107,8 +122,11 @@ class TestLoadIntuitiveData:
         monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_signals", lambda d: signals)
         monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
-        monkeypatch.setattr(server.loaders, "load_signal_counts",
-                            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+        monkeypatch.setattr(
+            server.loaders,
+            "load_signal_counts",
+            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        )
         data = server._load_intuitive_data()
         assert data["recommendation"]["code"] == "000001"
         assert len(data["recommendations"]) == 2
@@ -125,13 +143,16 @@ class TestLoadIntuitiveData:
         monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_signals", lambda d: signals)
         monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
-        monkeypatch.setattr(server.loaders, "load_signal_counts",
-                            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+        monkeypatch.setattr(
+            server.loaders,
+            "load_signal_counts",
+            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        )
         data = server._load_intuitive_data()
         codes = [s["code"] for s in data["observation_signals"]]
-        assert codes == ["000003", "000002"]   # RECOMMEND 在前，SECONDARY 在后
-        assert "000001" not in codes   # BUY 不混入
-        assert "000004" not in codes   # WATCH 排除
+        assert codes == ["000003", "000002"]  # RECOMMEND 在前，SECONDARY 在后
+        assert "000001" not in codes  # BUY 不混入
+        assert "000004" not in codes  # WATCH 排除
 
     def test_no_buy_signals(self, monkeypatch):
         signals = [{"code": "000001", "action": "WATCH"}]
@@ -139,16 +160,20 @@ class TestLoadIntuitiveData:
         monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_signals", lambda d: signals)
         monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
-        monkeypatch.setattr(server.loaders, "load_signal_counts",
-                            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0})
+        monkeypatch.setattr(
+            server.loaders,
+            "load_signal_counts",
+            lambda d: {"day": 0, "total": 0, "ladder_day": 0, "ladder_total": 0},
+        )
         data = server._load_intuitive_data()
         assert data["recommendation"] is None
 
 
 class TestLoadLogicData:
     def test_basic_shape(self, monkeypatch):
-        monkeypatch.setattr(server.loaders, "load_market_snapshot",
-                            lambda d: {"date": "2026-09-25"})
+        monkeypatch.setattr(
+            server.loaders, "load_market_snapshot", lambda d: {"date": "2026-09-25"}
+        )
         monkeypatch.setattr(server.loaders, "load_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_top_ladder", lambda d: [])
         monkeypatch.setattr(server.loaders, "load_promotion", lambda d: [])
@@ -186,8 +211,9 @@ class TestLoadLogicData:
 
 class TestLoadAlgorithmData:
     def test_basic_shape(self, monkeypatch):
-        monkeypatch.setattr(server.loaders, "load_market_snapshot",
-                            lambda d: {"date": "2026-09-25"})
+        monkeypatch.setattr(
+            server.loaders, "load_market_snapshot", lambda d: {"date": "2026-09-25"}
+        )
         data = server._load_algorithm_data()
         assert "formulas" in data
         assert "thresholds" in data
@@ -197,6 +223,7 @@ class TestLoadAlgorithmData:
     def test_snapshot_failure_handled(self, monkeypatch):
         def bad_load(d):
             raise RuntimeError("DB error")
+
         monkeypatch.setattr(server.loaders, "load_market_snapshot", bad_load)
         data = server._load_algorithm_data()
         assert data["market"] == {}
@@ -204,30 +231,26 @@ class TestLoadAlgorithmData:
 
 class TestRenderDashboard:
     def test_intuitive_layer(self, monkeypatch):
-        monkeypatch.setattr(server, "_load_intuitive_data",
-                            lambda d: {"phase": "发酵"})
+        monkeypatch.setattr(server, "_load_intuitive_data", lambda d: {"phase": "发酵"})
         monkeypatch.setattr(server.snapshot, "resolve_date", lambda d: None)
         monkeypatch.setattr(server.snapshot, "banner_ctx", lambda d: {})
         monkeypatch.setattr(server.snapshot, "calendar_ctx", lambda d, m: {})
         monkeypatch.setattr(server.snapshot, "date_links", lambda d: {"date_query": ""})
         monkeypatch.setattr(server.snapshot, "available_dates", lambda: [])
         monkeypatch.setattr(server.snapshot, "recent_snapshots_ctx", lambda d: [])
-        monkeypatch.setattr(server, "_render_template",
-                            lambda name, **ctx: f"rendered:{name}")
+        monkeypatch.setattr(server, "_render_template", lambda name, **ctx: f"rendered:{name}")
         result = server.render_dashboard("intuitive")
         assert "rendered:intuitive.html" == result
 
     def test_strategy_layer(self, monkeypatch):
-        monkeypatch.setattr(server.strategy_view, "strategy_dates",
-                            lambda: ["2026-09-25"])
+        monkeypatch.setattr(server.strategy_view, "strategy_dates", lambda: ["2026-09-25"])
         monkeypatch.setattr(server.snapshot, "resolve_date", lambda d: None)
         monkeypatch.setattr(server.snapshot, "banner_ctx", lambda d: {})
         monkeypatch.setattr(server.snapshot, "calendar_ctx", lambda d, m: {})
         monkeypatch.setattr(server.snapshot, "date_links", lambda d: {"date_query": ""})
         monkeypatch.setattr(server.snapshot, "available_dates", lambda: [])
         monkeypatch.setattr(server.snapshot, "recent_snapshots_ctx", lambda d: [])
-        monkeypatch.setattr(server, "_render_template",
-                            lambda name, **ctx: f"rendered:{name}")
+        monkeypatch.setattr(server, "_render_template", lambda name, **ctx: f"rendered:{name}")
         result = server.render_dashboard("strategy")
         assert "rendered:strategy.html" == result
 
@@ -238,8 +261,7 @@ class TestRenderDashboard:
         monkeypatch.setattr(server.snapshot, "date_links", lambda d: {"date_query": ""})
         monkeypatch.setattr(server.snapshot, "available_dates", lambda: [])
         monkeypatch.setattr(server.snapshot, "recent_snapshots_ctx", lambda d: [])
-        monkeypatch.setattr(server, "_render_template",
-                            lambda name, **ctx: f"rendered:{name}")
+        monkeypatch.setattr(server, "_render_template", lambda name, **ctx: f"rendered:{name}")
         result = server.render_dashboard("unknown")
         assert "rendered:unknown.html" == result
 
@@ -263,10 +285,12 @@ class TestGetStatic:
 class TestJsonDefault:
     def test_decimal(self):
         from decimal import Decimal
+
         assert server._json_default(Decimal("10.5")) == 10.5
 
     def test_date(self):
         from datetime import date
+
         assert server._json_default(date(2026, 9, 25)) == "2026-09-25"
 
     def test_other(self):

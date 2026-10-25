@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-import pandas as pd
 
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import execute
@@ -38,8 +37,10 @@ def _streaks(flags: list[bool]) -> list[int]:
 
 def _pct_case(col: str = "code") -> str:
     """按板块前缀生成涨停分子 CASE 表达式（110=+10%），config 驱动禁 magic number。"""
-    whens = " ".join(f"WHEN left({col}, 2) = '{p}' THEN {v}"
-                     for p, v in sorted(CONFIG.LIMIT_PCT_BY_PREFIX.items()))
+    whens = " ".join(
+        f"WHEN left({col}, 2) = '{p}' THEN {v}"
+        for p, v in sorted(CONFIG.LIMIT_PCT_BY_PREFIX.items())
+    )
     return f"CASE {whens} ELSE {CONFIG.LIMIT_PCT_DEFAULT} END"
 
 
@@ -57,8 +58,7 @@ def _bse_filter(col: str = "s.code") -> str:
     only '%s', '%b', '%t' are allowed as placeholders）——前缀比较同时避开
     这个坑，且与 Rust/Python 镜像实现逐字同形。
     """
-    conds = " AND ".join(f"left({col}, {len(p)}) <> '{p}'"
-                         for p in CONFIG.BSE_EXCLUDED_PREFIXES)
+    conds = " AND ".join(f"left({col}, {len(p)}) <> '{p}'" for p in CONFIG.BSE_EXCLUDED_PREFIXES)
     return f"({conds})"
 
 
@@ -123,13 +123,14 @@ def render_sql() -> str:
     `stock_basic.is_st` 这个「当前口径」标志，2026-10-13 前全表为 false 故从未生效，
     同日转真后 `derived_bar` 自该日起不含 ST（历史含 ST ⇒ 已知断点）。
     """
-    return (_DERIVE_SQL
-            .replace("{pct}", _pct_case("b.code"))
-            .replace("{bse}", _bse_filter("s.code"))
-            .replace("{finite_pre}", _finite("b.pre_close"))
-            .replace("{finite_close}", _finite("b.close"))
-            .replace("{finite_high}", _finite("b.high"))
-            .replace("{finite_low}", _finite("b.low")))
+    return (
+        _DERIVE_SQL.replace("{pct}", _pct_case("b.code"))
+        .replace("{bse}", _bse_filter("s.code"))
+        .replace("{finite_pre}", _finite("b.pre_close"))
+        .replace("{finite_close}", _finite("b.close"))
+        .replace("{finite_high}", _finite("b.high"))
+        .replace("{finite_low}", _finite("b.low"))
+    )
 
 
 def compute_derived(start: date, end: date) -> int:
@@ -174,7 +175,8 @@ def zero_reset(start: date, end: date) -> int:
     return execute(
         "UPDATE derived_bar SET cont_days = 0 "
         "WHERE date BETWEEN %s AND %s AND NOT is_limit_up AND cont_days <> 0",
-        (start, end))
+        (start, end),
+    )
 
 
 def derive_range(start: date, end: date) -> None:
@@ -183,5 +185,12 @@ def derive_range(start: date, end: date) -> None:
     n = compute_derived(warm, end)
     c = compute_cont_days(warm, end)
     z = zero_reset(warm, end)
-    log.info("derived_bar %s~%s：%d 行衍生，%d 行连板回填，%d 行归零"
-             "（喂养窗口自 %s）", start, end, n, c, z, warm)
+    log.info(
+        "derived_bar %s~%s：%d 行衍生，%d 行连板回填，%d 行归零（喂养窗口自 %s）",
+        start,
+        end,
+        n,
+        c,
+        z,
+        warm,
+    )

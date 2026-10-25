@@ -89,7 +89,7 @@ from emotion_core.core import emotion_core_rust as _rust
 
 log = logging.getLogger(__name__)
 
-Status = bool | None                 # True 成立 / False 不成立 / None 证据不足
+Status = bool | None  # True 成立 / False 不成立 / None 证据不足
 
 
 def _cfg(name: str, default: Any) -> Any:
@@ -110,14 +110,15 @@ DRAGON_G2_MIN_MEMBERS: int = _cfg("DRAGON_G2_MIN_MEMBERS", 3)
 
 def _series(end: date, n: int, exchange_only: bool) -> list[int]:
     """近 n 交易日主板最高板序列（exchange_only=True 取换手口径 H）。"""
-    col = "max(CASE WHEN is_exchange THEN cont_days END)" if exchange_only \
-        else "max(cont_days)"
+    col = "max(CASE WHEN is_exchange THEN cont_days END)" if exchange_only else "max(cont_days)"
     df = query_df(
         f"SELECT date, {col} h FROM derived_bar"
         " WHERE cont_days >= 1 AND left(code, 3) IN ("
-        + ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES)) + ")"
+        + ", ".join(["%s"] * len(CONFIG.BOARD_PREFIXES))
+        + ")"
         " AND date <= %s GROUP BY date ORDER BY date DESC LIMIT %s",
-        (*CONFIG.BOARD_PREFIXES, end, n))
+        (*CONFIG.BOARD_PREFIXES, end, n),
+    )
     return [int(v) for v in reversed(df["h"].dropna().tolist())]
 
 
@@ -158,23 +159,29 @@ def g2_theme_ladder(trade_date: date) -> tuple[Status, str]:
         " FROM theme_group WHERE date = %s"
         " AND member_count >= %s"
         " ORDER BY highest_board DESC, member_count DESC LIMIT 1",
-        (trade_date, DRAGON_G2_MIN_MEMBERS))
+        (trade_date, DRAGON_G2_MIN_MEMBERS),
+    )
     if df.empty:
         top = query_df(
             "SELECT theme, member_count FROM theme_group WHERE date = %s"
             " ORDER BY highest_board DESC, member_count DESC LIMIT 1",
-            (trade_date,))
+            (trade_date,),
+        )
         if top.empty:
             return None, "theme_group 当日无数据"
-        return False, (f"最强题材 {top.iloc[0]['theme']} 成员"
-                       f"{int(top.iloc[0]['member_count'] or 0)}"
-                       f"（<{DRAGON_G2_MIN_MEMBERS}，无达标主线）")
+        return False, (
+            f"最强题材 {top.iloc[0]['theme']} 成员"
+            f"{int(top.iloc[0]['member_count'] or 0)}"
+            f"（<{DRAGON_G2_MIN_MEMBERS}，无达标主线）"
+        )
     r = df.iloc[0]
     # V5（二轮审计）：文案方向修正——成员达标 ≠ 无数据；首板维度未实现是
     # 唯一缺口，不得让读者误以为整个 G2 无数据
-    return None, (f"主线题材 {r['theme']} 成员{int(r['member_count'])} 达标"
-                  f"（首板维度未实现 P1.5，首板完整性不计——G2 记 UNKNOWN"
-                  " 不证伪，非「尚无数据」)")
+    return None, (
+        f"主线题材 {r['theme']} 成员{int(r['member_count'])} 达标"
+        f"（首板维度未实现 P1.5，首板完整性不计——G2 记 UNKNOWN"
+        " 不证伪，非「尚无数据」)"
+    )
 
 
 def g3_break_feedback(trade_date: date) -> tuple[Status, str]:
@@ -185,7 +192,8 @@ def g3_break_feedback(trade_date: date) -> tuple[Status, str]:
         " WHERE date <= %s AND fail_perf IS NOT NULL"
         " AND layer = (SELECT max(layer) FROM promotion_day p2 WHERE p2.date <= %s)"
         " ORDER BY date DESC LIMIT %s",
-        (trade_date, trade_date, DRAGON_FEEDBACK_LOOKBACK))
+        (trade_date, trade_date, DRAGON_FEEDBACK_LOOKBACK),
+    )
     if len(df) < 2:
         return None, f"断板反馈样本 {len(df)} 不足"
     perfs = [float(v) for v in df["fail_perf"].tolist()]
@@ -204,8 +212,7 @@ def b2_oneword_made(trade_date: date, a3_hit: bool) -> tuple[Status, str]:
     ★ 判定逻辑由 Rust 实现（ecosystem.rs::b2_oneword_made）。"""
     if not a3_hit:
         return False, "A3 未命中"
-    df = query_df(
-        "SELECT max(divergence) d FROM promotion_day WHERE date = %s", (trade_date,))
+    df = query_df("SELECT max(divergence) d FROM promotion_day WHERE date = %s", (trade_date,))
     d = df["d"].iloc[0]
     if d is None or pd.isna(d):
         return None, "背离度无数据"
@@ -229,15 +236,18 @@ def _tradable_theme_members(trade_date: date) -> list[tuple[str, str | None, int
         " WHERE l.date = %s AND l.is_exchange = true"
         " AND l.cont_days = (SELECT max(cont_days) FROM ladder_day"
         "                    WHERE date = l.date AND is_exchange = true)",
-        (trade_date,))
+        (trade_date,),
+    )
     if df.empty:
         return []
-    def _mc(v):                          # R3：NaN/None 统一 0（防御 join 空档）
+
+    def _mc(v):  # R3：NaN/None 统一 0（防御 join 空档）
         return int(v) if v is not None and not pd.isna(v) else 0
-    def _th(v):                          # R3：pandas NaN 归一 None——NaN
+
+    def _th(v):  # R3：pandas NaN 归一 None——NaN
         return None if v is None or pd.isna(v) else str(v)  # truthy 绕过 UNKNOWN
-    return [(str(r["code"]), _th(r["theme"]), _mc(r["mc"]))
-            for _, r in df.iterrows()]
+
+    return [(str(r["code"]), _th(r["theme"]), _mc(r["mc"])) for _, r in df.iterrows()]
 
 
 def b4_no_sector(trade_date: date) -> tuple[Status, str]:
@@ -257,8 +267,7 @@ def b4_no_sector(trade_date: date) -> tuple[Status, str]:
         return False, f"换手最高板 {c}({th}) 成员{mc}——板块有跟随"
     no_theme = [c for c, th, _ in rows if not th]
     if no_theme:
-        return None, (f"换手最高板 {','.join(no_theme)} 无题材标签"
-                      "（theme 未覆盖），B4 记 UNKNOWN")
+        return None, (f"换手最高板 {','.join(no_theme)} 无题材标签（theme 未覆盖），B4 记 UNKNOWN")
     parts = [f"{c}({th or '—'})成员{mc}" for c, th, mc in rows]
     return True, "换手最高板全孤立：" + "、".join(parts)
 
@@ -275,14 +284,15 @@ def b5_cross_theme(trade_date: date) -> tuple[Status, str]:
         " count(*) FILTER (WHERE t.confidence >= 0.6) c_ok"
         " FROM ladder_day l LEFT JOIN theme_tag t"
         "   ON t.code = l.code AND t.date = l.date"
-        " WHERE l.date = %s AND l.is_top", (trade_date,))
+        " WHERE l.date = %s AND l.is_top",
+        (trade_date,),
+    )
     n, c = int(df["n"].iloc[0] or 0), int(df["c"].iloc[0] or 0)
     c_ok = int(df["c_ok"].iloc[0] or 0)
     if c == 0:
         return None, "当日无同身位组"
     if c_ok == 0:
-        return None, (f"同身位 {c} 只均无可信题材标注"
-                      "（confidence<0.6 弱映射不计），B5 记 UNKNOWN")
+        return None, (f"同身位 {c} 只均无可信题材标注（confidence<0.6 弱映射不计），B5 记 UNKNOWN")
     return n > 1, f"同身位 {c} 只（可信标注 {c_ok}）跨 {n} 题材"
 
 
@@ -303,17 +313,13 @@ def b3_next_day_dump(trade_date: date, mode: str = "live") -> tuple[Status, str]
     """B3 胜出次日即核按钮：近 N 日 sole_top 次日平均跌幅 < 阈值。
     ★ 判定逻辑由 Rust 实现（ecosystem.rs::b3_next_day_dump）。"""
     bound = trade_date if mode == "live" else trade_date + timedelta(days=3)
-    df = query_df(_B3_SQL,
-                  (trade_date, DRAGON_FEEDBACK_LOOKBACK, bound))
+    df = query_df(_B3_SQL, (trade_date, DRAGON_FEEDBACK_LOOKBACK, bound))
     p, c = df["p"].iloc[0], int(df["c"].iloc[0] or 0)
     if c < 2 or p is None or pd.isna(p):
         return None, f"胜出者次日样本 {c} 不足"
     p = round(float(p), 2)
     ok, note = _rust.b3_next_day_dump(p, c, DRAGON_B3_MAX_PERF, mode)
     return ok, note
-
-
-
 
 
 def _verdict(goods: list, bads: list) -> str:
@@ -324,23 +330,26 @@ def _verdict(goods: list, bads: list) -> str:
     return _rust.verdict(rust_goods, rust_bads)
 
 
-def rate(trade_date: date, accel: tuple[bool, str, dict] | None = None,
-         mode: str = "live") -> dict:
+def rate(trade_date: date, accel: tuple[bool, str, dict] | None = None, mode: str = "live") -> dict:
     """评级主入口：返回 {rating, goods, bads}，条件逐项带 状态 + 说明。
 
     accel 可传入 accelerate.detect() 结果复用，避免重复查询（emotion 链路用）；
     工单里写作 `prior` 的那个参数即此 `accel`（lkl 原名，不另设别名）。
     """
     hit, _, facts = accel if accel is not None else accelerate.detect(trade_date)
-    goods = [("G1 可交易高度扩张", *g1_height_expanding(trade_date)),
-             ("G2 主线梯队完整", *g2_theme_ladder(trade_date)),
-             ("G3 断板负反馈温和", *g3_break_feedback(trade_date)),
-             ("G4 胜者上方有空间", *g4_headroom(trade_date))]
-    bads = [("B1 加速事件", *b1_acceleration(trade_date, hit)),
-            ("B2 高度靠一字制造", *b2_oneword_made(trade_date, facts.get("a3", False))),
-            ("B3 胜出次日核按钮", *b3_next_day_dump(trade_date, mode)),
-            ("B4 无板块支持", *b4_no_sector(trade_date)),
-            ("B5 高标跨题材", *b5_cross_theme(trade_date))]
+    goods = [
+        ("G1 可交易高度扩张", *g1_height_expanding(trade_date)),
+        ("G2 主线梯队完整", *g2_theme_ladder(trade_date)),
+        ("G3 断板负反馈温和", *g3_break_feedback(trade_date)),
+        ("G4 胜者上方有空间", *g4_headroom(trade_date)),
+    ]
+    bads = [
+        ("B1 加速事件", *b1_acceleration(trade_date, hit)),
+        ("B2 高度靠一字制造", *b2_oneword_made(trade_date, facts.get("a3", False))),
+        ("B3 胜出次日核按钮", *b3_next_day_dump(trade_date, mode)),
+        ("B4 无板块支持", *b4_no_sector(trade_date)),
+        ("B5 高标跨题材", *b5_cross_theme(trade_date)),
+    ]
     return {"rating": _verdict(goods, bads), "goods": goods, "bads": bads}
 
 
@@ -349,10 +358,13 @@ def _ser(items: list) -> list[dict]:
     return [{"cond": n, "ok": s, "note": t} for n, s, t in items]
 
 
-def persist(trade_date: date, accel: tuple | None = None,
-            mode: str = "live",
-            *, persist_fn: Callable[[date, str, str, str], int],
-            ) -> int:
+def persist(
+    trade_date: date,
+    accel: tuple | None = None,
+    mode: str = "live",
+    *,
+    persist_fn: Callable[[date, str, str, str], int],
+) -> int:
     """评级写回 market_stat（UPDATE；行须已由 emotion.run_range 产出）。
 
     persist_fn 由 orchestration/服务层注入（走 data.loader.update_market_stat_ecosystem），
@@ -360,13 +372,14 @@ def persist(trade_date: date, accel: tuple | None = None,
     """
     r = rate(trade_date, accel, mode)
     return persist_fn(
-        trade_date, r["rating"],
+        trade_date,
+        r["rating"],
         json.dumps(_ser(r["goods"]), ensure_ascii=False),
-        json.dumps(_ser(r["bads"]), ensure_ascii=False))
+        json.dumps(_ser(r["bads"]), ensure_ascii=False),
+    )
 
 
-def run_range(start: date, end: date, *,
-              persist_fn: Callable[[date, str, str, str], int]) -> int:
+def run_range(start: date, end: date, *, persist_fn: Callable[[date, str, str, str], int]) -> int:
     """区间评级：仅处理 market_stat 已有行的交易日，返回成功天数。
 
     ``persist_fn`` 由服务层注入（同 :func:`persist`；``algorithms`` 不得直连
@@ -387,9 +400,9 @@ def run_range(start: date, end: date, *,
     days = query_df(
         "SELECT date FROM market_stat WHERE date BETWEEN %s AND %s"
         " AND tradable_max_days IS NOT NULL ORDER BY date",
-        (start, end))["date"].tolist()
-    n = sum(1 for d in days
-            if persist(d, mode="replay", persist_fn=persist_fn))
+        (start, end),
+    )["date"].tolist()
+    n = sum(1 for d in days if persist(d, mode="replay", persist_fn=persist_fn))
     log.info("dragon_env %s~%s：%d/%d 日", start, end, n, len(days))
     return n
 
@@ -402,18 +415,35 @@ def ladder_health(trade_date: date) -> dict:
     ★ 聚合逻辑由 Rust 实现（ecosystem.rs::ladder_health）。"""
     df = query_df(
         "SELECT code, cont_days, is_exchange, is_sole_top FROM ladder_day"
-        " WHERE date = %s ORDER BY cont_days DESC, code", (trade_date,))
-    rows = [(str(r["code"]), int(r["cont_days"]), bool(r["is_exchange"]),
-             bool(r["is_sole_top"])) for _, r in df.iterrows()]
+        " WHERE date = %s ORDER BY cont_days DESC, code",
+        (trade_date,),
+    )
+    rows = [
+        (str(r["code"]), int(r["cont_days"]), bool(r["is_exchange"]), bool(r["is_sole_top"]))
+        for _, r in df.iterrows()
+    ]
     if not rows:
-        return {"date": trade_date, "rows": 0, "height_nominal": None,
-                "height_exchange": None, "groups": {}, "gaps": [],
-                "sole_top": None, "top_group": []}
+        return {
+            "date": trade_date,
+            "rows": 0,
+            "height_nominal": None,
+            "height_exchange": None,
+            "groups": {},
+            "gaps": [],
+            "sole_top": None,
+            "top_group": [],
+        }
     h = _rust.ladder_health(rows)
-    return {"date": trade_date, "rows": h.rows,
-            "height_nominal": h.height_nominal, "height_exchange": h.height_exchange,
-            "groups": _unpack_groups(h), "gaps": list(h.gaps),
-            "sole_top": h.sole_top, "top_group": list(h.top_group)}
+    return {
+        "date": trade_date,
+        "rows": h.rows,
+        "height_nominal": h.height_nominal,
+        "height_exchange": h.height_exchange,
+        "groups": _unpack_groups(h),
+        "gaps": list(h.gaps),
+        "sole_top": h.sole_top,
+        "top_group": list(h.top_group),
+    }
 
 
 def _unpack_groups(h: object) -> dict[int, int]:
@@ -421,40 +451,51 @@ def _unpack_groups(h: object) -> dict[int, int]:
     return dict(sorted(zip(h.groups_keys, h.groups_vals), reverse=True))
 
 
-def promotion_strength(trade_date: date,
-                       prior: list | None = None) -> dict:
+def promotion_strength(trade_date: date, prior: list | None = None) -> dict:
     """晋级强度：分层晋级率 + 连板持续性（环比）。
     ★ 聚合逻辑由 Rust 实现（ecosystem.rs::promotion_strength）。"""
     df = query_df(
         "SELECT layer, promote_nominal, promote_exchange, rate_nominal,"
         " rate_exchange, divergence, fail_perf FROM promotion_day"
-        " WHERE date = %s ORDER BY layer", (trade_date,))
-    prior_rates = {str(r["layer"]): r.get("rate_exchange")
-                   for r in (prior or [])}
+        " WHERE date = %s ORDER BY layer",
+        (trade_date,),
+    )
+    prior_rates = {str(r["layer"]): r.get("rate_exchange") for r in (prior or [])}
     prior_list = [(layer, rate) for layer, rate in prior_rates.items()]
     rust_layers = []
     for _, r in df.iterrows():
         layer = str(r["layer"])
         rate_ex = None if pd.isna(r["rate_exchange"]) else float(r["rate_exchange"])
-        rust_layers.append((layer,
-                            int(r["promote_nominal"] or 0),
-                            int(r["promote_exchange"] or 0),
-                            None if pd.isna(r["rate_nominal"]) else float(r["rate_nominal"]),
-                            rate_ex,
-                            None if pd.isna(r["divergence"]) else float(r["divergence"]),
-                            None if pd.isna(r["fail_perf"]) else float(r["fail_perf"])))
+        rust_layers.append(
+            (
+                layer,
+                int(r["promote_nominal"] or 0),
+                int(r["promote_exchange"] or 0),
+                None if pd.isna(r["rate_nominal"]) else float(r["rate_nominal"]),
+                rate_ex,
+                None if pd.isna(r["divergence"]) else float(r["divergence"]),
+                None if pd.isna(r["fail_perf"]) else float(r["fail_perf"]),
+            )
+        )
     ps = _rust.promotion_strength(rust_layers, prior_list)
-    layers_out = [{"layer": l.layer,
-                   "promote_nominal": l.promote_nominal,
-                   "promote_exchange": l.promote_exchange,
-                   "rate_nominal": l.rate_nominal,
-                   "rate_exchange": l.rate_exchange,
-                   "divergence": l.divergence,
-                   "fail_perf": l.fail_perf,
-                   "delta_exchange": l.delta_exchange}
-                  for l in ps.layers]
-    return {"date": trade_date, "layers": layers_out,
-            "deep_layer": ps.deep_layer,
-            "deep_rate_nominal": ps.deep_rate_nominal,
-            "deep_rate_exchange": ps.deep_rate_exchange,
-            "deep_delta_exchange": ps.deep_delta_exchange}
+    layers_out = [
+        {
+            "layer": l.layer,
+            "promote_nominal": l.promote_nominal,
+            "promote_exchange": l.promote_exchange,
+            "rate_nominal": l.rate_nominal,
+            "rate_exchange": l.rate_exchange,
+            "divergence": l.divergence,
+            "fail_perf": l.fail_perf,
+            "delta_exchange": l.delta_exchange,
+        }
+        for l in ps.layers
+    ]
+    return {
+        "date": trade_date,
+        "layers": layers_out,
+        "deep_layer": ps.deep_layer,
+        "deep_rate_nominal": ps.deep_rate_nominal,
+        "deep_rate_exchange": ps.deep_rate_exchange,
+        "deep_delta_exchange": ps.deep_delta_exchange,
+    }

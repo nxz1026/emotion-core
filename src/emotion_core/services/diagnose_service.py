@@ -17,6 +17,7 @@
 B 段的 T+1/T+3/T+5 一律 `date <= as_of` 现算（PIT）：目标日之后的腿缺失就是缺失，
 不用未来数据补，不猜。
 """
+
 from __future__ import annotations
 
 import json
@@ -49,7 +50,7 @@ _WINDOW_TEXT = {
 # 故可用位置构造 Checklist 交给 entry.passed_of 聚合；序若变动则退回 entry.checklist 重算。
 _CHECK_IDS: tuple[str, ...] = ("c1", "c2", "c3", "c4", "c5", "w1")
 
-_LIMIT = 10          # B 段各表取最近 N 条
+_LIMIT = 10  # B 段各表取最近 N 条
 _THEME_LIMIT = 3
 
 # ---- SQL（只读；本模块自持，与 services/stock_service 的 data/stock_query 同风格）----
@@ -133,7 +134,7 @@ def _try(fn: Callable, *args, **kwargs) -> Any:
     """执行并折异常为 None——本服务任何一段都不许把异常抛给 /api/stock。"""
     try:
         return fn(*args, **kwargs)
-    except Exception as exc:                                   # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.warning("diagnose 调用 %s 失败：%s", getattr(fn, "__qualname__", fn), exc)
         return None
 
@@ -149,7 +150,7 @@ def _opt(row: Any, key: str, default: Any = None) -> Any:
         value = row[key]
     except (KeyError, IndexError, TypeError):
         return default
-    if value is None or value != value:      # None / NaN（不 import pandas 也能判）
+    if value is None or value != value:  # None / NaN（不 import pandas 也能判）
         return default
     return value
 
@@ -180,6 +181,7 @@ def _as_json(raw: Any) -> Any:
 
 # --------------------------------------------------------------------------- A 段
 
+
 def _why_not_candidate(technical: dict) -> str:
     """非候选时给一句可核验的原因（只用已取的当日行情，不猜）。"""
     if not technical:
@@ -188,55 +190,68 @@ def _why_not_candidate(technical: dict) -> str:
         return "当日未涨停"
     if not int(technical.get("cont_days") or 0):
         return "当日无连板记录"
-    return (f"当日 {technical.get('cont_days')} 连板，但不在梯队在册集合"
-            "（次新 / ST / 非主板之一）")
+    return f"当日 {technical.get('cont_days')} 连板，但不在梯队在册集合（次新 / ST / 非主板之一）"
 
 
-def _checklist_of(cond_rows: list, cand: LadderDay, window: str,
-                  as_of: date) -> Checklist:
+def _checklist_of(cond_rows: list, cand: LadderDay, window: str, as_of: date) -> Checklist:
     """条件行 → domain.Checklist。位序不符时退回 entry.checklist 重算（不自行聚合）。"""
     ids = tuple(str(label).split(" ", 1)[0].lower() for label, _, _ in cond_rows)
     if ids == _CHECK_IDS:
         return Checklist(*[ok for _, ok, _ in cond_rows])
-    if ids == _CHECK_IDS[:-1]:        # 无警告行（entry._WARNINGS 为空时）→ 警告位留 None
+    if ids == _CHECK_IDS[:-1]:  # 无警告行（entry._WARNINGS 为空时）→ 警告位留 None
         return Checklist(*[ok for _, ok, _ in cond_rows], None)
     log.warning("entry.rows 行序变化 %s，退回 entry.checklist 重算", ids)
     return entry.checklist(cand, window, as_of=as_of)
 
 
-def _seg_a(code: str, as_of: date, window: str, has_market_row: bool,
-           technical: dict) -> dict:
+def _seg_a(code: str, as_of: date, window: str, has_market_row: bool, technical: dict) -> dict:
     """A 段：当日身份（连板/换手/梯队层级/唯一最高板）+ 五条件逐项 + W1 警告。"""
     seg: dict[str, Any] = {
-        "title": TITLE_A, "applicable": False, "note": "", "reason": "",
-        "layer": None, "cont_days": None, "is_exchange": None, "is_top": None,
-        "is_sole_top": None, "ladder_role": "", "peers": {},
-        "window": window, "window_text": _WINDOW_TEXT.get(window, "窗口取值未知"),
+        "title": TITLE_A,
+        "applicable": False,
+        "note": "",
+        "reason": "",
+        "layer": None,
+        "cont_days": None,
+        "is_exchange": None,
+        "is_top": None,
+        "is_sole_top": None,
+        "ladder_role": "",
+        "peers": {},
+        "window": window,
+        "window_text": _WINDOW_TEXT.get(window, "窗口取值未知"),
         "window_source": "market_stat" if has_market_row else "缺当日行，按 NONE（保守）",
-        "conditions": [], "warnings": [], "passed": None,
-        "ladder": [], "ladder_count": 0,
+        "conditions": [],
+        "warnings": [],
+        "passed": None,
+        "ladder": [],
+        "ladder_count": 0,
     }
     ladder_rows = []
     for r in _rows(_frame(_LADDER_SQL, (as_of,))):
-        ladder_rows.append({
-            "code": str(r["code"]),
-            "cont_days": int(_opt(r, "cont_days", 0) or 0),
-            "is_exchange": bool(_opt(r, "is_exchange", False)),
-            "is_top": bool(_opt(r, "is_top", False)),
-            "is_sole_top": bool(_opt(r, "is_sole_top", False)),
-            # 仅承载（判定不由这两个字段参与：entry._ctx 用 ladder.build 自算 y_comp）
-            "y_top_group_count": int(_opt(r, "y_top_group_count") or 0),
-            "y_top_survivor_count": int(_opt(r, "y_top_survivor_count") or 0),
-        })
+        ladder_rows.append(
+            {
+                "code": str(r["code"]),
+                "cont_days": int(_opt(r, "cont_days", 0) or 0),
+                "is_exchange": bool(_opt(r, "is_exchange", False)),
+                "is_top": bool(_opt(r, "is_top", False)),
+                "is_sole_top": bool(_opt(r, "is_sole_top", False)),
+                # 仅承载（判定不由这两个字段参与：entry._ctx 用 ladder.build 自算 y_comp）
+                "y_top_group_count": int(_opt(r, "y_top_group_count") or 0),
+                "y_top_survivor_count": int(_opt(r, "y_top_survivor_count") or 0),
+            }
+        )
     seg["ladder_count"] = len(ladder_rows)
     seg["ladder"] = ladder_rows[:20]
 
     mine = next((r for r in ladder_rows if r["code"] == code), None)
     if mine is None:
         seg["reason"] = _why_not_candidate(technical)
-        seg["note"] = ("当日非候选：ladder_day 无该股行 ⇒ 不在梯队"
-                       "（在册门槛 = 主板 + 非 ST + 非次新 + 连板≥2）。"
-                       "五条件不适用，不编造 PASS/FAIL。")
+        seg["note"] = (
+            "当日非候选：ladder_day 无该股行 ⇒ 不在梯队"
+            "（在册门槛 = 主板 + 非 ST + 非次新 + 连板≥2）。"
+            "五条件不适用，不编造 PASS/FAIL。"
+        )
         return seg
 
     seg["applicable"] = True
@@ -251,33 +266,55 @@ def _seg_a(code: str, as_of: date, window: str, has_market_row: bool,
         "same_cont_exchange": sum(1 for r in same if r["is_exchange"]),
         "max_cont": max((r["cont_days"] for r in ladder_rows), default=0),
     }
-    seg["ladder_role"] = ("唯一最高板（换手口径）" if mine["is_sole_top"]
-                          else (f"最高身位成员（并列 {len(same)} 只）" if mine["is_top"]
-                                else f"{mine['cont_days']} 板成员"))
+    seg["ladder_role"] = (
+        "唯一最高板（换手口径）"
+        if mine["is_sole_top"]
+        else (
+            f"最高身位成员（并列 {len(same)} 只）"
+            if mine["is_top"]
+            else f"{mine['cont_days']} 板成员"
+        )
+    )
 
-    cand = LadderDay(date=as_of, code=code, cont_days=mine["cont_days"],
-                     is_exchange=mine["is_exchange"], is_top=mine["is_top"],
-                     is_sole_top=mine["is_sole_top"],
-                     y_top_group_count=mine["y_top_group_count"],
-                     y_top_survivor_count=mine["y_top_survivor_count"])
+    cand = LadderDay(
+        date=as_of,
+        code=code,
+        cont_days=mine["cont_days"],
+        is_exchange=mine["is_exchange"],
+        is_top=mine["is_top"],
+        is_sole_top=mine["is_sole_top"],
+        y_top_group_count=mine["y_top_group_count"],
+        y_top_survivor_count=mine["y_top_survivor_count"],
+    )
     cond_rows = _try(entry.rows, cand, window, as_of=as_of)
     if not cond_rows:
-        seg["note"] = ("五条件不可核验：entry.rows 未产出（上游缺数或数据库异常），"
-                       "不编造 PASS/FAIL。")
+        seg["note"] = (
+            "五条件不可核验：entry.rows 未产出（上游缺数或数据库异常），不编造 PASS/FAIL。"
+        )
         return seg
 
     for label, ok, note in cond_rows:
         cid = str(label).split(" ", 1)[0].lower()
         if cid.startswith("w"):
-            seg["warnings"].append({
-                "id": cid, "label": str(label), "ok": ok,
-                "status": "WARN" if str(note).startswith("⚠") else "OK",
-                "note": str(note)})
+            seg["warnings"].append(
+                {
+                    "id": cid,
+                    "label": str(label),
+                    "ok": ok,
+                    "status": "WARN" if str(note).startswith("⚠") else "OK",
+                    "note": str(note),
+                }
+            )
         else:
-            seg["conditions"].append({
-                "id": cid, "label": str(label), "ok": ok,
-                "status": "UNKNOWN" if ok is None else ("PASS" if ok else "FAIL"),
-                "note": str(note)})
+            seg["conditions"].append(
+                {
+                    "id": cid,
+                    "label": str(label),
+                    "ok": ok,
+                    "status": "UNKNOWN" if ok is None else ("PASS" if ok else "FAIL"),
+                    "note": str(note),
+                }
+            )
     cl = _try(_checklist_of, cond_rows, cand, window, as_of)
     seg["passed"] = None if cl is None else entry.passed_of(cl)
     return seg
@@ -285,62 +322,83 @@ def _seg_a(code: str, as_of: date, window: str, has_market_row: bool,
 
 # --------------------------------------------------------------------------- B 段
 
+
 def _seg_b(code: str, as_of: date, basic: dict) -> dict:
     """B 段：历史身份 + 历史唯一最高板与后续 T+1/T+3/T+5 + 历史信号及结果。"""
     first_bar = basic.get("first_bar_date")
-    new_issuer = None if first_bar is None else _try(stock_algo.is_new_issuer,
-                                                     first_bar, as_of)
+    new_issuer = None if first_bar is None else _try(stock_algo.is_new_issuer, first_bar, as_of)
     seg: dict[str, Any] = {
-        "title": TITLE_B, "available": True,
+        "title": TITLE_B,
+        "available": True,
         "identity": {
-            "name": basic.get("name"), "industry": basic.get("industry"),
+            "name": basic.get("name"),
+            "industry": basic.get("industry"),
             "market_cap": basic.get("market_cap"),
-            "float_shares": basic.get("float_shares"), "first_bar_date": first_bar,
-            "list_date": basic.get("list_date"), "is_st": basic.get("is_st"),
-            "in_market": basic.get("in_market"), "is_new_issuer": new_issuer,
+            "float_shares": basic.get("float_shares"),
+            "first_bar_date": first_bar,
+            "list_date": basic.get("list_date"),
+            "is_st": basic.get("is_st"),
+            "in_market": basic.get("in_market"),
+            "is_new_issuer": new_issuer,
         },
-        "sole_top_history": [], "sole_top_n": 0, "return_summary": {},
-        "signals": [], "signal_n": 0, "note": "",
+        "sole_top_history": [],
+        "sole_top_n": 0,
+        "return_summary": {},
+        "signals": [],
+        "signal_n": 0,
+        "note": "",
     }
     if first_bar is None:
         seg["note"] = "stock_basic.first_bar_date 缺失 → 次新判定不可核验。"
 
     for r in _rows(_frame(_SOLE_TOP_SQL, (code, as_of, code, as_of, _LIMIT))):
-        seg["sole_top_history"].append({
-            "date": _opt(r, "date"),
-            "t1_ret": _opt(r, "t1_ret"), "t3_ret": _opt(r, "t3_ret"),
-            "t5_ret": _opt(r, "t5_ret"),
-        })
+        seg["sole_top_history"].append(
+            {
+                "date": _opt(r, "date"),
+                "t1_ret": _opt(r, "t1_ret"),
+                "t3_ret": _opt(r, "t3_ret"),
+                "t5_ret": _opt(r, "t5_ret"),
+            }
+        )
     seg["sole_top_n"] = len(seg["sole_top_history"])
     hist = seg["sole_top_history"]
     for key in ("t1_ret", "t3_ret", "t5_ret"):
-        seg["return_summary"][f"avg_{key.split('_')[0]}"] = stock_algo.mean(
-            [h[key] for h in hist])
+        seg["return_summary"][f"avg_{key.split('_')[0]}"] = stock_algo.mean([h[key] for h in hist])
     t1 = [h["t1_ret"] for h in hist if h["t1_ret"] is not None]
     seg["return_summary"]["win_rate_t1"] = (
-        None if not t1 else round(sum(1 for v in t1 if float(v) > 0) / len(t1) * 100, 1))
+        None if not t1 else round(sum(1 for v in t1 if float(v) > 0) / len(t1) * 100, 1)
+    )
 
     for r in _rows(_frame(_SIGNAL_SQL, (code, as_of, _LIMIT))):
-        seg["signals"].append({
-            "confirm_date": _opt(r, "confirm_date"), "action": _opt(r, "action"),
-            "status": _opt(r, "status"), "buy_window": _opt(r, "buy_window"),
-            "source": _opt(r, "source"), "checklist": _as_rows(_opt(r, "checklist")),
-            "outcome": {
-                "t1_gap": _opt(r, "t1_gap"), "t1_promote": _opt(r, "t1_promote"),
-                "t1_close_ret": _opt(r, "t1_close_ret"), "max_up5": _opt(r, "max_up5"),
-                "max_dd5": _opt(r, "max_dd5"), "t5_close_ret": _opt(r, "t5_close_ret"),
-                "rule_ret_a": _opt(r, "rule_ret_a"),
-                "rule_ret_d": _opt(r, "rule_ret_d"), "complete": _opt(r, "complete"),
-            },
-        })
+        seg["signals"].append(
+            {
+                "confirm_date": _opt(r, "confirm_date"),
+                "action": _opt(r, "action"),
+                "status": _opt(r, "status"),
+                "buy_window": _opt(r, "buy_window"),
+                "source": _opt(r, "source"),
+                "checklist": _as_rows(_opt(r, "checklist")),
+                "outcome": {
+                    "t1_gap": _opt(r, "t1_gap"),
+                    "t1_promote": _opt(r, "t1_promote"),
+                    "t1_close_ret": _opt(r, "t1_close_ret"),
+                    "max_up5": _opt(r, "max_up5"),
+                    "max_dd5": _opt(r, "max_dd5"),
+                    "t5_close_ret": _opt(r, "t5_close_ret"),
+                    "rule_ret_a": _opt(r, "rule_ret_a"),
+                    "rule_ret_d": _opt(r, "rule_ret_d"),
+                    "complete": _opt(r, "complete"),
+                },
+            }
+        )
     seg["signal_n"] = len(seg["signals"])
     return seg
 
 
 # --------------------------------------------------------------------------- C 段
 
-def _seg_c(code: str, as_of: date, layer: str | None, market_row: Any,
-           stats: dict | None) -> dict:
+
+def _seg_c(code: str, as_of: date, layer: str | None, market_row: Any, stats: dict | None) -> dict:
     """C 段：晋级率双口径 + divergence + 题材完整性 + 生态评级 + 同状态赔率。"""
     stats = stats or {}
     promo_row = stats.get("promo_row") or None
@@ -349,30 +407,63 @@ def _seg_c(code: str, as_of: date, layer: str | None, market_row: Any,
 
     promotion = None
     if promo_row:
-        promotion = {k: promo_row.get(k) for k in
-                     ("layer", "total", "promoted", "rate", "rate_exchange",
-                      "divergence", "perf_median", "win_rate", "perf_n", "fail_perf")}
+        promotion = {
+            k: promo_row.get(k)
+            for k in (
+                "layer",
+                "total",
+                "promoted",
+                "rate",
+                "rate_exchange",
+                "divergence",
+                "perf_median",
+                "win_rate",
+                "perf_n",
+                "fail_perf",
+            )
+        }
 
     rating = _opt(market_row, "dragon_env")
     dragon = None
     if rating:
-        dragon = {"rating": rating,
-                  "reasons": _as_json(_opt(market_row, "dragon_env_reasons")),
-                  "risks": _as_json(_opt(market_row, "dragon_env_risks")),
-                  "accelerate": _opt(market_row, "accelerate"),
-                  "accel_reason": _opt(market_row, "accel_reason")}
+        dragon = {
+            "rating": rating,
+            "reasons": _as_json(_opt(market_row, "dragon_env_reasons")),
+            "risks": _as_json(_opt(market_row, "dragon_env_risks")),
+            "accelerate": _opt(market_row, "accelerate"),
+            "accel_reason": _opt(market_row, "accel_reason"),
+        }
 
     themes = []
     for r in _rows(_frame(_THEME_SQL, (code, as_of, _THEME_LIMIT))):
-        themes.append({k: _opt(r, k) for k in
-                       ("date", "primary_theme", "role", "confidence", "completeness",
-                        "status", "highest_board", "member_count", "top_code")})
+        themes.append(
+            {
+                k: _opt(r, k)
+                for k in (
+                    "date",
+                    "primary_theme",
+                    "role",
+                    "confidence",
+                    "completeness",
+                    "status",
+                    "highest_board",
+                    "member_count",
+                    "top_code",
+                )
+            }
+        )
 
     seg: dict[str, Any] = {
-        "title": TITLE_C, "layer": layer, "promotion": promotion,
-        "forward5": fwd5, "dragon_env": dragon,
-        "diverge": _opt(market_row, "diverge"), "odds": buy_point,
-        "themes": themes, "available": False, "note": "",
+        "title": TITLE_C,
+        "layer": layer,
+        "promotion": promotion,
+        "forward5": fwd5,
+        "dragon_env": dragon,
+        "diverge": _opt(market_row, "diverge"),
+        "odds": buy_point,
+        "themes": themes,
+        "available": False,
+        "note": "",
     }
     missing = []
     if not stats:
@@ -394,8 +485,8 @@ def _seg_c(code: str, as_of: date, layer: str | None, market_row: Any,
 
 # --------------------------------------------------------------------------- 入口
 
-def diagnose(code: str, as_of: date | None = None, *,
-             stats: dict | None = None) -> dict:
+
+def diagnose(code: str, as_of: date | None = None, *, stats: dict | None = None) -> dict:
     """三段式个股诊断（/api/stock 的 `diagnose` 段；也可独立调用）。
 
     Args:
@@ -438,11 +529,18 @@ def diagnose(code: str, as_of: date | None = None, *,
     market: dict[str, Any] = {}
     for r in _rows(_frame(_MARKET_SQL, (as_of,)))[:1]:
         market_row = r
-        market = {"phase": str(_opt(r, "phase", "")),
-                  "buy_window": str(_opt(r, "buy_window", ""))}
-        for key in ("has_candidate", "diverge", "force_liquidate", "max_limit_days",
-                    "dragon_env", "accelerate", "accel_reason", "reason",
-                    "tradable_max_days"):
+        market = {"phase": str(_opt(r, "phase", "")), "buy_window": str(_opt(r, "buy_window", ""))}
+        for key in (
+            "has_candidate",
+            "diverge",
+            "force_liquidate",
+            "max_limit_days",
+            "dragon_env",
+            "accelerate",
+            "accel_reason",
+            "reason",
+            "tradable_max_days",
+        ):
             market[key] = _opt(r, key)
 
     window = market.get("buy_window") or "NONE"
@@ -451,8 +549,11 @@ def diagnose(code: str, as_of: date | None = None, *,
         out = _try(fn, *args, **kwargs)
         if isinstance(out, dict):
             return out
-        return {"title": title, "available": False,
-                "note": "该段数据不可用（查询/判定异常），已降级。"}
+        return {
+            "title": title,
+            "available": False,
+            "note": "该段数据不可用（查询/判定异常），已降级。",
+        }
 
     seg_a = guard(TITLE_A, _seg_a, code, as_of, window, bool(market_row), technical)
     seg_b = guard(TITLE_B, _seg_b, code, as_of, fundamental)
@@ -461,9 +562,14 @@ def diagnose(code: str, as_of: date | None = None, *,
     layer = (seg_a or {}).get("layer") or (stats or {}).get("layer")
     seg_c = guard(TITLE_C, _seg_c, code, as_of, layer, market_row, stats)
     return {
-        "code": code, "as_of": as_of, "technical": technical,
-        "fundamental": fundamental, "market": market,
-        "A": seg_a, "B": seg_b, "C": seg_c,
+        "code": code,
+        "as_of": as_of,
+        "technical": technical,
+        "fundamental": fundamental,
+        "market": market,
+        "A": seg_a,
+        "B": seg_b,
+        "C": seg_c,
         "note": "三段式：A 当日身份与五条件（口径 = algorithms/entry.py）；"
-                "B 历史身份、唯一最高板与信号结果；C 统计赔率（PIT，非未来承诺）。",
+        "B 历史身份、唯一最高板与信号结果；C 统计赔率（PIT，非未来承诺）。",
     }

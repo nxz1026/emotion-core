@@ -1,4 +1,5 @@
 """测试 WindClient（CLI 调用 + 错误处理）。"""
+
 from __future__ import annotations
 
 import json
@@ -27,14 +28,17 @@ class FakeCompleted:
 def _make_runner(stdout: str):
     def runner(argv: Sequence[str], cwd: Path, timeout: float):
         return FakeCompleted(stdout)
+
     return runner
 
 
 def _success_response(data: dict) -> str:
-    return json.dumps({
-        "content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}],
-        "isError": False,
-    })
+    return json.dumps(
+        {
+            "content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}],
+            "isError": False,
+        }
+    )
 
 
 def test_availability_cli_missing():
@@ -124,8 +128,10 @@ def test_call_param_error():
 
 def test_call_timeout():
     """超时时抛 WindSourceError。"""
+
     def runner(argv, cwd, timeout):
         raise subprocess.TimeoutExpired(cmd="node", timeout=timeout)
+
     client = WindClient(runner=runner)
     with patch.object(client, "availability", return_value=(True, "")):
         with pytest.raises(WindSourceError):

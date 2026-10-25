@@ -9,6 +9,7 @@ Rust 侧价格函数是私有 fn，只能经 `compute_derived` 的判据间接�
 双向钉死。Python 参考实现：`src/emotion_core/utils/price.py`（唯一涨停价实现，
 整数分运算，四舍五入 = SQL 整数式 `(x*pct + 50)/100`）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,10 +29,20 @@ D1 = date(2026, 3, 2)
 
 # (代码, 期望千分比)：主板 100 / 创业科创 200 / 北交所 300
 BOARDS = [
-    ("600825", 100), ("601398", 100), ("603259", 100), ("605100", 100),
-    ("000001", 100), ("001979", 100), ("002415", 100),
-    ("300750", 200), ("301236", 200), ("688981", 200),
-    ("430047", 300), ("830799", 300), ("871981", 300), ("920002", 300),
+    ("600825", 100),
+    ("601398", 100),
+    ("603259", 100),
+    ("605100", 100),
+    ("000001", 100),
+    ("001979", 100),
+    ("002415", 100),
+    ("300750", 200),
+    ("301236", 200),
+    ("688981", 200),
+    ("430047", 300),
+    ("830799", 300),
+    ("871981", 300),
+    ("920002", 300),
     ("bj430047", 300),
 ]
 
@@ -40,8 +51,14 @@ def _rust_flags(code: str, o: int, h: int, lo: int, cl: int, pc: int) -> tuple:
     """Rust 侧判据元组 (lu, ld, one_word, exchange, bomb, touched)。"""
     bar = rust.Bar(code, D1, o, h, lo, cl, pc, 10, 0.1)
     r = rust.compute_derived([bar])[0]
-    return (r.is_limit_up, r.is_limit_down, r.is_one_word, r.is_exchange,
-            r.is_bomb, r.touched_limit)
+    return (
+        r.is_limit_up,
+        r.is_limit_down,
+        r.is_one_word,
+        r.is_exchange,
+        r.is_bomb,
+        r.touched_limit,
+    )
 
 
 @pytest.mark.parametrize("code,pct", BOARDS)
@@ -63,10 +80,10 @@ def test_limit_price_flags(code, pct):
     ld = limit_down_price_cents(pre, code)
     cases = [
         # (open, high, low, close, 期望 (lu, ld, ow, ex, bomb, tl))
-        (lu, lu, lu, lu, (True, False, True, False, False, True)),           # 一字板
-        (lu - 5, lu, lu - 1, lu, (True, False, False, True, False, True)),   # 换手板
-        (lu, lu + 1, lu, lu + 1, (False, False, True, False, True, True)),   # 多一分：炸板
-        (ld, ld, ld, ld, (False, True, False, False, False, False)),         # 跌停
+        (lu, lu, lu, lu, (True, False, True, False, False, True)),  # 一字板
+        (lu - 5, lu, lu - 1, lu, (True, False, False, True, False, True)),  # 换手板
+        (lu, lu + 1, lu, lu + 1, (False, False, True, False, True, True)),  # 多一分：炸板
+        (ld, ld, ld, ld, (False, True, False, False, False, False)),  # 跌停
         (ld - 1, ld - 1, ld - 1, ld - 1, (False, False, False, False, False, False)),
     ]
     for o, h, lo, cl, expected in cases:
@@ -74,12 +91,15 @@ def test_limit_price_flags(code, pct):
         assert got == expected, f"{code} pre={pre} close={cl}：Rust {got} vs 期望 {expected}"
 
 
-@pytest.mark.parametrize("code,pre,rounded", [
-    ("600825", 1005, 1106),   # 1005*1100 = 1105500，+500 → 1106（截断会得 1105）
-    ("300750", 1003, 1204),   # 1003*1200 = 1203600，+500 → 1204
-    ("430047", 1002, 1303),   # 1002*1300 = 1302600，+500 → 1303
-    ("920002", 1002, 1303),   # 920 号段同 30%（2026-10-07 补的分支）
-])
+@pytest.mark.parametrize(
+    "code,pre,rounded",
+    [
+        ("600825", 1005, 1106),  # 1005*1100 = 1105500，+500 → 1106（截断会得 1105）
+        ("300750", 1003, 1204),  # 1003*1200 = 1203600，+500 → 1204
+        ("430047", 1002, 1303),  # 1002*1300 = 1302600，+500 → 1303
+        ("920002", 1002, 1303),  # 920 号段同 30%（2026-10-07 补的分支）
+    ],
+)
 def test_limit_price_rounds_half_up_not_truncates(code, pre, rounded):
     """涨停价 = 四舍五入（SQL 整数式 `(x*pct + 50)/100`），不是直接截断。"""
     pct = board_pct_milli(code)

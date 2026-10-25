@@ -8,6 +8,7 @@
 反向证据：`derived_bar` DDL 一旦出现 is_st 列，就说明有人把 ST 判定下沉到派生层，
 本测试即失败——那意味着下游必须各自重剔一次，口径开始分叉。
 """
+
 from __future__ import annotations
 
 from emotion_core.algorithms import derive
@@ -24,7 +25,8 @@ def test_derived_bar_has_no_st_column():
     ddl = schema.DDL["derived_bar"]
     assert "is_st" not in ddl, (
         "derived_bar 不得有 is_st 列：ST 只能由 derive 一次性剔除，"
-        "下沉到派生层会让每个下游各自重剔一次")
+        "下沉到派生层会让每个下游各自重剔一次"
+    )
 
 
 def test_stock_basic_owns_the_st_flag():
@@ -35,7 +37,7 @@ def test_stock_basic_owns_the_st_flag():
 
 def test_emotion_counts_read_derived_bar_only():
     """情绪家数从 derived_bar 取（已剔 ST），不再回查 daily_bar 自行过滤。"""
-    src = (schema.DDL["derived_bar"])
+    src = schema.DDL["derived_bar"]
     assert "is_limit_up" in src and "is_bomb" in src and "is_limit_down" in src
     import inspect
 

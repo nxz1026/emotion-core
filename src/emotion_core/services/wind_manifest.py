@@ -3,9 +3,9 @@
 将 WindClient 的每次调用落库到 ops_raw_manifest + ops_quota_ledger，
 用于事后溯源与配额核对。
 """
+
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from typing import Any, Mapping
@@ -53,5 +53,6 @@ def record_call(call: WindCall) -> None:
 
 def _hash_params(params: Mapping[str, Any]) -> str:
     import hashlib
+
     canonical = json.dumps(params, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]

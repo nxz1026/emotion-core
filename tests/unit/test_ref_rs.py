@@ -1,8 +1,9 @@
 """ref_rs 相对强弱排名服务测试。"""
+
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -5,6 +5,7 @@
 端点实测坑适配（PLAN §E4.1）：json 围栏剥离 / timeout 按档 30~180s /
 仅超时与5xx重试（4xx 直抛）/ 失败也写 llm_call_log(status=ERROR)。
 """
+
 from __future__ import annotations
 
 import json
@@ -34,8 +35,9 @@ def _cfg(name, default):
     return getattr(CONFIG, name, default)
 
 
-LLM_ENABLED = _cfg("LLM_ENABLED", os.environ.get(
-    "LKL_LLM_ENABLED", "").lower() in ("1", "true", "yes"))
+LLM_ENABLED = _cfg(
+    "LLM_ENABLED", os.environ.get("LKL_LLM_ENABLED", "").lower() in ("1", "true", "yes")
+)
 
 
 @dataclass(frozen=True)
@@ -58,9 +60,14 @@ class LLMReply:
     model: str
 
 
-_ENV_MAP = {"LKL_LLM_MODEL": "model", "LKL_LLM_TEMPERATURE": "temperature",
-            "LKL_LLM_MAX_TOKENS": "max_tokens", "LKL_LLM_TOP_P": "top_p",
-            "LKL_LLM_TIMEOUT": "timeout", "LKL_LLM_BASE_URL": "base_url"}
+_ENV_MAP = {
+    "LKL_LLM_MODEL": "model",
+    "LKL_LLM_TEMPERATURE": "temperature",
+    "LKL_LLM_MAX_TOKENS": "max_tokens",
+    "LKL_LLM_TOP_P": "top_p",
+    "LKL_LLM_TIMEOUT": "timeout",
+    "LKL_LLM_BASE_URL": "base_url",
+}
 
 
 def _cast(value: str, like):
@@ -108,14 +115,15 @@ class LLMClient:
         self.params = resolve_params(profile, overrides)
         self.api_key = resolve_key(profile)
 
-    def complete(self, prompt: str, system: str | None = None,
-                 purpose: str = "complete") -> str:
-        msgs = ([{"role": "system", "content": system}] if system else []) \
-            + [{"role": "user", "content": prompt}]
+    def complete(self, prompt: str, system: str | None = None, purpose: str = "complete") -> str:
+        msgs = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": "user", "content": prompt}
+        ]
         return self.chat(msgs, purpose=purpose).text
 
-    def chat(self, messages: list[dict], purpose: str = "chat",
-             json_mode: bool = False) -> LLMReply:
+    def chat(
+        self, messages: list[dict], purpose: str = "chat", json_mode: bool = False
+    ) -> LLMReply:
         with self._lock:
             original = (self.profile, self.params, self.api_key)
             try:
@@ -123,8 +131,7 @@ class LLMClient:
             finally:
                 self.profile, self.params, self.api_key = original
 
-    def _chat_locked(self, messages: list[dict], purpose: str,
-                     json_mode: bool) -> LLMReply:
+    def _chat_locked(self, messages: list[dict], purpose: str, json_mode: bool) -> LLMReply:
         chain = resolve_chain(self.profile)
         self._request_profile = self.profile
         failures: list[str] = []
@@ -138,14 +145,17 @@ class LLMClient:
             except LLMNotConfigured:
                 err = "LLMNotConfigured"
                 failures.append(f"{backend}: {err}")
-                self._log_call(None, purpose, self._latency_ms(t0),
-                               status="FAILOVER", err=err)
+                self._log_call(None, purpose, self._latency_ms(t0), status="FAILOVER", err=err)
             except Exception as exc:  # noqa: BLE001
                 err = short_error(exc, (self.api_key,))
                 failures.append(f"{backend}: {err}")
-                self._log_call(None, purpose, self._latency_ms(t0),
-                               status="ERROR" if len(chain) == 1 else "FAILOVER",
-                               err=err)
+                self._log_call(
+                    None,
+                    purpose,
+                    self._latency_ms(t0),
+                    status="ERROR" if len(chain) == 1 else "FAILOVER",
+                    err=err,
+                )
                 if len(chain) == 1 or not fallback_error(exc):
                     raise
         raise LLMChainExhausted("LLM 回退链耗尽：" + "；".join(failures))
@@ -156,28 +166,39 @@ class LLMClient:
 
     def _payload(self, messages: list[dict], json_mode: bool) -> dict:
         p = self.params
-        payload = {"model": p.model, "messages": messages,
-                   "temperature": p.temperature, "max_tokens": p.max_tokens,
-                   "top_p": p.top_p}
+        payload = {
+            "model": p.model,
+            "messages": messages,
+            "temperature": p.temperature,
+            "max_tokens": p.max_tokens,
+            "top_p": p.top_p,
+        }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
 
     def _select_backend(self, profile: str, is_request: bool = True) -> None:
         self.profile = profile
-        overrides = self._overrides if is_request else {
-            "max_retry": self._overrides["max_retry"]
-        } if "max_retry" in self._overrides else {}
+        overrides = (
+            self._overrides
+            if is_request
+            else {"max_retry": self._overrides["max_retry"]}
+            if "max_retry" in self._overrides
+            else {}
+        )
         self.params = resolve_params(profile, overrides)
         self.api_key = resolve_key(profile)
 
     def _reply(self, data: dict, purpose: str, latency_ms: int) -> LLMReply:
         msg = data["choices"][0]["message"]
         usage = data.get("usage") or {}
-        reply = LLMReply(strip_fence(msg.get("content") or ""),
-                         int(usage.get("prompt_tokens", 0)),
-                         int(usage.get("completion_tokens", 0)), latency_ms,
-                         data.get("model", self.params.model))
+        reply = LLMReply(
+            strip_fence(msg.get("content") or ""),
+            int(usage.get("prompt_tokens", 0)),
+            int(usage.get("completion_tokens", 0)),
+            latency_ms,
+            data.get("model", self.params.model),
+        )
         self._log_call(reply, purpose, reply.latency_ms, status="OK")
         return reply
 
@@ -188,8 +209,7 @@ class LLMClient:
         last: Exception = RuntimeError("unreachable")
         for attempt in range(self.params.max_retry + 1):
             try:
-                resp = httpx.post(url, json=payload, headers=headers,
-                                  timeout=self.params.timeout)
+                resp = httpx.post(url, json=payload, headers=headers, timeout=self.params.timeout)
                 if resp.status_code >= 500:
                     raise httpx.TransportError(f"5xx {resp.status_code}")
                 resp.raise_for_status()
@@ -201,11 +221,12 @@ class LLMClient:
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last = exc
             if attempt < self.params.max_retry:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         raise last
 
-    def _log_call(self, reply: LLMReply | None, purpose: str, latency_ms: int,
-                  status: str, err: str = "") -> None:
+    def _log_call(
+        self, reply: LLMReply | None, purpose: str, latency_ms: int, status: str, err: str = ""
+    ) -> None:
         """写 llm_call_log；DB 故障静默降级，绝不影响主流程。"""
         try:
             r = reply
@@ -213,11 +234,16 @@ class LLMClient:
                 "INSERT INTO llm_call_log (profile, model, purpose,"
                 " prompt_tokens, completion_tokens, latency_ms, status)"
                 " VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (self.profile, self.params.model, purpose,
-                 r.prompt_tokens if r else None,
-                 r.completion_tokens if r else None,
-                 latency_ms,
-                 (status + (f":{err}" if err else ""))[:200]))
+                (
+                    self.profile,
+                    self.params.model,
+                    purpose,
+                    r.prompt_tokens if r else None,
+                    r.completion_tokens if r else None,
+                    latency_ms,
+                    (status + (f":{err}" if err else ""))[:200],
+                ),
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -237,9 +263,9 @@ def comment(trade_date) -> str:
     """V9 异步点评：读已落盘报告 → 脱敏 → LLM 点评 → 追加写回文件。"""
     if not LLM_ENABLED:
         return ""
-    from emotion_core.algorithms.review.utils import (_atomic_write,
-                                                      _strip_position_block)
+    from emotion_core.algorithms.review.utils import _atomic_write, _strip_position_block
     from pathlib import Path
+
     out = Path("reports") / f"{trade_date}.md"
     if not out.exists():
         return ""
@@ -249,9 +275,16 @@ def comment(trade_date) -> str:
     try:
         sanitized = _strip_position_block(md)
         reply = get_client("default").chat(
-            [{"role": "system", "content": "你是A股龙空龙策略复盘助手，"
-             "对复盘报告给≤120字要点点评，不构成投资建议。"},
-             {"role": "user", "content": sanitized}], purpose="llm-comment")
+            [
+                {
+                    "role": "system",
+                    "content": "你是A股龙空龙策略复盘助手，"
+                    "对复盘报告给≤120字要点点评，不构成投资建议。",
+                },
+                {"role": "user", "content": sanitized},
+            ],
+            purpose="llm-comment",
+        )
         section = f"\n## ⑪ LLM 点评（{reply.model}，仅供参考）\n\n{reply.text}\n"
         _atomic_write(out, md + section)
         return section

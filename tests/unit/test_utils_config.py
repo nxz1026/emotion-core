@@ -1,4 +1,5 @@
 """utils/config.py 单元测试：Config 字段默认值与 config_hash。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -114,6 +115,7 @@ class TestConfigHash:
         import hashlib
         import json
         from dataclasses import asdict
+
         payload = json.dumps(asdict(CONFIG), default=str, sort_keys=True)
         expected = hashlib.sha256(payload.encode()).hexdigest()[:12]
         assert config_hash() == expected

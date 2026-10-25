@@ -20,6 +20,7 @@ from emotion_core.data.providers import sina_quote as mine
 
 CPT_PATH = "/home/ubuntu/DSH/Chan_Pattern_Trader"
 
+
 #: 构造一段新浪批量响应：字段 34 位，格式与真实响应一致。
 def _row(
     name: str = "测试股",
@@ -75,9 +76,19 @@ class TestParseMatchesCpt:
 
     def test_suspended_row_equal(self, cpt_parser):
         """停牌：价量全 0 ⇒ 五档整对 `None`，量记 0.0。"""
-        row = _row(open_="0", prev="2.46", last="0", high="0", low="0",
-                   vol="0", amount="0", bid_vol="0", bid_price="0",
-                   ask_vol="0", ask_price="0")
+        row = _row(
+            open_="0",
+            prev="2.46",
+            last="0",
+            high="0",
+            low="0",
+            vol="0",
+            amount="0",
+            bid_vol="0",
+            bid_price="0",
+            ask_vol="0",
+            ask_price="0",
+        )
         text = _response([("sz000016", row)])
         a = mine.parse_sina_quotes(text)["000016"]
         b = {k[2:]: v for k, v in cpt_parser(text).items()}["000016"]
@@ -140,9 +151,19 @@ class TestNormalizeCodeMatchesCpt:
         from cpt.adapters.a_share_public import normalize_code as cpt_norm
 
         codes = [
-            "600519", "000002", "300750", "688981", "920296", "830799",
-            "430418", "873122", "sh600519", "sz000002", "bj920296",
-            "600519.SH", "000002.SZ",
+            "600519",
+            "000002",
+            "300750",
+            "688981",
+            "920296",
+            "830799",
+            "430418",
+            "873122",
+            "sh600519",
+            "sz000002",
+            "bj920296",
+            "600519.SH",
+            "000002.SZ",
         ]
         for code in codes:
             assert mine.normalize_code(code) == cpt_norm(code), code

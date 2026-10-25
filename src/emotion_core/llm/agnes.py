@@ -17,6 +17,7 @@ temperature / max_tokens 不参与；端点、模型、timeout、重试次数、
 单后端语义：不做多后端回退——回退是 services.llm.LLMClient 的职责，
 llm 层要的是"填入 prompt、输出信息"的可插拔实现。
 """
+
 from __future__ import annotations
 
 import os
@@ -37,8 +38,11 @@ LLM_PROFILES: dict[str, dict] = {
     "agnes": {
         "base_url": "https://apihub.agnes-ai.com/v1",
         "model": "agnes-3.0-flash",
-        "temperature": 0.2, "max_tokens": 8192, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "top_p": 1.0,
+        "timeout": 180,
+        "max_retry": 2,
     },
 }
 LLM_KEY_ENV = "LKL_LLM_API_KEY"
@@ -107,7 +111,8 @@ def resolve_key(profile: str) -> str:
     raise LLMNotConfigured(
         f"未找到密钥：设 {LLM_KEY_ENV} 或 "
         f"{LLM_PROFILE_KEY_ENV.get(profile, '')}"
-        f"（可放 {LLM_ENV_FILES}）或放置密钥文件 {LLM_KEY_FILES}")
+        f"（可放 {LLM_ENV_FILES}）或放置密钥文件 {LLM_KEY_FILES}"
+    )
 
 
 def _resolve_key(profile: str) -> str:
@@ -122,6 +127,7 @@ def _resolve_key(profile: str) -> str:
 
 
 # ── 参数定义 ────────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class LLMParams:
@@ -153,11 +159,11 @@ def strip_fence(text: str) -> str:
 
 # ── Agnes 客户端 ────────────────────────────────────────────────────────────
 
+
 class AgnesClient:
     """Agnes LLM 客户端（OpenAI 兼容协议）。"""
 
-    def __init__(self, *, profile: str = "agnes",
-                 api_key: str | None = None) -> None:
+    def __init__(self, *, profile: str = "agnes", api_key: str | None = None) -> None:
         self.profile = profile
         self.api_key = (api_key or _resolve_key(profile)).strip()
         self.params: LLMParams = resolve_params(profile)
@@ -186,25 +192,26 @@ class AgnesClient:
             RuntimeError: 返回体缺 choices/message。
         """
         if not self.api_key:
-            raise LLMNotEnabledError(
-                "Agnes 未启用：设 AGNES_API_KEY 或 LKL_LLM_API_KEY_AGNES")
-        params = replace(self.params, temperature=temperature,
-                         max_tokens=max_tokens)
-        messages = ([{"role": "system", "content": system}] if system else []) \
-            + [{"role": "user", "content": prompt}]
-        payload = {"model": params.model, "messages": messages,
-                   "temperature": params.temperature,
-                   "max_tokens": params.max_tokens, "top_p": params.top_p}
+            raise LLMNotEnabledError("Agnes 未启用：设 AGNES_API_KEY 或 LKL_LLM_API_KEY_AGNES")
+        params = replace(self.params, temperature=temperature, max_tokens=max_tokens)
+        messages = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": "user", "content": prompt}
+        ]
+        payload = {
+            "model": params.model,
+            "messages": messages,
+            "temperature": params.temperature,
+            "max_tokens": params.max_tokens,
+            "top_p": params.top_p,
+        }
         data = self._post(params, payload)
         try:
             content = data["choices"][0]["message"].get("content") or ""
         except (AttributeError, IndexError, KeyError, TypeError) as exc:
-            raise RuntimeError(
-                f"Agnes 返回体缺 choices/message：{str(data)[:160]}") from exc
+            raise RuntimeError(f"Agnes 返回体缺 choices/message：{str(data)[:160]}") from exc
         return strip_fence(content)
 
-    def _post(self, params: LLMParams,
-              payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, params: LLMParams, payload: dict[str, Any]) -> dict[str, Any]:
         """POST /chat/completions。
 
         重试判定：超时、传输错、5xx、429 退避重试；其余 4xx（400/401/403…）
@@ -215,8 +222,7 @@ class AgnesClient:
         last: Exception = RuntimeError("unreachable")
         for attempt in range(params.max_retry + 1):
             try:
-                resp = httpx.post(url, json=payload, headers=headers,
-                                  timeout=params.timeout)
+                resp = httpx.post(url, json=payload, headers=headers, timeout=params.timeout)
                 if resp.status_code >= 500:
                     raise httpx.TransportError(f"5xx {resp.status_code}")
                 resp.raise_for_status()
@@ -228,5 +234,5 @@ class AgnesClient:
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last = exc
             if attempt < params.max_retry:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         raise last

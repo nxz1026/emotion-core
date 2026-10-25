@@ -1,4 +1,5 @@
 """llm/agnes.py AgnesClient + 密钥解析 + 输出清洗测试。"""
+
 from __future__ import annotations
 
 import os
@@ -14,7 +15,6 @@ from emotion_core.llm.agnes import (
     _read_env_file_key,
     _resolve_key,
     AgnesClient,
-    LLM_PROFILES,
     resolve_key,
     resolve_params,
     strip_fence,
@@ -27,7 +27,7 @@ class TestStripFence:
         assert strip_fence('```json\n{"a": 1}\n```') == '{"a": 1}'
 
     def test_plain_fence(self):
-        assert strip_fence('```\nhello\n```') == 'hello'
+        assert strip_fence("```\nhello\n```") == "hello"
 
     def test_no_fence(self):
         assert strip_fence("plain text") == "plain text"
@@ -148,7 +148,9 @@ class TestAgnesClient:
         client = AgnesClient(api_key="test_key")
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"choices": [{"message": {"content": '```json\n{"x": 1}\n```'}}]}
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '```json\n{"x": 1}\n```'}}]
+        }
         with patch("httpx.post", return_value=mock_response):
             result = client.complete("prompt")
             assert result == '{"x": 1}'

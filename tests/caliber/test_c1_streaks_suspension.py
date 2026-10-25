@@ -10,6 +10,7 @@
     fixture 的 cont_days 完全一致——这是对「跨停牌不断档」最硬的证据。
 2. **合成边界**：抽掉中间交易日（停牌）与插入一个非涨停日（断板），锁死二者语义不同。
 """
+
 from __future__ import annotations
 
 import json
@@ -82,11 +83,9 @@ def test_matches_lkl_fixture_row_by_row():
     checked = 0
     for code, rs in by_code.items():
         rs.sort(key=lambda r: r["date"])
-        sim = simulate_cont_days(
-            [(date.fromisoformat(r["date"]), r["is_limit_up"]) for r in rs])
+        sim = simulate_cont_days([(date.fromisoformat(r["date"]), r["is_limit_up"]) for r in rs])
         for r, got in zip(rs, sim):
-            assert got == r["cont_days"], (
-                f"{code} {r['date']}: 重演 {got} ≠ lkl {r['cont_days']}")
+            assert got == r["cont_days"], f"{code} {r['date']}: 重演 {got} ≠ lkl {r['cont_days']}"
             checked += 1
     assert checked == len(rows)
 
@@ -108,9 +107,17 @@ def test_missing_day_does_not_reset_but_a_flat_day_does():
 
 
 def _bar(code: str, d: date, close_cents: int, pre_cents: int, volume: int) -> Bar:
-    return Bar(code=code, date=d, open_cents=close_cents, high_cents=close_cents,
-               low_cents=close_cents, close_cents=close_cents,
-               pre_close_cents=pre_cents, volume=volume, turnover_rate=1.0)
+    return Bar(
+        code=code,
+        date=d,
+        open_cents=close_cents,
+        high_cents=close_cents,
+        low_cents=close_cents,
+        close_cents=close_cents,
+        pre_close_cents=pre_cents,
+        volume=volume,
+        turnover_rate=1.0,
+    )
 
 
 def test_zero_volume_padding_row_does_not_break_chain():
@@ -120,9 +127,18 @@ def test_zero_volume_padding_row_does_not_break_chain():
     记的 11 对不上（review 告警「报告可用性 PARTIAL：对账差异 1 行」）。
     """
     code = "600825"
-    boards = [date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24),
-              date(2026, 9, 28), date(2026, 9, 29), date(2026, 9, 30),
-              date(2026, 10, 8), date(2026, 10, 9), date(2026, 10, 12)]
+    boards = [
+        date(2026, 9, 21),
+        date(2026, 9, 22),
+        date(2026, 9, 23),
+        date(2026, 9, 24),
+        date(2026, 9, 28),
+        date(2026, 9, 29),
+        date(2026, 9, 30),
+        date(2026, 10, 8),
+        date(2026, 10, 9),
+        date(2026, 10, 12),
+    ]
     halted = [date(2026, 10, 13), date(2026, 10, 14), date(2026, 10, 15)]
 
     bars: list[Bar] = []

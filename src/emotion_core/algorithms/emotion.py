@@ -67,6 +67,7 @@ F8：单日调用会让 y/b 全为 None（发酵/退潮 two_day/负反馈分支�
 对账：tests/unit/test_emotion.py（无 DB，假查询断言规则/时序/落库行）；另用一次性脚本
 按日差分对账真实库 market_stat 历史行（run_range 增量链与 replay 零读库链双路）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -92,13 +93,13 @@ def _cfg(name: str, default: Any) -> Any:
     return getattr(CONFIG, name, default)
 
 
-_EMOTION_PERF_BASIS: str = _cfg("EMOTION_PERF_BASIS", "median")   # lkl EMOTION_PERF_BASIS
-_EMOTION_WARMUP: int = _cfg("EMOTION_WARMUP", 5)                 # lkl EMOTION_WARMUP
-_BOMB_WINDOW: int = _cfg("BOMB_RATE_WINDOW", 30)                 # lkl CLIMAX_BOMB_WINDOW
-_BOMB_FALLBACK: float = _cfg("BOMB_RATE_FALLBACK", 0.42)         # lkl CLIMAX_BOMB_RATE
-_ACCEL_ENFORCE: bool = _cfg("ACCEL_ENFORCE", False)              # lkl ACCEL_ENFORCE（影子开关）
+_EMOTION_PERF_BASIS: str = _cfg("EMOTION_PERF_BASIS", "median")  # lkl EMOTION_PERF_BASIS
+_EMOTION_WARMUP: int = _cfg("EMOTION_WARMUP", 5)  # lkl EMOTION_WARMUP
+_BOMB_WINDOW: int = _cfg("BOMB_RATE_WINDOW", 30)  # lkl CLIMAX_BOMB_WINDOW
+_BOMB_FALLBACK: float = _cfg("BOMB_RATE_FALLBACK", 0.42)  # lkl CLIMAX_BOMB_RATE
+_ACCEL_ENFORCE: bool = _cfg("ACCEL_ENFORCE", False)  # lkl ACCEL_ENFORCE（影子开关）
 _ACCEL_BASELINE_WINDOW: int = _cfg("ACCEL_BASELINE_WINDOW", 30)  # lkl ACCEL_BASELINE_WINDOW
-_UPSERT_BATCH: int = _cfg("UPSERT_BATCH", 1000)                  # lkl UPSERT_BATCH
+_UPSERT_BATCH: int = _cfg("UPSERT_BATCH", 1000)  # lkl UPSERT_BATCH
 
 
 def _lt(a: Any, b: float) -> bool:
@@ -118,36 +119,37 @@ class EmotionDay:
     ★F6 缺失语义：指标类字段 None = 数据缺失（禁补 0.0/False）；规则判据遇 None
     视为该条不成立。dragon_env* 三列不在本容器（归 dragon_env.py）。
     """
+
     date: date
     limit_up_count: int = 0
-    bomb_rate: float | None = None           # V3：分母0（无人触板）→ None（F6 禁补0）
-    zt_performance: float | None = None      # 昨日涨停今日涨幅（判据列，basis 见 config）
-    max_limit_days: int = 0                  # 主板名义最高板（含一字）
+    bomb_rate: float | None = None  # V3：分母0（无人触板）→ None（F6 禁补0）
+    zt_performance: float | None = None  # 昨日涨停今日涨幅（判据列，basis 见 config）
+    max_limit_days: int = 0  # 主板名义最高板（含一字）
     limit_down_count: int = 0
-    phase: str = ""                          # 冰点/发酵/高潮/退潮
-    buy_window: str = "NONE"                 # STANDARD/ENHANCED/NONE
+    phase: str = ""  # 冰点/发酵/高潮/退潮
+    buy_window: str = "NONE"  # STANDARD/ENHANCED/NONE
     force_liquidate: bool = False
-    reason: str = ""                         # 阶段判定说明（复盘①用）
-    phase_inherited: bool = False            # R2：True=当日无规则触发、延续昨日 phase
-    reason_tag: str = ""                     # R2：·延续/·反转/·加速 等叠加标记
-    is_seed: bool = False                    # W1：True=增量模式播种的昨日快照——只作
-                                             # y/b 继承上下文，classify 不得对其执行规则判定
-    data_missing: bool = False               # V3：True=derived_bar 当日整体缺失，
-                                             # classify 只继承昨日并标 ·缺数据，不判冰点
-    top_amplitude: float = 0.0               # 最高板股今日最大振幅 %（高潮规则）
+    reason: str = ""  # 阶段判定说明（复盘①用）
+    phase_inherited: bool = False  # R2：True=当日无规则触发、延续昨日 phase
+    reason_tag: str = ""  # R2：·延续/·反转/·加速 等叠加标记
+    is_seed: bool = False  # W1：True=增量模式播种的昨日快照——只作
+    # y/b 继承上下文，classify 不得对其执行规则判定
+    data_missing: bool = False  # V3：True=derived_bar 当日整体缺失，
+    # classify 只继承昨日并标 ·缺数据，不判冰点
+    top_amplitude: float = 0.0  # 最高板股今日最大振幅 %（高潮规则）
     # 昨日最高板组今日未封；None=无前日数据/无≥2板组（A8：默认 None
     # 与语义一致，False 必须是实测"未断板"）
     top_broke: bool | None = None
-    bomb_threshold: float = float("inf")     # 自适应炸板阈值（inf=分支关闭）
-    has_candidate: bool = False              # 存在唯一换手最高板候选（冰点放宽守卫）
-    neg_feedback: int = 0                    # 高潮分歧负反馈计数（vs 昨日，0~5）
-    diverge: bool = False                    # 高潮且 nb≥DIVERGE_NEG_MIN → 窗口降级
-    zt_performance_mean: float | None = None    # 均值（展示用，与中位数并列）
+    bomb_threshold: float = float("inf")  # 自适应炸板阈值（inf=分支关闭）
+    has_candidate: bool = False  # 存在唯一换手最高板候选（冰点放宽守卫）
+    neg_feedback: int = 0  # 高潮分歧负反馈计数（vs 昨日，0~5）
+    diverge: bool = False  # 高潮且 nb≥DIVERGE_NEG_MIN → 窗口降级
+    zt_performance_mean: float | None = None  # 均值（展示用，与中位数并列）
     zt_performance_median: float | None = None  # 中位数（★F5 目标判据）
-    tradable_max_days: int | None = None        # 换手口径最高板 H（并列展示）
-    oneword_ratio: float | None = None          # 当日涨停股一字占比（加速 A3 基线）
-    accelerate: bool = False                    # §1.11 加速事件命中
-    accel_reason: str = ""                      # A1/A2/A3 实测值说明
+    tradable_max_days: int | None = None  # 换手口径最高板 H（并列展示）
+    oneword_ratio: float | None = None  # 当日涨停股一字占比（加速 A3 基线）
+    accelerate: bool = False  # §1.11 加速事件命中
+    accel_reason: str = ""  # A1/A2/A3 实测值说明
     accel_facts: dict = field(default_factory=dict)  # 实测值（不入库，供评级复用）
 
 
@@ -172,12 +174,12 @@ def _counts(trade_date: date) -> dict:
         " max(d.cont_days) FILTER (WHERE left(d.code,3) IN (" + _ph() + ")) maxh"
         " FROM derived_bar d JOIN stock_basic s ON s.code = d.code"
         f" WHERE d.date = %s AND {_NEW_ISSUER_FILTER}",
-        (*CONFIG.BOARD_PREFIXES, trade_date, trade_date, *_NEW_ISSUER_PARAMS))
+        (*CONFIG.BOARD_PREFIXES, trade_date, trade_date, *_NEW_ISSUER_PARAMS),
+    )
     return df.iloc[0].to_dict()
 
 
-def _zt_perf(trade_date: date, prev: date | None
-             ) -> tuple[float | None, float | None]:
+def _zt_perf(trade_date: date, prev: date | None) -> tuple[float | None, float | None]:
     """昨日涨停股（全市场剔ST次新）今日涨幅 (均值, 中位数) %。
 
     ★F6：无前一交易日或样本为空 → (None, None)，禁补 0.0（0 会被退潮规则
@@ -194,7 +196,8 @@ def _zt_perf(trade_date: date, prev: date | None
         " JOIN daily_bar y ON y.code = d.code AND y.date = d.date"
         " JOIN daily_bar t ON t.code = d.code AND t.date = %s"
         f" WHERE d.date = %s AND d.is_limit_up AND {_NEW_ISSUER_FILTER}) x",
-        (trade_date, prev, prev, *_NEW_ISSUER_PARAMS))
+        (trade_date, prev, prev, *_NEW_ISSUER_PARAMS),
+    )
     row = df.iloc[0]
     mean = None if pd.isna(row["mean"]) else float(row["mean"])
     med = None if pd.isna(row["median"]) else float(row["median"])
@@ -213,10 +216,11 @@ def _top_amplitude(trade_date: date) -> tuple[int, float]:
         f" WHERE date = %s AND left(code,3) IN ({_ph()})"
         " AND cont_days = (SELECT max(cont_days) FROM derived_bar"
         f"                       WHERE date = %s AND left(code,3) IN ({_ph()}))",
-        (trade_date, *CONFIG.BOARD_PREFIXES, trade_date, *CONFIG.BOARD_PREFIXES))
+        (trade_date, *CONFIG.BOARD_PREFIXES, trade_date, *CONFIG.BOARD_PREFIXES),
+    )
     h, a = df["h"].iloc[0], df["a"].iloc[0]
     if h is None or pd.isna(h):
-        return 0, 0.0                     # 零涨停：无最高板组，振幅不参与判据
+        return 0, 0.0  # 零涨停：无最高板组，振幅不参与判据
     return int(h), (float(a) if a is not None else 0.0)
 
 
@@ -237,7 +241,8 @@ def _top_broke(trade_date: date, prev: date | None) -> bool | None:
         f" WHERE d1.date = %s AND left(d1.code,3) IN ({_ph()}) AND d1.cont_days ="
         f"   (SELECT max(cont_days) FROM derived_bar WHERE date = %s"
         f"     AND left(code,3) IN ({_ph()})) AND d1.cont_days >= 2",
-        (trade_date, prev, *CONFIG.BOARD_PREFIXES, prev, *CONFIG.BOARD_PREFIXES))
+        (trade_date, prev, *CONFIG.BOARD_PREFIXES, prev, *CONFIG.BOARD_PREFIXES),
+    )
     if df.empty:
         return None
     val = df["broke"].iloc[0]
@@ -253,14 +258,15 @@ def _bomb_threshold(trade_date: date, prior_rates: list | None = None) -> float:
     None 时回落读库（单日调试兼容路径，增量模式只读目标区间外的旧值）。
     """
     if prior_rates is not None:
-        s = pd.Series([r for r in prior_rates[:_BOMB_WINDOW]
-                       if r is not None and not pd.isna(r)], dtype=float)
-        return (float(s.median() + s.std(ddof=1))
-                if len(s) >= _BOMB_WINDOW else _BOMB_FALLBACK)
+        s = pd.Series(
+            [r for r in prior_rates[:_BOMB_WINDOW] if r is not None and not pd.isna(r)], dtype=float
+        )
+        return float(s.median() + s.std(ddof=1)) if len(s) >= _BOMB_WINDOW else _BOMB_FALLBACK
     df = query_df(
         "SELECT bomb_rate FROM market_stat WHERE date < %s"
         " AND bomb_rate IS NOT NULL ORDER BY date DESC LIMIT %s",
-        (trade_date, _BOMB_WINDOW))
+        (trade_date, _BOMB_WINDOW),
+    )
     if len(df) < _BOMB_WINDOW:
         return _BOMB_FALLBACK
     s = df["bomb_rate"].astype(float)
@@ -279,7 +285,8 @@ def _has_candidate(trade_date: date) -> bool:
         f"   AND left(code,3) IN ({_ph()}))"
         " SELECT count(*) FILTER (WHERE cont_days = th AND is_exchange) = 1"
         "        AND max(th) >= %s AS has FROM t",
-        (trade_date, *CONFIG.BOARD_PREFIXES, CONFIG.MIN_LEADER_DAYS))
+        (trade_date, *CONFIG.BOARD_PREFIXES, CONFIG.MIN_LEADER_DAYS),
+    )
     return bool(df["has"].iloc[0]) if not df.empty else False
 
 
@@ -298,33 +305,38 @@ def indicators(trade_date: date, hist: dict | None = None) -> EmotionDay:
     分支：classify 只继承昨日 phase 并打 ·缺数据 标记，不再误走
     「冰点触发」（零涨停被当冷却市况判定）。
     """
-    n_rows = int(query_df(
-        "SELECT count(*) n FROM derived_bar WHERE date = %s",
-        (trade_date,))["n"].iloc[0])
+    n_rows = int(
+        query_df("SELECT count(*) n FROM derived_bar WHERE date = %s", (trade_date,))["n"].iloc[0]
+    )
     if n_rows == 0:
         return EmotionDay(date=trade_date, data_missing=True)
     prev = _prev_day(trade_date)
     c = _counts(trade_date)
     height, amp = _top_amplitude(trade_date)
     mean, med = _zt_perf(trade_date, prev)
-    hit, reason, facts = accelerate.detect(
-        trade_date, hist["onewords"] if hist else None)
+    hit, reason, facts = accelerate.detect(trade_date, hist["onewords"] if hist else None)
     touched = c["touched"] or 0
     return EmotionDay(
-        date=trade_date, limit_up_count=int(c["zt"] or 0),
+        date=trade_date,
+        limit_up_count=int(c["zt"] or 0),
         # V3（二轮审计，F6 禁补 0）：分母 0（无人触板）→ None 而非假 0.0——
         # 假 0 会滚进 30 日自适应阈值（数据缺口→假阈值→误判高潮传导链）
         bomb_rate=(c["zb"] or 0) / touched if touched else None,
         zt_performance=med if _EMOTION_PERF_BASIS == "median" else mean,
-        zt_performance_mean=mean, zt_performance_median=med,
-        max_limit_days=height, limit_down_count=int(c["dt"] or 0),
-        top_amplitude=amp, top_broke=_top_broke(trade_date, prev),
-        bomb_threshold=_bomb_threshold(
-            trade_date, hist["bomb_rates"] if hist else None),
+        zt_performance_mean=mean,
+        zt_performance_median=med,
+        max_limit_days=height,
+        limit_down_count=int(c["dt"] or 0),
+        top_amplitude=amp,
+        top_broke=_top_broke(trade_date, prev),
+        bomb_threshold=_bomb_threshold(trade_date, hist["bomb_rates"] if hist else None),
         has_candidate=_has_candidate(trade_date),
         tradable_max_days=facts.get("tradable_h"),
         oneword_ratio=facts.get("oneword_ratio"),
-        accelerate=hit, accel_reason=reason, accel_facts=facts)
+        accelerate=hit,
+        accel_reason=reason,
+        accel_facts=facts,
+    )
 
 
 def _neg_feedback(t: EmotionDay, y: EmotionDay | None) -> int:
@@ -334,13 +346,18 @@ def _neg_feedback(t: EmotionDay, y: EmotionDay | None) -> int:
     """
     if y is None:
         return 0
-    perf_down = (t.zt_performance is not None and y.zt_performance is not None
-                 and t.zt_performance < y.zt_performance)
-    return (int(bool(t.top_broke))
-            + int(t.max_limit_days < y.max_limit_days)
-            + int(_gt(t.bomb_rate, y.bomb_rate))    # V3：None 不计数
-            + int(perf_down)
-            + int(t.limit_down_count > y.limit_down_count))
+    perf_down = (
+        t.zt_performance is not None
+        and y.zt_performance is not None
+        and t.zt_performance < y.zt_performance
+    )
+    return (
+        int(bool(t.top_broke))
+        + int(t.max_limit_days < y.max_limit_days)
+        + int(_gt(t.bomb_rate, y.bomb_rate))  # V3：None 不计数
+        + int(perf_down)
+        + int(t.limit_down_count > y.limit_down_count)
+    )
 
 
 def _fmt(v: float | None, prec: int = 1) -> str:
@@ -369,7 +386,7 @@ def _as_days(series: list[EmotionDay] | pd.DataFrame) -> list[EmotionDay]:
                 if isinstance(val, str):
                     val = date.fromisoformat(val)
                 elif isinstance(val, datetime):
-                    val = val.date()      # pandas Timestamp/datetime → date（口径统一）
+                    val = val.date()  # pandas Timestamp/datetime → date（口径统一）
             vals[key] = val
         days.append(EmotionDay(**vals))
     return days
@@ -389,17 +406,16 @@ def classify(series: list[EmotionDay] | pd.DataFrame) -> list[EmotionDay]:
     days = _as_days(series)
     for i, t in enumerate(days):
         if t.is_seed:
-            continue          # W1：seed 是昨日落库 phase 的权威快照——规则引擎
-        y = days[i - 1] if i >= 1 else None     # 不得用占位默认值重判覆盖
+            continue  # W1：seed 是昨日落库 phase 的权威快照——规则引擎
+        y = days[i - 1] if i >= 1 else None  # 不得用占位默认值重判覆盖
         b = days[i - 2] if i >= 2 else None
-        if t.data_missing:                      # V3：数据不可用显式分支——
-            t.phase = y.phase if y else "冰点"   # 只继承，不触发任何规则（此前
+        if t.data_missing:  # V3：数据不可用显式分支——
+            t.phase = y.phase if y else "冰点"  # 只继承，不触发任何规则（此前
             t.buy_window, t.force_liquidate = window_of(t.phase)  # 0涨停被误判冰点）
             t.phase_inherited = y is not None
             t.reason = "·缺数据（derived_bar 当日整体缺失，phase 仅延续）"
             continue
-        fired = next(((rule, name) for rule, name in _RULES if rule(t, y, b)),
-                     None)
+        fired = next(((rule, name) for rule, name in _RULES if rule(t, y, b)), None)
         phase = fired[1] if fired else (y.phase if y else "冰点")
         t.phase = phase
         t.buy_window, t.force_liquidate = window_of(phase)
@@ -407,13 +423,11 @@ def classify(series: list[EmotionDay] | pd.DataFrame) -> list[EmotionDay]:
         # R2：延续=当日无规则命中（phase 值相同但规则命中≠延续——
         # 如昨日冰点今日反转再确认，phase 同为冰点但是触发）
         inherited = fired is None and y is not None
-        first_day = fired is None and y is None    # V3：首日无历史——
+        first_day = fired is None and y is None  # V3：首日无历史——
         tag = "·首日基线" if first_day else ("·延续" if inherited else "")
         if phase == "冰点" and not inherited and not first_day:
-            rev = (y is not None and _lt(y.zt_performance, 0)
-                   and _gt(t.zt_performance, 0))
-            tag += "·反转" if rev else ("·无候选放宽" if not t.has_candidate
-                                        else "·候选守卫")
+            rev = y is not None and _lt(y.zt_performance, 0) and _gt(t.zt_performance, 0)
+            tag += "·反转" if rev else ("·无候选放宽" if not t.has_candidate else "·候选守卫")
         elif phase == "高潮" and t.neg_feedback >= CONFIG.DIVERGE_NEG_MIN:
             t.diverge = True
             # W7′：降级不再把窗口压成 NONE（旧口径 DIVERGE_WINDOW="NONE" 直接
@@ -426,7 +440,7 @@ def classify(series: list[EmotionDay] | pd.DataFrame) -> list[EmotionDay]:
             tag += "·加速" + ("降级" if _ACCEL_ENFORCE else "(影子)")
             if _ACCEL_ENFORCE:
                 t.buy_window = "NONE"
-        t.reason_tag = tag                     # R2：tag 存档供 reason/报告复用
+        t.reason_tag = tag  # R2：tag 存档供 reason/报告复用
         t.phase_inherited = inherited
         t.reason = _phase_reason(t, inherited)
     return days
@@ -434,13 +448,14 @@ def classify(series: list[EmotionDay] | pd.DataFrame) -> list[EmotionDay]:
 
 def _phase_reason(t: EmotionDay, inherited: bool) -> str:
     """R2：延续日不摆当日数字冒充触发依据（拆函数保持 classify ≤50 行）。"""
-    nums = (f"涨停{t.limit_up_count} 炸率{_fmt(t.bomb_rate)}"
-            f"/阈{t.bomb_threshold:.2f} 昨涨停表现{_fmt(t.zt_performance)}"
-            f" 名义{t.max_limit_days}板/可交易{_fmt(t.tradable_max_days, 0)}板"
-            f" 跌停{t.limit_down_count}")
+    nums = (
+        f"涨停{t.limit_up_count} 炸率{_fmt(t.bomb_rate)}"
+        f"/阈{t.bomb_threshold:.2f} 昨涨停表现{_fmt(t.zt_performance)}"
+        f" 名义{t.max_limit_days}板/可交易{_fmt(t.tradable_max_days, 0)}板"
+        f" 跌停{t.limit_down_count}"
+    )
     if inherited:
-        return (f"{t.phase}（延续：当日无规则触发，数字仅参考）"
-                f"{t.reason_tag}({nums})")
+        return f"{t.phase}（延续：当日无规则触发，数字仅参考）{t.reason_tag}({nums})"
     return f"{t.phase}{t.reason_tag}({nums})"
 
 
@@ -450,30 +465,67 @@ def _r(v: float | None, prec: int = 4) -> float | None:
 
 
 # market_stat 的情绪列（列序对齐 lkl _COLS；dragon_env* 三列归 dragon_env.py，不在本表）
-_COLS = ("date", "limit_up_count", "bomb_rate", "zt_performance",
-         "max_limit_days", "limit_down_count", "phase", "buy_window",
-         "force_liquidate", "reason", "top_amplitude", "top_broke",
-         "bomb_threshold", "has_candidate", "neg_feedback", "diverge",
-         "zt_performance_mean", "zt_performance_median", "tradable_max_days",
-         "oneword_ratio", "accelerate", "accel_reason", "phase_inherited")
+_COLS = (
+    "date",
+    "limit_up_count",
+    "bomb_rate",
+    "zt_performance",
+    "max_limit_days",
+    "limit_down_count",
+    "phase",
+    "buy_window",
+    "force_liquidate",
+    "reason",
+    "top_amplitude",
+    "top_broke",
+    "bomb_threshold",
+    "has_candidate",
+    "neg_feedback",
+    "diverge",
+    "zt_performance_mean",
+    "zt_performance_median",
+    "tradable_max_days",
+    "oneword_ratio",
+    "accelerate",
+    "accel_reason",
+    "phase_inherited",
+)
 
 _UPSERT_SQL = (
     f"INSERT INTO market_stat ({', '.join(_COLS)})"
     f" VALUES ({', '.join(['%s'] * len(_COLS))})"
     " ON CONFLICT (date) DO UPDATE SET "
-    + ", ".join(f"{c}=EXCLUDED.{c}" for c in _COLS if c != "date"))
+    + ", ".join(f"{c}=EXCLUDED.{c}" for c in _COLS if c != "date")
+)
 
 
 def _row(s: EmotionDay) -> tuple:
     """EmotionDay → market_stat 行元组（列序对齐 _COLS）。"""
-    return (s.date, s.limit_up_count, _r(s.bomb_rate), _r(s.zt_performance),
-            s.max_limit_days, s.limit_down_count, s.phase, s.buy_window,
-            s.force_liquidate, s.reason, _r(s.top_amplitude), s.top_broke,
-            None if s.bomb_threshold == float("inf") else _r(s.bomb_threshold),
-            s.has_candidate, s.neg_feedback, s.diverge,
-            _r(s.zt_performance_mean), _r(s.zt_performance_median),
-            s.tradable_max_days, s.oneword_ratio, s.accelerate, s.accel_reason,
-            s.phase_inherited)
+    return (
+        s.date,
+        s.limit_up_count,
+        _r(s.bomb_rate),
+        _r(s.zt_performance),
+        s.max_limit_days,
+        s.limit_down_count,
+        s.phase,
+        s.buy_window,
+        s.force_liquidate,
+        s.reason,
+        _r(s.top_amplitude),
+        s.top_broke,
+        None if s.bomb_threshold == float("inf") else _r(s.bomb_threshold),
+        s.has_candidate,
+        s.neg_feedback,
+        s.diverge,
+        _r(s.zt_performance_mean),
+        _r(s.zt_performance_median),
+        s.tradable_max_days,
+        s.oneword_ratio,
+        s.accelerate,
+        s.accel_reason,
+        s.phase_inherited,
+    )
 
 
 def _upsert_rows(rows: list[tuple]) -> int:
@@ -482,21 +534,23 @@ def _upsert_rows(rows: list[tuple]) -> int:
         return 0
     # P2（三轮审计）：行宽校验防错位静默写脏数据
     if len(rows[0]) != len(_COLS):
-        raise ValueError(f"upsert market_stat：行宽 {len(rows[0])} != 列数 "
-                         f"{len(_COLS)}")
+        raise ValueError(f"upsert market_stat：行宽 {len(rows[0])} != 列数 {len(_COLS)}")
     # 统一消毒：NaN / ±inf → NULL（PG numeric 可存 NaN/Inf，会击穿下游 ::bigint 转换）
-    clean = [tuple(None if isinstance(v, float) and not math.isfinite(v) else v
-                   for v in r) for r in rows]
+    clean = [
+        tuple(None if isinstance(v, float) and not math.isfinite(v) else v for v in r) for r in rows
+    ]
     with transaction() as conn, conn.cursor() as cur:
         for i in range(0, len(clean), _UPSERT_BATCH):
-            cur.executemany(_UPSERT_SQL, clean[i:i + _UPSERT_BATCH])
+            cur.executemany(_UPSERT_SQL, clean[i : i + _UPSERT_BATCH])
     return len(clean)
 
 
 def _warmup_start(start: date, n: int) -> date:
     """向前回退 n 个交易日，作为状态机 warm-up 起点（等价单查询，见文档 §4）。"""
-    df = query_df("SELECT DISTINCT date FROM daily_bar WHERE date < %s"
-                  " ORDER BY date DESC LIMIT %s", (start, n))
+    df = query_df(
+        "SELECT DISTINCT date FROM daily_bar WHERE date < %s ORDER BY date DESC LIMIT %s",
+        (start, n),
+    )
     if df.empty:
         return start
     return min(df["date"])
@@ -504,8 +558,10 @@ def _warmup_start(start: date, n: int) -> date:
 
 def _rolling_days(trade_date: date, window: int) -> list[date]:
     """trade_date 之前 window 个交易日（升序；等价单查询，见文档 §4）。"""
-    df = query_df("SELECT DISTINCT date FROM daily_bar WHERE date < %s"
-                  " ORDER BY date DESC LIMIT %s", (trade_date, window))
+    df = query_df(
+        "SELECT DISTINCT date FROM daily_bar WHERE date < %s ORDER BY date DESC LIMIT %s",
+        (trade_date, window),
+    )
     if df.empty:
         return []
     return sorted(df["date"])
@@ -522,21 +578,29 @@ def _seed_and_hist(start: date) -> tuple[EmotionDay | None, dict]:
     seed = None
     if prev is not None:
         df = query_df(
-            "SELECT date, phase, bomb_rate, oneword_ratio FROM market_stat"
-            " WHERE date = %s", (prev,))
+            "SELECT date, phase, bomb_rate, oneword_ratio FROM market_stat WHERE date = %s", (prev,)
+        )
         if not df.empty and df["phase"].iloc[0]:
             r = df.iloc[0]
             seed = EmotionDay(
-                date=r["date"], phase=r["phase"],
-                bomb_rate=r["bomb_rate"], oneword_ratio=r["oneword_ratio"],
-                is_seed=True)      # W1：标记后 classify 不再对其执行规则判定
+                date=r["date"],
+                phase=r["phase"],
+                bomb_rate=r["bomb_rate"],
+                oneword_ratio=r["oneword_ratio"],
+                is_seed=True,
+            )  # W1：标记后 classify 不再对其执行规则判定
     prior = _rolling_days(start, max(_BOMB_WINDOW, _ACCEL_BASELINE_WINDOW))
-    df = (query_df(
-        "SELECT date, bomb_rate, oneword_ratio FROM market_stat"
-        " WHERE date < %s AND date >= %s ORDER BY date DESC",
-        (start, prior[0])) if prior else pd.DataFrame())
-    bomb_rates = (df["bomb_rate"].tolist() if not df.empty else [])
-    onewords = (df["oneword_ratio"].tolist() if not df.empty else [])
+    df = (
+        query_df(
+            "SELECT date, bomb_rate, oneword_ratio FROM market_stat"
+            " WHERE date < %s AND date >= %s ORDER BY date DESC",
+            (start, prior[0]),
+        )
+        if prior
+        else pd.DataFrame()
+    )
+    bomb_rates = df["bomb_rate"].tolist() if not df.empty else []
+    onewords = df["oneword_ratio"].tolist() if not df.empty else []
     return seed, {"bomb_rates": bomb_rates, "onewords": onewords}
 
 
@@ -552,14 +616,14 @@ def run_range(start: date, end: date, warmup: int | None = None) -> int:
     """
     wu = _EMOTION_WARMUP if warmup is None else warmup
     days = trading_days(_warmup_start(start, wu), end)
-    if not days:                       # A8：无行情区间（假期回填/未来日期）早退
+    if not days:  # A8：无行情区间（假期回填/未来日期）早退
         log.warning("market_stat %s~%s：区间无交易日，跳过", start, end)
         return 0
     seed, hist = _seed_and_hist(days[0])
     head = [seed] if seed is not None else []
     states: list[EmotionDay] = []
-    for d in days:                      # W1：逐日滚动，算完一天把当日值前插
-        s = indicators(d, hist)         # V3：None（分母0日）不入窗口（F6）
+    for d in days:  # W1：逐日滚动，算完一天把当日值前插
+        s = indicators(d, hist)  # V3：None（分母0日）不入窗口（F6）
         states.append(s)
         if s.bomb_rate is not None:
             hist["bomb_rates"].insert(0, s.bomb_rate)
@@ -568,8 +632,14 @@ def run_range(start: date, end: date, warmup: int | None = None) -> int:
     series = classify(head + states)
     target = [s for s in series if s.date >= start]
     n = _upsert_rows([_row(s) for s in target])
-    log.info("market_stat %s~%s：%d 日（增量，seed=%s，自 %s）",
-             start, end, n, seed.phase if seed else "无", days[0])
+    log.info(
+        "market_stat %s~%s：%d 日（增量，seed=%s，自 %s）",
+        start,
+        end,
+        n,
+        seed.phase if seed else "无",
+        days[0],
+    )
     return n
 
 
@@ -594,19 +664,18 @@ def replay(start: date, end: date) -> int:
     if not days:
         log.warning("replay %s~%s：DATA_START 起无交易日", start, end)
         return 0
-    bomb_rates: list = []              # 最新在前（滚动窗口）
+    bomb_rates: list = []  # 最新在前（滚动窗口）
     onewords: list = []
     states: list[EmotionDay] = []
     for d in days:
         s = indicators(d, {"bomb_rates": bomb_rates, "onewords": onewords})
         states.append(s)
-        if s.bomb_rate is not None:      # V3：None 不入滚动窗口（F6）
+        if s.bomb_rate is not None:  # V3：None 不入滚动窗口（F6）
             bomb_rates.insert(0, s.bomb_rate)
         if s.oneword_ratio is not None:
             onewords.insert(0, s.oneword_ratio)
     series = classify(states)
     target = [s for s in series if start <= s.date <= end]
     n = _upsert_rows([_row(s) for s in target])
-    log.info("market_stat replay %s~%s：%d 日（全量重放自 %s，零读库基线）",
-             start, end, n, days[0])
+    log.info("market_stat replay %s~%s：%d 日（全量重放自 %s，零读库基线）", start, end, n, days[0])
     return n

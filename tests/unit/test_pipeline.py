@@ -8,6 +8,7 @@ IO 全部桩掉（pipeline.execute、pipeline.query_df 记录 (sql, params) 并�
 alerts.record 换成 spy/抛错桩），真实库对账另跑（编排者阶段：同输入下与
 lkl.services.pipeline 逐字段一致，含 SQL 文本与参数元组）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,8 +23,16 @@ from emotion_core.algorithms import pipeline
 from emotion_core.utils.config import config_hash
 
 D0 = date(2026, 9, 26)
-COLS = ["step", "status", "for_date", "detail",
-        "started_at", "finished_at", "exit_code", "config_hash"]
+COLS = [
+    "step",
+    "status",
+    "for_date",
+    "detail",
+    "started_at",
+    "finished_at",
+    "exit_code",
+    "config_hash",
+]
 H = config_hash()
 
 
@@ -67,16 +76,15 @@ def test_mark_running_sql_params_and_reset(db):
     sql, params = one_call(db)
     assert_sql(
         sql,
-        "INSERT INTO pipeline_state (step, status, for_date, detail, started_at,"
-        " config_hash)",
-        "VALUES (%s,'RUNNING',%s,%s, now(), %s)",      # 状态字面量 + started_at=now()
-        "ON CONFLICT (step) DO UPDATE SET status='RUNNING'",   # 幂等覆盖上次
+        "INSERT INTO pipeline_state (step, status, for_date, detail, started_at, config_hash)",
+        "VALUES (%s,'RUNNING',%s,%s, now(), %s)",  # 状态字面量 + started_at=now()
+        "ON CONFLICT (step) DO UPDATE SET status='RUNNING'",  # 幂等覆盖上次
         "for_date=EXCLUDED.for_date",
         "detail=EXCLUDED.detail",
-        "started_at=now()",                            # 重跑重置开始时刻
-        "finished_at=null",                            # 清上次结束时刻
-        "exit_code=null",                              # 清上次退出码
-        "config_hash=EXCLUDED.config_hash",            # 每次运行记配置指纹
+        "started_at=now()",  # 重跑重置开始时刻
+        "finished_at=null",  # 清上次结束时刻
+        "exit_code=null",  # 清上次退出码
+        "config_hash=EXCLUDED.config_hash",  # 每次运行记配置指纹
     )
     assert sql.count("%s") == 4
     assert params == ("fetch", D0, "拉取中", H)
@@ -90,8 +98,9 @@ def test_mark_running_defaults(db):
 
 
 # ── mark_done ───────────────────────────────────────────────
-@pytest.mark.parametrize("exit_code,status", [(0, "OK"), (1, "FAILED"),
-                                              (2, "FAILED"), (7, "FAILED")])
+@pytest.mark.parametrize(
+    "exit_code,status", [(0, "OK"), (1, "FAILED"), (2, "FAILED"), (7, "FAILED")]
+)
 def test_mark_done_status_by_exit_code(db, exit_code, status):
     assert pipeline.mark_done("emotion", D0, "done", exit_code) is None
     sql, params = one_call(db)
@@ -119,8 +128,7 @@ def test_mark_done_defaults(db):
 # ── mark_failed ─────────────────────────────────────────────
 def test_mark_failed_truncates_and_enqueues_alert(db, monkeypatch):
     seen: list[tuple] = []
-    monkeypatch.setattr(alerts_mod, "record",
-                        lambda *a: seen.append(a))
+    monkeypatch.setattr(alerts_mod, "record", lambda *a: seen.append(a))
     long_detail = "e" * 600
     pipeline.mark_failed("review", long_detail, D0)
 
@@ -163,33 +171,58 @@ def test_mark_failed_swallows_alert_error(db, monkeypatch, caplog):
     monkeypatch.setattr(alerts_mod, "record", boom)
     caplog.set_level(logging.DEBUG, logger="emotion_core.pipeline")
 
-    pipeline.mark_failed("fetch", "拉取失败", D0)      # 不得冒泡
+    pipeline.mark_failed("fetch", "拉取失败", D0)  # 不得冒泡
 
     assert calls == [("ERROR", "pipeline", "步骤 fetch 失败：拉取失败")]
-    sql, params = one_call(db)                          # FAILED 记录仍落库
+    sql, params = one_call(db)  # FAILED 记录仍落库
     assert sql.count("%s") == 4 and params == ("fetch", D0, "拉取失败", H)
-    assert any(r.levelno == logging.DEBUG
-               and r.name == "emotion_core.pipeline"
-               and r.getMessage() == "告警入队失败（不拦 FAILED 记录）"
-               for r in caplog.records)
+    assert any(
+        r.levelno == logging.DEBUG
+        and r.name == "emotion_core.pipeline"
+        and r.getMessage() == "告警入队失败（不拦 FAILED 记录）"
+        for r in caplog.records
+    )
 
 
 # ── overview / failures ─────────────────────────────────────
 def frame(dtype=object) -> pd.DataFrame:
     """pipeline_state 帧（dtype=object 让 NULL 保持 Python None，见 NaT 用例）。"""
-    return pd.DataFrame([
-        {"step": "fetch", "status": "OK", "for_date": D0, "detail": "ok",
-         "started_at": datetime(2026, 9, 26, 10, 0, 0),
-         "finished_at": datetime(2026, 9, 26, 10, 0, 12, 340000),
-         "exit_code": 0, "config_hash": H},
-        {"step": "derive", "status": "FAILED", "for_date": None, "detail": "bad",
-         "started_at": datetime(2026, 9, 26, 11, 0, 0),
-         "finished_at": None, "exit_code": 1, "config_hash": H},
-        {"step": "unknown-step", "status": "OK", "for_date": None, "detail": None,
-         "started_at": None,
-         "finished_at": datetime(2026, 9, 26, 12, 0, 0), "exit_code": None,
-         "config_hash": H},
-    ], columns=COLS, dtype=dtype)
+    return pd.DataFrame(
+        [
+            {
+                "step": "fetch",
+                "status": "OK",
+                "for_date": D0,
+                "detail": "ok",
+                "started_at": datetime(2026, 9, 26, 10, 0, 0),
+                "finished_at": datetime(2026, 9, 26, 10, 0, 12, 340000),
+                "exit_code": 0,
+                "config_hash": H,
+            },
+            {
+                "step": "derive",
+                "status": "FAILED",
+                "for_date": None,
+                "detail": "bad",
+                "started_at": datetime(2026, 9, 26, 11, 0, 0),
+                "finished_at": None,
+                "exit_code": 1,
+                "config_hash": H,
+            },
+            {
+                "step": "unknown-step",
+                "status": "OK",
+                "for_date": None,
+                "detail": None,
+                "started_at": None,
+                "finished_at": datetime(2026, 9, 26, 12, 0, 0),
+                "exit_code": None,
+                "config_hash": H,
+            },
+        ],
+        columns=COLS,
+        dtype=dtype,
+    )
 
 
 def test_overview_shape(db):
@@ -201,35 +234,57 @@ def test_overview_shape(db):
         sql,
         "SELECT step, status, for_date, detail, started_at, finished_at,"
         " exit_code, config_hash FROM pipeline_state",
-        "ORDER BY coalesce(finished_at, started_at) DESC",   # 最近活动在前
+        "ORDER BY coalesce(finished_at, started_at) DESC",  # 最近活动在前
     )
     assert params == ()
 
     assert len(out) == 3
     fetch, derive, unknown = out
-    assert set(fetch) == {"step", "status", "for_date", "detail", "duration_s",
-                          "exit_code", "config_hash", "rerun"}
+    assert set(fetch) == {
+        "step",
+        "status",
+        "for_date",
+        "detail",
+        "duration_s",
+        "exit_code",
+        "config_hash",
+        "rerun",
+    }
     # 两端非 None → round(秒差, 1)
-    assert fetch == {"step": "fetch", "status": "OK", "for_date": "2026-09-26",
-                     "detail": "ok", "duration_s": 12.3, "exit_code": 0,
-                     "config_hash": H,
-                     "rerun": "lkl fetch sync"}
+    assert fetch == {
+        "step": "fetch",
+        "status": "OK",
+        "for_date": "2026-09-26",
+        "detail": "ok",
+        "duration_s": 12.3,
+        "exit_code": 0,
+        "config_hash": H,
+        "rerun": "lkl fetch sync",
+    }
     # 任一端 None → duration None；for_date None → None
     assert derive["duration_s"] is None
     assert derive["for_date"] is None
     assert derive["rerun"] == "lkl derive"
     assert unknown["duration_s"] is None
     assert unknown["for_date"] is None
-    assert unknown["rerun"] is None            # 未知 step 无反查命令
+    assert unknown["rerun"] is None  # 未知 step 无反查命令
 
 
 def test_overview_rounds_one_decimal(db):
-    db.frame = pd.DataFrame([
-        {"step": "theme", "status": "OK", "for_date": None, "detail": "",
-         "started_at": datetime(2026, 9, 26, 10, 0, 0),
-         "finished_at": datetime(2026, 9, 26, 10, 0, 0, 123456),
-         "exit_code": 0, "config_hash": H},
-    ])
+    db.frame = pd.DataFrame(
+        [
+            {
+                "step": "theme",
+                "status": "OK",
+                "for_date": None,
+                "detail": "",
+                "started_at": datetime(2026, 9, 26, 10, 0, 0),
+                "finished_at": datetime(2026, 9, 26, 10, 0, 0, 123456),
+                "exit_code": 0,
+                "config_hash": H,
+            },
+        ]
+    )
     assert pipeline.overview()[0]["duration_s"] == 0.1
 
 
@@ -241,7 +296,7 @@ def test_overview_nat_timestamp_is_not_none(db):
     RUNNING 中（finished_at 为 NULL）的步骤 duration_s 是 nan 而非 None。逐字搬运下
     该口径与 lkl 一致；本用例锁住，防搬运后静默改口径。
     """
-    db.frame = frame(dtype=None)          # 默认推断：含 None 的时间列为 datetime64[ns]
+    db.frame = frame(dtype=None)  # 默认推断：含 None 的时间列为 datetime64[ns]
     out = pipeline.overview()
     assert out[1]["step"] == "derive" and out[1]["status"] == "FAILED"
     assert math.isnan(out[1]["duration_s"])

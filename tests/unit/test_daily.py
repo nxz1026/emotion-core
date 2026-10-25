@@ -24,6 +24,7 @@ from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocke
 
 # ── fixtures ──────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def patch_pipeline(monkeypatch):
     """桩掉 pipeline 打点函数。"""
@@ -54,8 +55,9 @@ def patch_all_steps(monkeypatch):
     返回值取真实量纲（行数 / 窗口），供 detail 断言；不依赖 DB 与网络。
     """
     monkeypatch.setattr("emotion_core.services.ingest.snapshot_daily", lambda d: 0)
-    monkeypatch.setattr("emotion_core.data.providers.eastmoney.em_data_date",
-                        lambda: date(2026, 9, 29))
+    monkeypatch.setattr(
+        "emotion_core.data.providers.eastmoney.em_data_date", lambda: date(2026, 9, 29)
+    )
     monkeypatch.setattr("emotion_core.services.ingest.fetch_hot_snapshot", lambda d: 0)
     monkeypatch.setattr("emotion_core.data.fill_stock_basic.backfill", lambda: 5223)
     monkeypatch.setattr("emotion_core.data.fill_list_date.backfill", lambda **kw: 3)
@@ -76,6 +78,7 @@ def patch_all_steps(monkeypatch):
 
 # ── 1. _trading_day_guard ─────────────────────────────────────────────
 
+
 class TestTradingDayGuard:
     """交易日守卫：非交易日跳过、未来日期跳过、交易日放行。"""
 
@@ -93,6 +96,7 @@ class TestTradingDayGuard:
 
 
 # ── 2. run_daily: 步骤顺序与打点 ──────────────────────────────────────
+
 
 class TestRunDailyStepOrder:
     """run_daily 步骤执行顺序、打点行为。"""
@@ -124,7 +128,15 @@ class TestRunDailyStepOrder:
             rc = daily.run_daily(date(2026, 9, 29), from_step="signal")
 
         assert rc == 0
-        assert step_calls == ["signal", "promotion", "theme", "ecosystem", "strategy", "outcome", "health"]
+        assert step_calls == [
+            "signal",
+            "promotion",
+            "theme",
+            "ecosystem",
+            "strategy",
+            "outcome",
+            "health",
+        ]
 
     def test_dry_run_no_execution(self, patch_pipeline, patch_today, patch_trading_day):
         """dry_run 只打印步骤，不执行。"""
@@ -135,7 +147,9 @@ class TestRunDailyStepOrder:
         mock_run.assert_not_called()
         daily.pipeline.mark_running.assert_not_called()
 
-    def test_step_detail_is_passed_to_mark_done(self, patch_pipeline, patch_today, patch_trading_day):
+    def test_step_detail_is_passed_to_mark_done(
+        self, patch_pipeline, patch_today, patch_trading_day
+    ):
         """回归：每步产出摘要必须作为 detail 落 pipeline_state（此前恒不传）。"""
         with patch.object(daily, "_run_step", side_effect=lambda step, d: f"{step} 摘要"):
             rc = daily.run_daily(date(2026, 9, 29))
@@ -143,10 +157,12 @@ class TestRunDailyStepOrder:
         assert rc == 0
         target = date(2026, 9, 29)
         assert daily.pipeline.mark_done.call_args_list == [
-            call(step, target, f"{step} 摘要") for step, _ in daily.STEPS]
+            call(step, target, f"{step} 摘要") for step, _ in daily.STEPS
+        ]
 
-    def test_none_returning_step_marks_empty_detail(self, patch_pipeline, patch_today,
-                                                    patch_trading_day):
+    def test_none_returning_step_marks_empty_detail(
+        self, patch_pipeline, patch_today, patch_trading_day
+    ):
         """桩函数/_run_step 返回 None 时，detail 归一化为 '' 而不是 None。"""
         with patch.object(daily, "_run_step", side_effect=lambda step, d: None):
             rc = daily.run_daily(date(2026, 9, 29))
@@ -154,10 +170,12 @@ class TestRunDailyStepOrder:
         assert rc == 0
         target = date(2026, 9, 29)
         assert daily.pipeline.mark_done.call_args_list == [
-            call(step, target, "") for step, _ in daily.STEPS]
+            call(step, target, "") for step, _ in daily.STEPS
+        ]
 
     def test_signal_and_ladder_details_land_in_pipeline_state(
-            self, patch_pipeline, patch_today, patch_trading_day, patch_all_steps):
+        self, patch_pipeline, patch_today, patch_trading_day, patch_all_steps
+    ):
         """真实分派下：signal / ladder / theme 三步带摘要，其余步骤允许为空串。"""
         rc = daily.run_daily(date(2026, 9, 29))
 
@@ -172,6 +190,7 @@ class TestRunDailyStepOrder:
 
 # ── 3. run_daily: 守卫与异常处理 ──────────────────────────────────────
 
+
 class TestRunDailyGuardAndExceptions:
     """守卫拦截、CoverageBlocked、通用异常。"""
 
@@ -183,8 +202,11 @@ class TestRunDailyGuardAndExceptions:
         assert rc == 0
         mock_run.assert_not_called()
 
-    def test_coverage_blocked_returns_exit_code_76(self, patch_pipeline, patch_today, patch_trading_day):
+    def test_coverage_blocked_returns_exit_code_76(
+        self, patch_pipeline, patch_today, patch_trading_day
+    ):
         """CoverageBlocked 应返回 EXIT_COVERAGE_BLOCKED (76)，不返回 1。"""
+
         def raise_coverage_blocked(step, trade_date):
             if step == "coverage":
                 raise CoverageBlocked("覆盖率不足 0.90")
@@ -212,6 +234,7 @@ class TestRunDailyGuardAndExceptions:
 
     def test_general_exception_returns_1(self, patch_pipeline, patch_today, patch_trading_day):
         """通用异常应返回 1，mark_failed 被调用。"""
+
         def raise_error(step, trade_date):
             if step == "sync":
                 raise RuntimeError("东财 502")
@@ -238,6 +261,7 @@ class TestRunDailyGuardAndExceptions:
 
 
 # ── 4. _run_step: 步骤分派 ────────────────────────────────────────────
+
 
 class TestRunStepDispatch:
     """_run_step 按步骤名分派到对应实现。"""
@@ -269,6 +293,7 @@ class TestRunStepDispatch:
 
 # ── 5. signal 步产出摘要（pipeline_state.detail） ──────────────────────
 
+
 class TestSignalStepDetail:
     """signal 步 detail：``signals=1 code=… action=… buy_window=… source=…``
     / ``signals=0 buy_window=…``。
@@ -284,58 +309,71 @@ class TestSignalStepDetail:
     def _signal() -> Signal:
         """按 domain/signal.py 真实定义构造（不编造属性、不用 SimpleNamespace）。"""
         return Signal(
-            code="600519", date=date(2026, 9, 29), action=Action.BUY,
-            checklist=Checklist(c1_uniqueness=True, c2_exchange=True,
-                                c3_elimination=True, c4_min_days=True,
-                                c5_strength_diverge=True, w1_crowding=True),
+            code="600519",
+            date=date(2026, 9, 29),
+            action=Action.BUY,
+            checklist=Checklist(
+                c1_uniqueness=True,
+                c2_exchange=True,
+                c3_elimination=True,
+                c4_min_days=True,
+                c5_strength_diverge=True,
+                w1_crowding=True,
+            ),
             source=SignalSource.LIVE,
         )
 
     def test_written_signal_is_recorded(self):
-        with patch("emotion_core.services.signal_service.run", return_value=self._signal()), \
-                patch("emotion_core.algorithms.entry.current_window",
-                      return_value="ENHANCED"):
-            assert (daily._run_step("signal", date(2026, 9, 29))
-                    == "signals=1 code=600519 action=BUY"
-                       " buy_window=ENHANCED source=live")
+        with (
+            patch("emotion_core.services.signal_service.run", return_value=self._signal()),
+            patch("emotion_core.algorithms.entry.current_window", return_value="ENHANCED"),
+        ):
+            assert (
+                daily._run_step("signal", date(2026, 9, 29)) == "signals=1 code=600519 action=BUY"
+                " buy_window=ENHANCED source=live"
+            )
 
     def test_no_signal_reports_zero_and_window(self):
-        with patch("emotion_core.services.signal_service.run", return_value=None), \
-                patch("emotion_core.algorithms.entry.current_window",
-                      return_value="STANDARD"):
-            assert (daily._run_step("signal", date(2026, 9, 29))
-                    == "signals=0 buy_window=STANDARD")
+        with (
+            patch("emotion_core.services.signal_service.run", return_value=None),
+            patch("emotion_core.algorithms.entry.current_window", return_value="STANDARD"),
+        ):
+            assert daily._run_step("signal", date(2026, 9, 29)) == "signals=0 buy_window=STANDARD"
 
     def test_none_window_reported_as_is(self):
-        with patch("emotion_core.services.signal_service.run", return_value=None), \
-                patch("emotion_core.algorithms.entry.current_window", return_value="NONE"):
-            assert (daily._run_step("signal", date(2026, 9, 29))
-                    == "signals=0 buy_window=NONE")
+        with (
+            patch("emotion_core.services.signal_service.run", return_value=None),
+            patch("emotion_core.algorithms.entry.current_window", return_value="NONE"),
+        ):
+            assert daily._run_step("signal", date(2026, 9, 29)) == "signals=0 buy_window=NONE"
 
     def test_window_read_failure_degrades_without_raising(self):
         """打点是旁路：读窗口失败不得把 signal 步变成 FAILED。"""
-        with patch("emotion_core.services.signal_service.run", return_value=None), \
-                patch("emotion_core.algorithms.entry.current_window",
-                      side_effect=RuntimeError("db down")):
-            assert (daily._run_step("signal", date(2026, 9, 29))
-                    == "signals=0 buy_window=unknown")
+        with (
+            patch("emotion_core.services.signal_service.run", return_value=None),
+            patch(
+                "emotion_core.algorithms.entry.current_window", side_effect=RuntimeError("db down")
+            ),
+        ):
+            assert daily._run_step("signal", date(2026, 9, 29)) == "signals=0 buy_window=unknown"
 
-    def test_detail_reaches_pipeline_state(self, patch_pipeline, patch_today,
-                                           patch_trading_day, patch_all_steps, monkeypatch):
+    def test_detail_reaches_pipeline_state(
+        self, patch_pipeline, patch_today, patch_trading_day, patch_all_steps, monkeypatch
+    ):
         """端到端（编排层）：有信号时摘要经 mark_done 落 pipeline_state。"""
-        monkeypatch.setattr("emotion_core.services.signal_service.run",
-                            lambda d: self._signal())
-        monkeypatch.setattr("emotion_core.algorithms.entry.current_window",
-                            lambda d: "ENHANCED")
+        monkeypatch.setattr("emotion_core.services.signal_service.run", lambda d: self._signal())
+        monkeypatch.setattr("emotion_core.algorithms.entry.current_window", lambda d: "ENHANCED")
 
         assert daily.run_daily(date(2026, 9, 29)) == 0
 
         by_step = {c.args[0]: c.args[2] for c in daily.pipeline.mark_done.call_args_list}
-        assert by_step["signal"] == ("signals=1 code=600519 action=BUY"
-                                     " buy_window=ENHANCED source=live")
+        assert by_step["signal"] == (
+            "signals=1 code=600519 action=BUY buy_window=ENHANCED source=live"
+        )
 
 
 # ── 6. basic 步：基础信息刷新 ─────────────────────────────────────────
+
 
 class TestBasicStep:
     """basic 步：stock_basic 元数据刷新（fail-soft 与不回补历史）。"""
@@ -343,11 +381,12 @@ class TestBasicStep:
     def test_detail_reports_three_sources(self, patch_all_steps, patch_today):
         assert daily._basic_detail() == "spot=5223 list_date=3 industry=2"
 
-    def test_snapshot_failure_does_not_block_the_other_two(
-            self, patch_today, monkeypatch):
+    def test_snapshot_failure_does_not_block_the_other_two(self, patch_today, monkeypatch):
         """快照失败（新浪/东财都挂）只让 spot 那一段 FAILED，后两步照跑。"""
-        monkeypatch.setattr("emotion_core.data.fill_stock_basic.backfill",
-                            lambda: (_ for _ in ()).throw(RuntimeError("502 Bad Gateway")))
+        monkeypatch.setattr(
+            "emotion_core.data.fill_stock_basic.backfill",
+            lambda: (_ for _ in ()).throw(RuntimeError("502 Bad Gateway")),
+        )
         monkeypatch.setattr("emotion_core.data.fill_list_date.backfill", lambda **kw: 3)
         monkeypatch.setattr("emotion_core.data.fill_industry.backfill", lambda *a, **kw: 2)
 
@@ -356,6 +395,7 @@ class TestBasicStep:
 
     def test_all_sources_failing_still_returns_detail(self, patch_today, monkeypatch):
         """三条源全挂：不抛（否则拦掉当天全部算法产出），但 detail 必须如实标 FAILED。"""
+
         def boom(*a, **kw):
             raise RuntimeError("down")
 
@@ -384,14 +424,15 @@ class TestBasicStep:
     def test_skips_historical_replay(self, patch_today, monkeypatch):
         """历史补跑（trade_date ≠ 今天）不刷新快照列，也不打网络源。"""
         for mod in ("fill_stock_basic", "fill_list_date", "fill_industry"):
-            monkeypatch.setattr(f"emotion_core.data.{mod}.backfill",
-                                lambda *a, **kw: pytest.fail("历史补跑不该打网络源"))
+            monkeypatch.setattr(
+                f"emotion_core.data.{mod}.backfill",
+                lambda *a, **kw: pytest.fail("历史补跑不该打网络源"),
+            )
 
         assert daily._run_step("basic", date(2026, 1, 5)) == ""
 
     def test_runs_on_current_trading_day(self, patch_all_steps, patch_today):
-        assert daily._run_step("basic", date(2026, 9, 29)) == (
-            "spot=5223 list_date=3 industry=2")
+        assert daily._run_step("basic", date(2026, 9, 29)) == ("spot=5223 list_date=3 industry=2")
 
     def test_brief_truncates_and_normalizes(self):
         assert daily._brief(RuntimeError("a\nb")) == "a b"
@@ -400,6 +441,7 @@ class TestBasicStep:
 
 
 # ── 7. 默认参数 ───────────────────────────────────────────────────────
+
 
 class TestDefaultArgs:
     """默认参数行为。"""
@@ -416,9 +458,22 @@ class TestDefaultArgs:
         """STEPS 注册表必须有 14 步（R20 起含 hot，R21 起含 basic）。"""
         assert len(daily.STEPS) == 14
         step_names = [s for s, _ in daily.STEPS]
-        expected = ["sync", "coverage", "hot", "basic", "derive", "market", "ladder",
-                    "signal", "promotion", "theme", "ecosystem", "strategy", "outcome",
-                    "health"]
+        expected = [
+            "sync",
+            "coverage",
+            "hot",
+            "basic",
+            "derive",
+            "market",
+            "ladder",
+            "signal",
+            "promotion",
+            "theme",
+            "ecosystem",
+            "strategy",
+            "outcome",
+            "health",
+        ]
         assert step_names == expected
 
     def test_basic_step_runs_before_algorithm_steps(self):

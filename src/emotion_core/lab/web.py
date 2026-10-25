@@ -48,7 +48,13 @@ _STAT_LABEL = {
 
 
 _NUM_FIELDS = (
-    "n", "fill_rate", "expectancy", "median", "win_rate", "lcb", "worst",
+    "n",
+    "fill_rate",
+    "expectancy",
+    "median",
+    "win_rate",
+    "lcb",
+    "worst",
     "sub_worst",
 )
 
@@ -63,8 +69,7 @@ def _floats(row: dict[str, Any]) -> dict[str, Any]:
 
 def _row_score(conn: Any, variant_id: str) -> dict[str, Any] | None:
     df = labdb.query_df(
-        "SELECT * FROM lab.lab_score WHERE variant_id = %s "
-        "ORDER BY window_end DESC LIMIT 1",
+        "SELECT * FROM lab.lab_score WHERE variant_id = %s ORDER BY window_end DESC LIMIT 1",
         (variant_id,),
     )
     if df.empty:
@@ -138,7 +143,8 @@ def _alarms(
         )
     slices = (base.get("detail") or {}).get("slices") or {}
     bad = [
-        (k, v) for k, v in slices.items()
+        (k, v)
+        for k, v in slices.items()
         if v.get("mean") is not None and v["mean"] < 0 and (v.get("n") or 0) >= MIN_N
     ]
     if bad:
@@ -151,9 +157,7 @@ def _alarms(
                 "detail": f"最差几片：{top}。切片只描述历史，不改规则。",
             }
         )
-    thin = [
-        k for k, v in slices.items() if (v.get("n") or 0) < MIN_N
-    ]
+    thin = [k for k, v in slices.items() if (v.get("n") or 0) < MIN_N]
     if thin:
         out.append(
             {
@@ -167,8 +171,7 @@ def _alarms(
         required = watch.get("required") or 0
         recent = [d for d in (watch.get("days") or [])[-3:]]
         detail = "；".join(
-            f"{d['day']} ok {d['ok']}/error {d['error']}/skipped {d['skipped']}"
-            for d in recent
+            f"{d['day']} ok {d['ok']}/error {d['error']}/skipped {d['skipped']}" for d in recent
         )
         out.append(
             {
@@ -188,7 +191,9 @@ def _alarms(
                 "detail": "ADR 0003 §D10 闸门通过，可以进入建表 + 起采集器那一步（需另一次拍板）。",
             }
         )
-    stale = [v for v in variants if v.get("variant_id") != BASELINE_ID and v.get("status") == "active"]
+    stale = [
+        v for v in variants if v.get("variant_id") != BASELINE_ID and v.get("status") == "active"
+    ]
     if stale:
         out.append(
             {
@@ -279,9 +284,13 @@ class _Handler(BaseHTTPRequestHandler):
                         200,
                         _render(
                             "lab_variant.html",
-                            {"today": date.today().isoformat(), "v": row,
-                             "variants": variants, "min_n": MIN_N,
-                             "stat_label": _STAT_LABEL},
+                            {
+                                "today": date.today().isoformat(),
+                                "v": row,
+                                "variants": variants,
+                                "min_n": MIN_N,
+                                "stat_label": _STAT_LABEL,
+                            },
                         ),
                     )
             elif path.startswith("/static/"):

@@ -1,4 +1,5 @@
 """持仓管理（services.position）：open/close/current，不连库。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -63,59 +64,73 @@ class TestClosePos:
 
 class TestCurrent:
     def test_empty_returns_empty_list(self, monkeypatch):
-        monkeypatch.setattr(position, "query_df",
-                            lambda sql, params=(), conn=None: pd.DataFrame())
+        monkeypatch.setattr(position, "query_df", lambda sql, params=(), conn=None: pd.DataFrame())
         assert position.current() == []
 
     def test_maps_rows_to_position_objects(self, monkeypatch):
-        df = pd.DataFrame({
-            "id": [1, 2],
-            "code": ["000001", "600000"],
-            "entry_date": [date(2026, 9, 20), date(2026, 9, 22)],
-            "entry_price": [10.0, 20.0],
-            "shares": [1000, 500],
-            "status": ["OPEN", "OPEN"],
-            "note": ["", "加仓"],
-        })
-        monkeypatch.setattr(position, "query_df",
-                            lambda sql, params=(), conn=None: df)
+        df = pd.DataFrame(
+            {
+                "id": [1, 2],
+                "code": ["000001", "600000"],
+                "entry_date": [date(2026, 9, 20), date(2026, 9, 22)],
+                "entry_price": [10.0, 20.0],
+                "shares": [1000, 500],
+                "status": ["OPEN", "OPEN"],
+                "note": ["", "加仓"],
+            }
+        )
+        monkeypatch.setattr(position, "query_df", lambda sql, params=(), conn=None: df)
         result = position.current()
         assert len(result) == 2
         assert all(isinstance(p, Position) for p in result)
         assert result[0] == Position(
-            code="000001", entry_date=date(2026, 9, 20),
-            entry_price=10.0, shares=1000, status="OPEN", note="", id=1)
+            code="000001",
+            entry_date=date(2026, 9, 20),
+            entry_price=10.0,
+            shares=1000,
+            status="OPEN",
+            note="",
+            id=1,
+        )
         assert result[1] == Position(
-            code="600000", entry_date=date(2026, 9, 22),
-            entry_price=20.0, shares=500, status="OPEN", note="加仓", id=2)
+            code="600000",
+            entry_date=date(2026, 9, 22),
+            entry_price=20.0,
+            shares=500,
+            status="OPEN",
+            note="加仓",
+            id=2,
+        )
 
     def test_note_none_becomes_empty_string(self, monkeypatch):
-        df = pd.DataFrame({
-            "id": [1],
-            "code": ["000001"],
-            "entry_date": [date(2026, 9, 20)],
-            "entry_price": [10.0],
-            "shares": [1000],
-            "status": ["OPEN"],
-            "note": [None],
-        })
-        monkeypatch.setattr(position, "query_df",
-                            lambda sql, params=(), conn=None: df)
+        df = pd.DataFrame(
+            {
+                "id": [1],
+                "code": ["000001"],
+                "entry_date": [date(2026, 9, 20)],
+                "entry_price": [10.0],
+                "shares": [1000],
+                "status": ["OPEN"],
+                "note": [None],
+            }
+        )
+        monkeypatch.setattr(position, "query_df", lambda sql, params=(), conn=None: df)
         result = position.current()
         assert result[0].note == ""
 
     def test_ordered_by_entry_date(self, monkeypatch):
-        df = pd.DataFrame({
-            "id": [1, 2],
-            "code": ["600000", "000001"],
-            "entry_date": [date(2026, 9, 25), date(2026, 9, 20)],
-            "entry_price": [20.0, 10.0],
-            "shares": [500, 1000],
-            "status": ["OPEN", "OPEN"],
-            "note": ["", ""],
-        })
-        monkeypatch.setattr(position, "query_df",
-                            lambda sql, params=(), conn=None: df)
+        df = pd.DataFrame(
+            {
+                "id": [1, 2],
+                "code": ["600000", "000001"],
+                "entry_date": [date(2026, 9, 25), date(2026, 9, 20)],
+                "entry_price": [20.0, 10.0],
+                "shares": [500, 1000],
+                "status": ["OPEN", "OPEN"],
+                "note": ["", ""],
+            }
+        )
+        monkeypatch.setattr(position, "query_df", lambda sql, params=(), conn=None: df)
         result = position.current()
         # 返回顺序与 SQL ORDER BY entry_date 一致（600000 在前）
         assert result[0].code == "600000"

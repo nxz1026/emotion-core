@@ -15,6 +15,7 @@ stock_zh_a_daily，与 2026-09-27 现有数据同源）完成同一回填目标�
 - 写入：emotion_core.data.sync.upsert_daily_bars（幂等 upsert，批量）
 - 并发：线程池；单股失败重试 3 次后跳过并记日志
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,9 +32,9 @@ from emotion_core.utils.db import query_df
 log = logging.getLogger("emotion_core.data.backfill_sina")
 
 START = date(2024, 1, 1)
-END = date(2026, 9, 26)          # 2026-09-27 已有数据，不覆盖
+END = date(2026, 9, 26)  # 2026-09-27 已有数据，不覆盖
 FETCH_START = date(2023, 12, 1)  # 提前抓，让 2024 首根有 pre_close
-BATCH_ROWS = 20000               # 累计多少行触发一次 upsert
+BATCH_ROWS = 20000  # 累计多少行触发一次 upsert
 RETRY = 3
 
 
@@ -56,7 +57,7 @@ def fetch_code(provider: SinaProvider, code: str) -> list[tuple]:
             return [tuple(r) for r in frame.itertuples(index=False, name=None)]
         except Exception as exc:  # noqa: BLE001 —— 网络源异常类型不定
             last = exc
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
     raise last  # type: ignore[misc]
 
 
@@ -94,12 +95,19 @@ def main() -> int:
             if len(buf) >= BATCH_ROWS:
                 flush()
             if i % 200 == 0:
-                log.info("进度 %d/%d（成功 %d 失败 %d 已写 %d 行）",
-                         i, len(codes), ok_codes, fail_codes, total_rows)
+                log.info(
+                    "进度 %d/%d（成功 %d 失败 %d 已写 %d 行）",
+                    i,
+                    len(codes),
+                    ok_codes,
+                    fail_codes,
+                    total_rows,
+                )
     flush()
 
-    log.info("新浪备源回填完成：成功 %d 只，失败 %d 只，共写入 %d 行",
-             ok_codes, fail_codes, total_rows)
+    log.info(
+        "新浪备源回填完成：成功 %d 只，失败 %d 只，共写入 %d 行", ok_codes, fail_codes, total_rows
+    )
     return 0
 
 

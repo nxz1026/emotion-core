@@ -1,4 +1,5 @@
 """domain/ladder.py 单元测试：LadderDay / LeaderIdentity。"""
+
 from __future__ import annotations
 
 from datetime import date

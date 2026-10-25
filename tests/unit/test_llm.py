@@ -1,4 +1,5 @@
 """LLM 层单测：mock httpx 不发真请求（三级参数/重试/围栏/密钥）。"""
+
 import httpx
 import pytest
 
@@ -18,8 +19,11 @@ class FakeResp:
             raise httpx.HTTPStatusError("err", request=None, response=self)
 
 
-OK_PAYLOAD = {"model": "m1", "choices": [{"message": {"content": "pong"}}],
-              "usage": {"prompt_tokens": 5, "completion_tokens": 2}}
+OK_PAYLOAD = {
+    "model": "m1",
+    "choices": [{"message": {"content": "pong"}}],
+    "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +40,7 @@ def _mock_post(monkeypatch, seq):
         if isinstance(item, Exception):
             raise item
         return item
+
     monkeypatch.setattr(llm.httpx, "post", fake_post)
     return calls
 
@@ -56,8 +61,9 @@ def test_strip_fence():
 def test_chat_success_and_log(monkeypatch):
     calls = _mock_post(monkeypatch, [FakeResp(OK_PAYLOAD)])
     logged = []
-    monkeypatch.setattr(llm.LLMClient, "_log_call",
-                        lambda self, r, pur, lat, status, err="": logged.append(status))
+    monkeypatch.setattr(
+        llm.LLMClient, "_log_call", lambda self, r, pur, lat, status, err="": logged.append(status)
+    )
     reply = llm.LLMClient("fast").chat([{"role": "user", "content": "ping"}])
     assert reply.text == "pong" and reply.prompt_tokens == 5
     assert calls[0]["url"].endswith("/chat/completions")
@@ -66,8 +72,7 @@ def test_chat_success_and_log(monkeypatch):
 
 
 def test_retry_on_timeout_only(monkeypatch):
-    calls = _mock_post(monkeypatch,
-                       [httpx.ConnectTimeout("t"), FakeResp(OK_PAYLOAD)])
+    calls = _mock_post(monkeypatch, [httpx.ConnectTimeout("t"), FakeResp(OK_PAYLOAD)])
     monkeypatch.setattr(llm.time, "sleep", lambda s: None)
     monkeypatch.setattr(llm.LLMClient, "_log_call", lambda *a, **k: None)
     reply = llm.LLMClient("fast", max_retry=2).chat([{"role": "user", "content": "x"}])

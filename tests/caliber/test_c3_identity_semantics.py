@@ -19,6 +19,7 @@
 3. 三档都不否决：`passed_of` 在 c3=None 时只看 c1/c2/c4/c5；
 4. `position_tier` 的仓位矩阵与定档表一致（含分歧降级降档、冰点观望）。
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -30,17 +31,30 @@ from emotion_core.domain.signal import Checklist
 
 
 def cand() -> SimpleNamespace:
-    return SimpleNamespace(code="600001", date="2026-10-20", cont_days=5,
-                           is_exchange=True, is_top=True, is_sole_top=True)
+    return SimpleNamespace(
+        code="600001",
+        date="2026-10-20",
+        cont_days=5,
+        is_exchange=True,
+        is_top=True,
+        is_sole_top=True,
+    )
 
 
 def ctx(*, g: int, s: int, y_codes: set[str], survivors: set[str]) -> dict:
     return {
-        "sole": cand(), "y_comp": (g, s),
-        "y_surv": (y_codes, survivors), "min_days": 4,
-        "rows": [], "window": "ENHANCED", "diverge_min": 5.0,
-        "c5_verifiable": True, "name": "", "turnover_rate": 6.0,
-        "bomb_times": 0, "close": 10.0,
+        "sole": cand(),
+        "y_comp": (g, s),
+        "y_surv": (y_codes, survivors),
+        "min_days": 4,
+        "rows": [],
+        "window": "ENHANCED",
+        "diverge_min": 5.0,
+        "c5_verifiable": True,
+        "name": "",
+        "turnover_rate": 6.0,
+        "bomb_times": 0,
+        "close": 10.0,
     }
 
 
@@ -75,25 +89,38 @@ def test_c3_tier(g, s, y_codes, survivors, expect):
 
 @pytest.mark.parametrize(
     ("g", "s", "y_codes", "survivors"),
-    [(2, 1, {"600001", "600002"}, {"600001"}),
-     (1, 1, {"600001"}, {"600001"}),
-     (2, 1, {"600002"}, {"600001"})],
+    [
+        (2, 1, {"600001", "600002"}, {"600001"}),
+        (1, 1, {"600001"}, {"600001"}),
+        (2, 1, {"600002"}, {"600001"}),
+    ],
 )
 def test_c3_identity_never_vetoes(g, s, y_codes, survivors):
-    ok, note = entry.c3_identity(
-        cand(), ctx(g=g, s=s, y_codes=y_codes, survivors=survivors))
+    ok, note = entry.c3_identity(cand(), ctx(g=g, s=s, y_codes=y_codes, survivors=survivors))
     assert ok is None, "身份档只描述身份，不做否决"
     assert "身份 " in note
 
 
 # ── 3. 不否决 ⇒ 聚合器只看剩下四条 ──────────────────────────────────
 def test_identity_none_does_not_block_passed():
-    cl = Checklist(c1_uniqueness=True, c2_exchange=True, c3_elimination=None,
-                   c4_min_days=True, c5_strength_diverge=True, w1_crowding=True)
+    cl = Checklist(
+        c1_uniqueness=True,
+        c2_exchange=True,
+        c3_elimination=None,
+        c4_min_days=True,
+        c5_strength_diverge=True,
+        w1_crowding=True,
+    )
     assert cl.passed is True
     # 但真条件否决时仍然失败（证明不是把 c3 槽位整体失效）
-    bad = Checklist(c1_uniqueness=True, c2_exchange=False, c3_elimination=None,
-                    c4_min_days=True, c5_strength_diverge=True, w1_crowding=True)
+    bad = Checklist(
+        c1_uniqueness=True,
+        c2_exchange=False,
+        c3_elimination=None,
+        c4_min_days=True,
+        c5_strength_diverge=True,
+        w1_crowding=True,
+    )
     assert bad.passed is False
 
 

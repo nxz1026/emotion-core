@@ -7,6 +7,7 @@
 - webhook 地址经 `_cfg("LKL_WEBHOOK_URL", "")` 读取（CONFIG 尚未收录该键，
   取 lkl config.py 默认空串 → 推送关闭，同 lkl 默认静默跳过），与 doctor.py 同先例。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -143,8 +144,9 @@ def push(md: str, trade_date) -> bool:
                 "飞书返回 HTTP 200 但 body 非成功码（多半是报文格式错）：%s",
                 resp.text[:120],
             )
-        log.info("webhook 推送 %s（%s）：HTTP %s 成功=%s",
-                 trade_date, channel, resp.status_code, ok)
+        log.info(
+            "webhook 推送 %s（%s）：HTTP %s 成功=%s", trade_date, channel, resp.status_code, ok
+        )
         return ok
     except Exception as exc:  # noqa: BLE001
         log.warning("webhook 推送失败（不影响报告落盘）：%s", exc)
@@ -159,10 +161,12 @@ def push(md: str, trade_date) -> bool:
 _HUMANIZE_DEDUP: dict[tuple[str, str], float] = {}
 _HUMANIZE_TTL = 86400  # 24h
 
-_HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。把下面这段龙空龙复盘系统的当日日报摘要，**用 2-3 句自然中文**讲清楚两件事：
+_HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。
+把下面这段龙空龙复盘系统的当日日报摘要，**用 2-3 句自然中文**讲清楚两件事：
 
 1. 今天的 A 股盘面现在在什么阶段、买入窗口是否打开；
-2. 今天产生了哪些信号（BUY 推荐几只、SECONDARY/RECOMMEND 观察几只）；没有信号时只说"今日无 BUY"即可。
+2. 今天产生了哪些信号（BUY 推荐几只、SECONDARY/RECOMMEND 观察几只）；
+   没有信号时只说"今日无 BUY"即可。
 
 ⚠️ 铁律：**只做格式美化，不做语义扩展。**
 - 禁止添加原文中不存在的信息、因果关系或解释。
@@ -172,7 +176,9 @@ _HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。把下面这�
 风格要求：
 - 用「今天」「当前」开头的句子，第二人称省略；
 - 数字（涨停家数、最高档数、信号数）保留原文；
-- **数字后面的股票代码与名称必须原样保留，不得概括为「某股」**——速览里的最高板括注（如「4（新华传媒 600825 一字）」）是原文，改写只能调语序，不能丢掉代码与票名；
+- **数字后面的股票代码与名称必须原样保留，不得概括为「某股」**——
+  速览里的最高板括注（如「4（新华传媒 600825 一字）」）是原文，
+  改写只能调语序，不能丢掉代码与票名；
 - 如果有 BUY 推荐，第一句必须出现「BUY」字样；
 - 如果没 BUY，只说"今日无 BUY 推荐"——除非原文明确给出了原因，否则不要添加任何因果解释；
 - 不要写 markdown 标题或列表，只输出 2-3 句纯文本；
@@ -182,7 +188,8 @@ _HUMANIZE_PROMPT = """你是给一线交易员发警报的助手。把下面这�
 """
 
 
-_HUMANIZE_BUY_PROMPT = """你是给一线交易员发盘后观察记录的助手。把下面这条简报，**用 2-3 句自然中文**说清楚：
+_HUMANIZE_BUY_PROMPT = """你是给一线交易员发盘后观察记录的助手。
+把下面这条简报，**用 2-3 句自然中文**说清楚：
 
 1. 观察哪只票（代码+名称+几板）；
 2. 它的硬条件是否全部通过（身位、换手、板数）。
@@ -221,6 +228,7 @@ def _humanize_alert(text: str, kind: str = "daily") -> str:
         return cached[1]
     try:
         from emotion_core.llm import agnes
+
         client = agnes.AgnesClient()
         out = client.complete(
             prompt=prompt + text,
@@ -265,8 +273,7 @@ _BUY_COND_HUMAN = (
 )
 
 
-def _format_buy_signal(code: str, name: str, cont_days: int,
-                       buy_window: str, cl: object) -> str:
+def _format_buy_signal(code: str, name: str, cont_days: int, buy_window: str, cl: object) -> str:
     """观察记录简报（人话版）：只给标的 + 身位 + 硬条件达标情况。
 
     A 止血（2026-10-21）：不再带买点/卖点/仓位（口径B 打板成交假设证伪，
@@ -274,12 +281,9 @@ def _format_buy_signal(code: str, name: str, cont_days: int,
     不带持仓明细（与 `push` 同纪律）；不带 BUY 之外的段（避免与日报摘要重复）。
     """
     name_part = f"{name}({code})" if name else code
-    lines = ["[emotion-core] 今日观察记录（不出买入建议）",
-             f"{name_part}  {cont_days} 板"]
-    passed = [human for field, human in _BUY_COND_HUMAN
-              if getattr(cl, field, None) is True]
-    failed = [human for field, human in _BUY_COND_HUMAN
-              if getattr(cl, field, None) is False]
+    lines = ["[emotion-core] 今日观察记录（不出买入建议）", f"{name_part}  {cont_days} 板"]
+    passed = [human for field, human in _BUY_COND_HUMAN if getattr(cl, field, None) is True]
+    failed = [human for field, human in _BUY_COND_HUMAN if getattr(cl, field, None) is False]
     if failed:
         lines.append("未过关：" + "、".join(failed))
     elif passed:
@@ -287,9 +291,14 @@ def _format_buy_signal(code: str, name: str, cont_days: int,
     return "\n".join(lines)
 
 
-def push_buy_signal(code: str, name: str, cont_days: int,
-                    buy_window: str, cl: object,
-                    trade_date: _date | None = None) -> bool:
+def push_buy_signal(
+    code: str,
+    name: str,
+    cont_days: int,
+    buy_window: str,
+    cl: object,
+    trade_date: _date | None = None,
+) -> bool:
     """观察记录即时推送：默认关闭，24h 内存节流，best-effort，失败不抛。
 
     **默认关闭**（A 止血）：读 `EMOTION_PUSH_BUY` / `PUSH_BUY`，缺省 0。口径B 打板
@@ -319,12 +328,15 @@ def push_buy_signal(code: str, name: str, cont_days: int,
     now = time.time()
     last = _BUY_DEDUP.get(key, 0.0)
     if now - last < _BUY_DEDUP_TTL:
-        log.info("观察记录 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
-                 d_iso, code, last, now - last)
+        log.info(
+            "观察记录 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
+            d_iso,
+            code,
+            last,
+            now - last,
+        )
         return False
-    text = _humanize_alert(
-        _format_buy_signal(code, name, cont_days, buy_window, cl),
-        kind="buy")
+    text = _humanize_alert(_format_buy_signal(code, name, cont_days, buy_window, cl), kind="buy")
     channel = _guess_channel(url)
     try:
         import requests
@@ -336,8 +348,14 @@ def push_buy_signal(code: str, name: str, cont_days: int,
                 "飞书观察记录即时推送返回 HTTP 200 但 body 非成功码：%s",
                 resp.text[:120],
             )
-        log.info("观察记录即时推送 %s/%s（%s）：HTTP %s 成功=%s",
-                 d_iso, code, channel, resp.status_code, ok)
+        log.info(
+            "观察记录即时推送 %s/%s（%s）：HTTP %s 成功=%s",
+            d_iso,
+            code,
+            channel,
+            resp.status_code,
+            ok,
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("观察记录即时推送失败（不影响落盘）：%s", exc)
         return False
@@ -386,9 +404,9 @@ def _watch_row_name(row: dict) -> str:
     return str(row.get("name") or "")
 
 
-def _format_watch_signal(d_iso: str, code: str, name: str,
-                         picks: list[tuple[int, str, str]],
-                         total: int, remain: int) -> str:
+def _format_watch_signal(
+    d_iso: str, code: str, name: str, picks: list[tuple[int, str, str]], total: int, remain: int
+) -> str:
     """一只票一条消息（R67-4）：标题 + 最高分 + top3 策略理由 + 汇总行。"""
     label = f"{name}({code})" if name else code
     best = picks[0][0] if picks else 0
@@ -405,8 +423,7 @@ def _format_watch_signal(d_iso: str, code: str, name: str,
     return "\n".join(lines)
 
 
-def push_watch_signals(rows: list[dict] | None,
-                       trade_date: _date | None = None) -> int:
+def push_watch_signals(rows: list[dict] | None, trade_date: _date | None = None) -> int:
     """WATCH 信号即时推送（R67-4）：按 code 聚合，一只票一条，best-effort 不抛。
 
     背景：``strategy_signal`` 的 WATCH 此前完全不推送。2026-10-08 600825 拿了 3 条
@@ -468,8 +485,13 @@ def push_watch_signals(rows: list[dict] | None,
         key = (d_iso, code)
         last = _WATCH_DEDUP.get(key, 0.0)
         if now - last < _WATCH_DEDUP_TTL:
-            log.info("WATCH 信号 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
-                     d_iso, code, last, now - last)
+            log.info(
+                "WATCH 信号 %s/%s 24h 内已推过（ts=%.0f，距今 %.0fs），跳过",
+                d_iso,
+                code,
+                last,
+                now - last,
+            )
             continue
         text = _format_watch_signal(d_iso, code, names.get(code, ""), picks, total, remain)
         try:
@@ -482,8 +504,14 @@ def push_watch_signals(rows: list[dict] | None,
                     "飞书 WATCH 推送返回 HTTP 200 但 body 非成功码：%s",
                     resp.text[:120],
                 )
-            log.info("WATCH 即时推送 %s/%s（%s）：HTTP %s 成功=%s",
-                     d_iso, code, channel, resp.status_code, ok)
+            log.info(
+                "WATCH 即时推送 %s/%s（%s）：HTTP %s 成功=%s",
+                d_iso,
+                code,
+                channel,
+                resp.status_code,
+                ok,
+            )
         except Exception as exc:  # noqa: BLE001
             log.warning("WATCH 即时推送失败（不影响 WATCH 落盘）：%s", exc)
             continue

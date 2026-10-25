@@ -57,7 +57,11 @@ def test_mainline_never_imports_lab() -> None:
     for path in _py_files(SRC):
         if LAB in path.parents:
             continue
-        hits = {m for m in _imports(path) if m == "emotion_core.lab" or m.startswith("emotion_core.lab.")}
+        hits = {
+            m
+            for m in _imports(path)
+            if m == "emotion_core.lab" or m.startswith("emotion_core.lab.")
+        }
         if hits:
             offenders.append(f"{path.relative_to(SRC)}: {sorted(hits)}")
     assert not offenders, "主线 import 了 lab（会造成实验污染生产）：\n" + "\n".join(offenders)
@@ -95,7 +99,9 @@ def test_lab_has_no_fstring_sql() -> None:
             if not isinstance(node, ast.JoinedStr):
                 continue
             literal = "".join(
-                v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str)
+                v.value
+                for v in node.values
+                if isinstance(v, ast.Constant) and isinstance(v.value, str)
             )
             if re.search(r"\b(select|insert|update|delete)\b", literal, re.I):
                 bad.append(f"{path.relative_to(SRC)}:{node.lineno}")

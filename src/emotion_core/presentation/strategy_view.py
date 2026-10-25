@@ -9,12 +9,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date
 from pathlib import Path
 
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
+
+log = logging.getLogger("emotion_core.strategy_view")
 
 REPORTS = Path(CONFIG.STRATEGY_REPORTS_DIR)
 _DATE_RE = re.compile(r"strategy_(\d{4}-\d{2}-\d{2})\.json$")
@@ -72,14 +75,8 @@ def to_api(date_str: str) -> dict:
     names: dict[str, str] = {}
     if codes:
         try:
-            frame = query_df(
-                "SELECT code, name FROM stock_basic WHERE code = ANY(%s)", (codes,)
-            )
-            names = {
-                str(row.code): row.name
-                for row in frame.itertuples()
-                if row.name is not None
-            }
+            frame = query_df("SELECT code, name FROM stock_basic WHERE code = ANY(%s)", (codes,))
+            names = {str(row.code): row.name for row in frame.itertuples() if row.name is not None}
         except Exception as exc:
             log.warning("strategy_view: 加载股票名称失败，跳过名称显示 — %s", exc)
             names = {}

@@ -13,6 +13,7 @@ Python 参考实现：`src/emotion_core/algorithms/ladder.py`（SQL 编排 build
   2026-09-30 编出的 .so 完全没有 is_suspended 字段、`fold_candidates` 也不收 suspended
   参数 —— 与源码分叉了一个已发布的策略特性，由本文件钉住。
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,14 +29,31 @@ from emotion_core.utils.config import CONFIG  # noqa: E402
 
 D1 = date(2026, 3, 2)
 
-FIELDS = ("date", "code", "cont_days", "is_exchange", "is_top", "is_sole_top",
-          "y_top_group_count", "y_top_survivor_count", "is_suspended")
+FIELDS = (
+    "date",
+    "code",
+    "cont_days",
+    "is_exchange",
+    "is_top",
+    "is_sole_top",
+    "y_top_group_count",
+    "y_top_survivor_count",
+    "is_suspended",
+)
 
 
 def _py_day(d: date, code: str, days: int, ex: bool, susp: bool = False) -> LadderDay:
-    return LadderDay(date=d, code=code, cont_days=days, is_exchange=ex, is_top=False,
-                     is_sole_top=False, y_top_group_count=0, y_top_survivor_count=0,
-                     is_suspended=susp)
+    return LadderDay(
+        date=d,
+        code=code,
+        cont_days=days,
+        is_exchange=ex,
+        is_top=False,
+        is_sole_top=False,
+        y_top_group_count=0,
+        y_top_survivor_count=0,
+        is_suspended=susp,
+    )
 
 
 def _rs_day(d: date, code: str, days: int, ex: bool, susp: bool = False):
@@ -43,24 +61,45 @@ def _rs_day(d: date, code: str, days: int, ex: bool, susp: bool = False):
 
 
 def _py_fields(r: LadderDay) -> tuple:
-    return (str(r.date), r.code, r.cont_days, r.is_exchange, r.is_top, r.is_sole_top,
-            r.y_top_group_count, r.y_top_survivor_count, r.is_suspended)
+    return (
+        str(r.date),
+        r.code,
+        r.cont_days,
+        r.is_exchange,
+        r.is_top,
+        r.is_sole_top,
+        r.y_top_group_count,
+        r.y_top_survivor_count,
+        r.is_suspended,
+    )
 
 
 def _rs_fields(r) -> tuple:
-    return (r.date, r.code, r.cont_days, r.is_exchange, r.is_top, r.is_sole_top,
-            r.y_top_group_count, r.y_top_survivor_count, r.is_suspended)
+    return (
+        r.date,
+        r.code,
+        r.cont_days,
+        r.is_exchange,
+        r.is_top,
+        r.is_sole_top,
+        r.y_top_group_count,
+        r.y_top_survivor_count,
+        r.is_suspended,
+    )
 
 
 def _assert_rows_same(py_rows: list[LadderDay], rs_rows: list, where: str) -> None:
     assert len(rs_rows) == len(py_rows), (
-        f"{where}: 行数 Rust {len(rs_rows)} vs Python {len(py_rows)}")
+        f"{where}: 行数 Rust {len(rs_rows)} vs Python {len(py_rows)}"
+    )
     for i, (p, r) in enumerate(zip(py_rows, rs_rows, strict=True)):
         assert _rs_fields(r) == _py_fields(p), (
-            f"{where}: 第 {i} 行不同\n  Rust   {_rs_fields(r)}\n  Python {_py_fields(p)}")
+            f"{where}: 第 {i} 行不同\n  Rust   {_rs_fields(r)}\n  Python {_py_fields(p)}"
+        )
 
 
 # ---------- 常量一致性 ----------
+
 
 def test_min_leader_days_constant_in_sync():
     """Rust `ladder::MIN_LEADER_DAYS` 是硬编码 4，必须与 CONFIG 同值。"""
@@ -73,13 +112,17 @@ def test_min_leader_days_constant_in_sync():
 
 # ---------- top_group ----------
 
-@pytest.mark.parametrize("rows,expected", [
-    ([(D1, "600825", 5, True), (D1, "000001", 3, True)], ["600825"]),
-    ([(D1, "600825", 5, True), (D1, "000001", 5, True)], ["600825", "000001"]),
-    ([(D1, "600825", 5, False), (D1, "000001", 3, True)], ["000001"]),   # 一字板不进最高组
-    ([(D1, "600825", 5, False)], []),                                     # 全一字 → 空
-    ([], []),
-])
+
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        ([(D1, "600825", 5, True), (D1, "000001", 3, True)], ["600825"]),
+        ([(D1, "600825", 5, True), (D1, "000001", 5, True)], ["600825", "000001"]),
+        ([(D1, "600825", 5, False), (D1, "000001", 3, True)], ["000001"]),  # 一字板不进最高组
+        ([(D1, "600825", 5, False)], []),  # 全一字 → 空
+        ([], []),
+    ],
+)
 def test_top_group(rows, expected):
     py_rows = [_py_day(*r) for r in rows]
     rs_rows = [_rs_day(*r) for r in rows]
@@ -101,14 +144,18 @@ def test_top_group_excludes_suspended():
 
 # ---------- sole_top ----------
 
-@pytest.mark.parametrize("rows,min_days,expected", [
-    ([(D1, "600825", 5, True)], None, "600825"),
-    ([(D1, "600825", 5, True), (D1, "000001", 3, True)], None, "600825"),
-    ([(D1, "600825", 5, True), (D1, "000001", 5, True)], None, None),
-    ([(D1, "600825", 3, True)], None, None),          # 未达门槛 4
-    ([(D1, "600825", 3, True)], 3, "600825"),         # 门槛下探
-    ([(D1, "600825", 9, False, True)], None, None),   # 停牌不算
-])
+
+@pytest.mark.parametrize(
+    "rows,min_days,expected",
+    [
+        ([(D1, "600825", 5, True)], None, "600825"),
+        ([(D1, "600825", 5, True), (D1, "000001", 3, True)], None, "600825"),
+        ([(D1, "600825", 5, True), (D1, "000001", 5, True)], None, None),
+        ([(D1, "600825", 3, True)], None, None),  # 未达门槛 4
+        ([(D1, "600825", 3, True)], 3, "600825"),  # 门槛下探
+        ([(D1, "600825", 9, False, True)], None, None),  # 停牌不算
+    ],
+)
 def test_sole_top(rows, min_days, expected):
     py_rows = [_py_day(*r) for r in rows]
     rs_rows = [_rs_day(*r) for r in rows]
@@ -126,24 +173,39 @@ def test_sole_top(rows, min_days, expected):
 # 场景 = (rows, prev_rows, today_exchange, suspended)
 FOLD_CASES = [
     # 单高标：昨日组 2 只、今日 1 只幸存
-    ([("600825", 5, True), ("000001", 3, True)],
-     [("600825", 4, True), ("000001", 2, True)], {"600825"}, []),
+    (
+        [("600825", 5, True), ("000001", 3, True)],
+        [("600825", 4, True), ("000001", 2, True)],
+        {"600825"},
+        [],
+    ),
     # 一字板更高身位但不进最高组
     ([("600825", 5, False), ("000001", 3, True)], [], set(), []),
     # 同身位两只 → is_sole_top 全 False
     ([("600825", 5, True), ("000001", 5, True)], [("600825", 4, True)], {"600825"}, []),
     # 停牌旁路行：昨日组 2 只、今日换成 000001 幸存
-    ([("600825", 5, True)],
-     [("600825", 4, True), ("000001", 4, True)], {"000001"}, [("002415", 4)]),
+    (
+        [("600825", 5, True)],
+        [("600825", 4, True), ("000001", 4, True)],
+        {"000001"},
+        [("002415", 4)],
+    ),
     # 全空
     ([], [], set(), []),
     # 昨日组 3 只、今日 2 只幸存（R2 分子 > 1）
-    ([("600825", 6, True)],
-     [("600825", 5, True), ("000001", 5, True), ("002415", 5, True)],
-     {"600825", "000001"}, []),
+    (
+        [("600825", 6, True)],
+        [("600825", 5, True), ("000001", 5, True), ("002415", 5, True)],
+        {"600825", "000001"},
+        [],
+    ),
     # 排序：板数降序，同板数 code 升序（含停牌行插位）
-    ([("600825", 3, True), ("000001", 5, True), ("002415", 3, True)],
-     [("000001", 4, True)], {"000001"}, [("600826", 3)]),
+    (
+        [("600825", 3, True), ("000001", 5, True), ("002415", 3, True)],
+        [("000001", 4, True)],
+        {"000001"},
+        [("600826", 3)],
+    ),
 ]
 
 
@@ -179,8 +241,17 @@ def test_fold_suspended_bypass():
     # 身位数字与非停牌版本一致（停牌行不参与 R2）
     base = next(r for r in with_susp if r.code == "600825")
     base_without = next(r for r in without if r.code == "600825")
-    assert (base.cont_days, base.is_top, base.is_sole_top, base.y_top_group_count,
-            base.y_top_survivor_count) == (
-                base_without.cont_days, base_without.is_top, base_without.is_sole_top,
-                base_without.y_top_group_count, base_without.y_top_survivor_count)
+    assert (
+        base.cont_days,
+        base.is_top,
+        base.is_sole_top,
+        base.y_top_group_count,
+        base.y_top_survivor_count,
+    ) == (
+        base_without.cont_days,
+        base_without.is_top,
+        base_without.is_sole_top,
+        base_without.y_top_group_count,
+        base_without.y_top_survivor_count,
+    )
     _assert_rows_same(with_susp, rs, "fold_candidates/suspended")

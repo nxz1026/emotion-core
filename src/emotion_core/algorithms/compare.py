@@ -27,6 +27,7 @@
 5. 无缺失依赖降级：db 入口与 evaluate 均已在本仓就位，本模块无降级分支、
    无静默跳过路径（lkl 同：漂移必落 alert）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,23 +41,25 @@ log = logging.getLogger("emotion_core.compare")
 def _live_codes(d: date) -> list[tuple[str, str]]:
     """实盘侧：当日 BUY 信号（code, status），按 code 升序。"""
     df = query_df(
-        "SELECT code, status FROM signal WHERE confirm_date=%s"
-        " AND action='BUY' ORDER BY code", (d,))
+        "SELECT code, status FROM signal WHERE confirm_date=%s AND action='BUY' ORDER BY code", (d,)
+    )
     return [(r.code, r.status) for r in df.itertuples()]
 
 
 def _replay_codes(d: date) -> list[tuple[str, bool]]:
     """回放侧：当日唯一候选+五条件判定（code, passed）。"""
     from emotion_core.algorithms import evaluate
+
     df = evaluate.replay(d, d, as_of=d)
     return [(r.code, bool(r.passed)) for r in df.itertuples()]
 
 
 def _drift_alert(d: date, detail: str) -> None:
     """规则漂移 → alert 表（level=WARN，可 ack 追踪，不静默）。"""
-    execute("INSERT INTO alert (level, source, detail) VALUES"
-            " ('WARN','compare',%s)",
-            (f"{d} 规则漂移：{detail}",))
+    execute(
+        "INSERT INTO alert (level, source, detail) VALUES ('WARN','compare',%s)",
+        (f"{d} 规则漂移：{detail}",),
+    )
 
 
 def compare(d: date) -> dict:
@@ -67,15 +70,20 @@ def compare(d: date) -> dict:
     replay_set = {c for c, _ in replay}
     drift = sorted(live_set ^ replay_set)
     passed_map = {c: p for c, p in replay}
-    ret = {"date": d.isoformat(),
-           "live": [{"code": c, "status": s} for c, s in live],
-           "replay": [{"code": c, "passed": p} for c, p in replay],
-           "consistent": not drift,
-           "drift": drift}
+    ret = {
+        "date": d.isoformat(),
+        "live": [{"code": c, "status": s} for c, s in live],
+        "replay": [{"code": c, "passed": p} for c, p in replay],
+        "consistent": not drift,
+        "drift": drift,
+    }
     if drift:
-        _drift_alert(d, f"实盘={sorted(live_set)} 回放={sorted(replay_set)}；"
-                    f"差异={drift}；回放passed="
-                    f"{ {c: passed_map.get(c) for c in drift} }")
+        _drift_alert(
+            d,
+            f"实盘={sorted(live_set)} 回放={sorted(replay_set)}；"
+            f"差异={drift}；回放passed="
+            f"{ {c: passed_map.get(c) for c in drift} }",
+        )
     return ret
 
 
@@ -91,16 +99,16 @@ def render(rep: dict) -> str:
     lines.append("")
     lines.append("**今日代码+数据重放（replay as_of=当日）**")
     if rep["replay"]:
-        lines += [f"- {s['code']}（passed={s['passed']}）"
-                  for s in rep["replay"]]
+        lines += [f"- {s['code']}（passed={s['passed']}）" for s in rep["replay"]]
     else:
         lines.append("- （无候选/窗口 NONE）")
     lines.append("")
     if rep["consistent"]:
         lines.append("✅ 两侧一致：无规则漂移")
     else:
-        lines.append(f"⚠ **规则漂移报警**：{rep['drift']}"
-                     "——已插入 alert（lkl alerts 查看 / alert-ack 确认）")
+        lines.append(
+            f"⚠ **规则漂移报警**：{rep['drift']}——已插入 alert（lkl alerts 查看 / alert-ack 确认）"
+        )
     return "\n".join(lines) + "\n"
 
 

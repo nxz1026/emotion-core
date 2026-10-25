@@ -7,6 +7,7 @@ A 止血（2026-10-21 奎爷拍板）：口径B 打板的成交假设被证伪�
 但**默认关闭**（`notify.push_buy_signal` 读 EMOTION_PUSH_BUY，默认 0），等 B 轮
 找到正期望边缘、或 C 轮盘中能力补齐后再开。
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,7 +53,7 @@ def _push_watch_safe(sig: Signal) -> None:
             code=sig.code,
             name=getattr(sig, "name", None) or "",
             cont_days=int(getattr(sig, "cont_days", 0) or 0),
-            buy_window="",   # window 不在 Signal 契约里；daily 主链 push() 仍带
+            buy_window="",  # window 不在 Signal 契约里；daily 主链 push() 仍带
             cl=sig.checklist,
             trade_date=sig.date,
         )

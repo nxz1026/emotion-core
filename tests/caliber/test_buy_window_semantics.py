@@ -18,6 +18,7 @@ W7′（奎爷 2026-10-21 批准，实测定档 `_audit/2026-10-21-修正方案-
   且 `force_liquidate` 恒 False（不再有任何相位强制清仓；卖出只看持有规则）。
 - 冰点仍禁买（n=3、封板率 0%，样本太小不足以支撑放开）。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -30,11 +31,20 @@ D0 = date(2026, 1, 5)
 
 def dm(day: date, **kw) -> state.DayMetrics:
     """构造单日指标（缺省为「无规则命中」形状）。"""
-    base = {"date": day, "limit_up_count": 50, "bomb_rate": None,
-            "zt_performance": None, "max_limit_days": 5, "limit_down_count": 1,
-            "top_amplitude": None, "top_broke": None,
-            "bomb_threshold": CONFIG.BOMB_RATE_FALLBACK, "has_candidate": True,
-            "tradable_max_days": 5, "oneword_ratio": None}
+    base = {
+        "date": day,
+        "limit_up_count": 50,
+        "bomb_rate": None,
+        "zt_performance": None,
+        "max_limit_days": 5,
+        "limit_down_count": 1,
+        "top_amplitude": None,
+        "top_broke": None,
+        "bomb_threshold": CONFIG.BOMB_RATE_FALLBACK,
+        "has_candidate": True,
+        "tradable_max_days": 5,
+        "oneword_ratio": None,
+    }
     base.update(kw)
     return state.DayMetrics(**base)
 
@@ -48,8 +58,9 @@ def test_window_mapping_is_fixed():
     for phase in ("冰点", "发酵", "高潮", "退潮"):
         assert state.window_of(phase)[1] is False
     # 只有冰点禁买
-    assert [p for p in ("冰点", "发酵", "高潮", "退潮")
-            if state.window_of(p)[0] == "NONE"] == ["冰点"]
+    assert [p for p in ("冰点", "发酵", "高潮", "退潮") if state.window_of(p)[0] == "NONE"] == [
+        "冰点"
+    ]
 
 
 def test_rule_priority_order():
@@ -70,11 +81,10 @@ def test_ebb_beats_climax_on_the_same_day():
 
 def test_no_hit_inherits_yesterday_and_seed_is_ice():
     """无命中继承昨日；首日无命中 → 冰点基线；两连炸板 + 跌停潮才判退潮。"""
-    d1 = dm(D0, limit_up_count=90)                     # 高潮
-    d2 = dm(D0 + timedelta(days=1))                    # 无命中 → 继承高潮
-    d3 = dm(D0 + timedelta(days=2), top_broke=True)    # 首日炸板：two_day 需昨日也炸 → 继承
-    d4 = dm(D0 + timedelta(days=3), top_broke=True,
-            limit_down_count=20)                       # 两连炸板 + 跌停潮 → 退潮
+    d1 = dm(D0, limit_up_count=90)  # 高潮
+    d2 = dm(D0 + timedelta(days=1))  # 无命中 → 继承高潮
+    d3 = dm(D0 + timedelta(days=2), top_broke=True)  # 首日炸板：two_day 需昨日也炸 → 继承
+    d4 = dm(D0 + timedelta(days=3), top_broke=True, limit_down_count=20)  # 两连炸板 + 跌停潮 → 退潮
     out = state.classify_series([d1, d2, d3, d4])
     assert [s.phase for s in out] == ["高潮", "高潮", "高潮", "退潮"]
 

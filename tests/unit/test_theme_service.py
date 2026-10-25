@@ -8,6 +8,7 @@
 本文件不需要数据库：默认 provider（NullProvider）返回空标签，`run()` 在触库之前
 就返回 0。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -69,39 +70,58 @@ class TestCleanTagRow:
     """
 
     def test_attribute_bucket_dropped_from_primary(self):
-        row = {"code": "600000", "primary_theme": "参股金融",
-               "secondary_themes": ["机器人概念", "含B股"], "source": "sina_concept"}
+        row = {
+            "code": "600000",
+            "primary_theme": "参股金融",
+            "secondary_themes": ["机器人概念", "含B股"],
+            "source": "sina_concept",
+        }
         got = theme_service._clean_tag_row(row)
-        assert got["primary_theme"] == "机器人概念"      # 桶被剔，真题材升位
+        assert got["primary_theme"] == "机器人概念"  # 桶被剔，真题材升位
         assert got["secondary_themes"] == []
         assert got["code"] == "600000"
-        assert got["source"] == "sina_concept"            # 其余字段原样带过
+        assert got["source"] == "sina_concept"  # 其余字段原样带过
 
     def test_all_noise_keeps_row_with_null_primary(self):
-        row = {"code": "600519", "primary_theme": "基金重仓",
-               "secondary_themes": ["业绩预升"], "source": "sina_concept"}
+        row = {
+            "code": "600519",
+            "primary_theme": "基金重仓",
+            "secondary_themes": ["业绩预升"],
+            "source": "sina_concept",
+        }
         got = theme_service._clean_tag_row(row)
-        assert got["primary_theme"] is None               # 无有效题材：行保留，记覆盖
+        assert got["primary_theme"] is None  # 无有效题材：行保留，记覆盖
         assert got["secondary_themes"] == []
 
     def test_region_theme_kept(self):
         """地域族是真题材（炒地图），刻意不剔——本判据有意留的边界。"""
-        row = {"code": "600758", "primary_theme": "成渝特区",
-               "secondary_themes": ["振兴沈阳", "参股金融"], "source": "sina_concept"}
+        row = {
+            "code": "600758",
+            "primary_theme": "成渝特区",
+            "secondary_themes": ["振兴沈阳", "参股金融"],
+            "source": "sina_concept",
+        }
         got = theme_service._clean_tag_row(row)
         assert got["primary_theme"] == "成渝特区"
         assert got["secondary_themes"] == ["振兴沈阳"]
 
     def test_order_preserved(self):
-        row = {"code": "000001", "primary_theme": "机器人概念",
-               "secondary_themes": ["固态电池", "含H股", "白酒概念"],
-               "source": "sina_concept"}
+        row = {
+            "code": "000001",
+            "primary_theme": "机器人概念",
+            "secondary_themes": ["固态电池", "含H股", "白酒概念"],
+            "source": "sina_concept",
+        }
         got = theme_service._clean_tag_row(row)
         assert got["primary_theme"] == "机器人概念"
         assert got["secondary_themes"] == ["固态电池", "白酒概念"]
 
     def test_original_row_not_mutated(self):
-        row = {"code": "000002", "primary_theme": "参股金融",
-               "secondary_themes": ["含B股"], "source": "sina_concept"}
+        row = {
+            "code": "000002",
+            "primary_theme": "参股金融",
+            "secondary_themes": ["含B股"],
+            "source": "sina_concept",
+        }
         theme_service._clean_tag_row(row)
         assert row["primary_theme"] == "参股金融"

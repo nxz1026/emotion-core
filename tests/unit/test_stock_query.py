@@ -7,6 +7,7 @@
    分子用 `>= cont+1`、换手口径分母同为"昨日该层只数"）；
 3. PIT：所有统计都带 `date < 目标日` 的上界，且分母不足门槛时给 None 而不是补零。
 """
+
 from __future__ import annotations
 
 import re
@@ -56,8 +57,8 @@ def test_resolve_code_puts_wildcards_in_params_not_sql(monkeypatch):
     sql, params = cap.calls[0]
     assert rows and rows[0]["code"] == "601811"
     assert not _bare_percent(sql), f"SQL 里有裸 %：{sql}"
-    assert params[0] == "%新华%"          # 通配符只在参数里
-    assert "601811" not in sql            # 用户输入不得拼进 SQL
+    assert params[0] == "%新华%"  # 通配符只在参数里
+    assert "601811" not in sql  # 用户输入不得拼进 SQL
 
 
 def test_resolve_code_digits_uses_prefix_param(monkeypatch):
@@ -70,18 +71,34 @@ def test_resolve_code_digits_uses_prefix_param(monkeypatch):
 
 
 def test_promotion_table_sql_caliber_and_pit(monkeypatch):
-    cap = _Capture([pd.DataFrame([{"layer": "1->2", "total": 30, "promoted": 6,
-                                   "promoted_ex": 5, "perf_n": 30, "perf_avg": 1.0,
-                                   "perf_median": 0.5, "perf_win_n": 18,
-                                   "fail_n": 24, "fail_perf": -1.0}])])
+    cap = _Capture(
+        [
+            pd.DataFrame(
+                [
+                    {
+                        "layer": "1->2",
+                        "total": 30,
+                        "promoted": 6,
+                        "promoted_ex": 5,
+                        "perf_n": 30,
+                        "perf_avg": 1.0,
+                        "perf_median": 0.5,
+                        "perf_win_n": 18,
+                        "fail_n": 24,
+                        "fail_perf": -1.0,
+                    }
+                ]
+            )
+        ]
+    )
     monkeypatch.setattr(q, "query_df", cap)
     rows = q.promotion_table(D)
     sql, params = cap.calls[0]
     assert not _bare_percent(sql)
     assert ">= v.cont_days + 1" in sql or ">= y.cont_days + 1" in sql  # 分子用 >=，非 =
-    assert "left(v.code, 3) = ANY(%s)" in sql                          # 主板池
-    assert "first_bar_date <= GREATEST" in sql                          # 剔次新
-    assert "v.date < %s" in sql                                        # PIT 上界
+    assert "left(v.code, 3) = ANY(%s)" in sql  # 主板池
+    assert "first_bar_date <= GREATEST" in sql  # 剔次新
+    assert "v.date < %s" in sql  # PIT 上界
     assert D in params and CONFIG.NEW_ISSUER_FLOOR in params
     assert list(CONFIG.BOARD_PREFIXES) in params
     # 全层返回：只给了一行也要补齐 5 层（无样本层给 0，不能吞层）
@@ -96,15 +113,31 @@ def test_promotion_table_sql_caliber_and_pit(monkeypatch):
 
 
 def test_promotion_table_returns_none_below_min_denom(monkeypatch):
-    cap = _Capture([pd.DataFrame([{"layer": "1->2", "total": 2, "promoted": 1,
-                                   "promoted_ex": 1, "perf_n": 2, "perf_avg": 1.0,
-                                   "perf_median": 1.0, "perf_win_n": 1,
-                                   "fail_n": 1, "fail_perf": -2.0}])])
+    cap = _Capture(
+        [
+            pd.DataFrame(
+                [
+                    {
+                        "layer": "1->2",
+                        "total": 2,
+                        "promoted": 1,
+                        "promoted_ex": 1,
+                        "perf_n": 2,
+                        "perf_avg": 1.0,
+                        "perf_median": 1.0,
+                        "perf_win_n": 1,
+                        "fail_n": 1,
+                        "fail_perf": -2.0,
+                    }
+                ]
+            )
+        ]
+    )
     monkeypatch.setattr(q, "query_df", cap)
     row = q.promotion_table(D, min_denom=CONFIG.PROMOTION_MIN_DENOM)[0]
     assert row["total"] == 2
     assert row["rate"] is None and row["rate_exchange"] is None  # F6：不猜、不补零
-    assert row["perf_median"] is not None                        # 收益统计仍如实给出
+    assert row["perf_median"] is not None  # 收益统计仍如实给出
 
 
 def test_promotion_table_pair_date_is_passed_for_single_day_calibration(monkeypatch):
@@ -116,8 +149,7 @@ def test_promotion_table_pair_date_is_passed_for_single_day_calibration(monkeypa
 
 
 def test_layer_forward_uses_lateral_and_pit(monkeypatch):
-    cap = _Capture([pd.DataFrame([{"ret": 1.0}, {"ret": -3.0}, {"ret": 5.0},
-                                  {"ret": None}])])
+    cap = _Capture([pd.DataFrame([{"ret": 1.0}, {"ret": -3.0}, {"ret": 5.0}, {"ret": None}])])
     monkeypatch.setattr(q, "query_df", cap)
     out = q.layer_forward(D, "2->3", 5)
     sql = cap.calls[0][0]
@@ -154,14 +186,20 @@ def test_bare_percent_check_helper():
     assert q.bare_percent_check("WHERE code LIKE '4%'")["bare_percent"] is True
 
 
-@pytest.mark.parametrize("func", ["latest_trade_date", "basic_row", "market_env",
-                                  "market_top", "themes_of"])
+@pytest.mark.parametrize(
+    "func", ["latest_trade_date", "basic_row", "market_env", "market_top", "themes_of"]
+)
 def test_readonly_queries_are_select_only(func, monkeypatch):
     """整条链路只读：不得出现任何写语句。"""
     cap = _Capture([pd.DataFrame([])])
     monkeypatch.setattr(q, "query_df", cap)
-    args = {"latest_trade_date": (), "basic_row": ("601811",),
-            "market_env": (D,), "market_top": (D,), "themes_of": ("601811", D)}[func]
+    args = {
+        "latest_trade_date": (),
+        "basic_row": ("601811",),
+        "market_env": (D,),
+        "market_top": (D,),
+        "themes_of": ("601811", D),
+    }[func]
     getattr(q, func)(*args)
     sql = cap.calls[0][0].lower()
     for verb in ("insert", "update", "delete", "drop", "alter"):

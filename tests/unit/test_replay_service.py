@@ -1,4 +1,5 @@
 """信号历史回填服务（services.replay_service）：run 遍历交易日，不连库。"""
+
 from __future__ import annotations
 
 import logging
@@ -10,8 +11,7 @@ from emotion_core.services import replay_service
 
 class TestRun:
     def test_empty_range_returns_zero(self, monkeypatch):
-        monkeypatch.setattr(replay_service, "trading_days",
-                            lambda s, e: [])
+        monkeypatch.setattr(replay_service, "trading_days", lambda s, e: [])
         assert replay_service.run(date(2026, 1, 1), date(2026, 1, 10)) == 0
 
     def test_counts_signals(self, monkeypatch):
@@ -40,8 +40,7 @@ class TestRun:
     def test_logs_summary(self, monkeypatch, caplog):
         days = [date(2026, 1, 5), date(2026, 1, 6)]
         monkeypatch.setattr(replay_service, "trading_days", lambda s, e: days)
-        monkeypatch.setattr(replay_service.entry, "check_signal",
-                            lambda d, s: {"code": "000001"})
+        monkeypatch.setattr(replay_service.entry, "check_signal", lambda d, s: {"code": "000001"})
         with caplog.at_level(logging.INFO, logger="emotion_core.replay_service"):
             replay_service.run(date(2026, 1, 5), date(2026, 1, 6))
         assert any("2/2" in r.getMessage() for r in caplog.records)

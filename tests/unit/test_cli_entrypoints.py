@@ -8,6 +8,7 @@ ref_rs / ref_limit_rule。
 ⚠️ 全部 IO 桩掉，不连库、不连 Wind、不发 HTTP；真实库对账在 oracle 编排阶段跑。
 ⚠️ 只测 `main()` 的分支与返回码，**不重复**各模块既有单测已覆盖的内部逻辑。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -172,8 +173,10 @@ class TestRefRsCli:
 
         def fake_top(**kw):
             captured.update(kw)
-            return [{"code": "600519", "rs": 1.5, "rank": 1},
-                    {"code": "000001", "rs": 1.2, "rank": None}]
+            return [
+                {"code": "600519", "rs": 1.5, "rank": 1},
+                {"code": "000001", "rs": 1.2, "rank": None},
+            ]
 
         monkeypatch.setattr(ref_rs, "get_top_rs", fake_top)
         assert ref_rs.main(["--as-of", "2026-09-25"]) == 0
@@ -199,9 +202,7 @@ class TestRefRsCli:
         assert seen == {"as_of": date(2026, 9, 25), "benchmark": "000905"}
 
     def test_calculate_zero_rows_returns_one(self, monkeypatch, capsys):
-        monkeypatch.setattr(
-            ref_rs, "calculate_rs", lambda as_of_date=None, benchmark="000300": 0
-        )
+        monkeypatch.setattr(ref_rs, "calculate_rs", lambda as_of_date=None, benchmark="000300": 0)
         monkeypatch.setattr(ref_rs, "get_top_rs", lambda **kw: [])
         assert ref_rs.main(["--calculate"]) == 1
         assert "已写入 0 行" in capsys.readouterr().out
@@ -214,7 +215,8 @@ class TestRefRsCli:
     def test_period_is_forwarded(self, monkeypatch):
         seen = {}
         monkeypatch.setattr(
-            ref_rs, "get_top_rs",
+            ref_rs,
+            "get_top_rs",
             lambda **kw: (seen.update(kw), [{"code": "600519", "rs": 1.0, "rank": 1}])[1],
         )
         ref_rs.main(["--period", "60", "--top", "5"])

@@ -1,4 +1,5 @@
 """晋级率服务（services.promotion_service）：run 封装，不连库。"""
+
 from __future__ import annotations
 
 import logging

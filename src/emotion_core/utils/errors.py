@@ -8,6 +8,7 @@
 - DataError：协议/数据结构非法（非 JSON、非 dict、字段缺失）——重试无意义
 - ProviderError：Provider 网络、解析或数据错误
 """
+
 from __future__ import annotations
 
 

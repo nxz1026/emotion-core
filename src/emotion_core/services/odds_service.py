@@ -3,6 +3,7 @@
 职责：三口径统计（打板价 / 开盘价 / 回踩）。
 参考 docs/07 §7 打板口径统计。
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,5 +41,7 @@ def run(trade_date: date) -> dict:
         "n": len(df),
         "avg_next_open_pct": round(
             float((df["next_open"] / df["signal_close"] - 1).mean() * 100), 2
-        ) if not df.empty else None,
+        )
+        if not df.empty
+        else None,
     }

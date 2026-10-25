@@ -47,15 +47,28 @@ from emotion_core.utils.db import query_df, transaction
 log = logging.getLogger(__name__)
 
 _TABLE = "signal_outcome"
-_COLS = ["confirm_date", "code", "action", "entry_proxy", "t1_gap",
-         "t1_promote", "t1_close_ret", "max_up5", "max_dd5",
-         "t5_close_ret", "rule_ret_a", "rule_ret_d", "complete"]
+_COLS = [
+    "confirm_date",
+    "code",
+    "action",
+    "entry_proxy",
+    "t1_gap",
+    "t1_promote",
+    "t1_close_ret",
+    "max_up5",
+    "max_dd5",
+    "t5_close_ret",
+    "rule_ret_a",
+    "rule_ret_d",
+    "complete",
+]
 _CONFLICT = ["confirm_date", "code", "action"]
 _UPSERT_SQL = (
     f"INSERT INTO {_TABLE} ({', '.join(_COLS)})"
     f" VALUES ({', '.join(['%s'] * len(_COLS))})"
     f" ON CONFLICT ({', '.join(_CONFLICT)}) DO UPDATE SET "
-    + ", ".join(f"{c}=EXCLUDED.{c}" for c in _COLS if c not in _CONFLICT))
+    + ", ".join(f"{c}=EXCLUDED.{c}" for c in _COLS if c not in _CONFLICT)
+)
 
 
 def _cfg(name: str, default: Any) -> Any:
@@ -72,8 +85,7 @@ def _outcome_row(confirm_date: date, code: str, action: str) -> tuple | None:
 
     rule_ret_a=口径A（断板次日开盘卖）、rule_ret_d=影子口径D（半仓法）。
     """
-    base = query_df("SELECT close FROM daily_bar WHERE code=%s AND date=%s",
-                    (code, confirm_date))
+    base = query_df("SELECT close FROM daily_bar WHERE code=%s AND date=%s", (code, confirm_date))
     if base.empty:
         return None
     base = float(base["close"].iloc[0])
@@ -82,25 +94,42 @@ def _outcome_row(confirm_date: date, code: str, action: str) -> tuple | None:
         return None
     entry = float(nb["open"].iloc[0])
     fam = _exit_family(code, confirm_date)
-    row = (confirm_date, code, action, round(entry, 3),
-           _pct(entry, base), _limit_up_on(code, nb["date"].iloc[0]),
-           _pct(nb["close"].iloc[0], entry), None, None, None,
-           fam.get("A_断板开盘"), fam.get("D_半仓"), False)
+    row = (
+        confirm_date,
+        code,
+        action,
+        round(entry, 3),
+        _pct(entry, base),
+        _limit_up_on(code, nb["date"].iloc[0]),
+        _pct(nb["close"].iloc[0], entry),
+        None,
+        None,
+        None,
+        fam.get("A_断板开盘"),
+        fam.get("D_半仓"),
+        False,
+    )
     if len(nb) >= 5:
         w = nb.head(5)
-        row = (*row[:7], _pct(w["high"].max(), entry),
-               _pct(w["low"].min(), entry), _pct(w["close"].iloc[4], entry),
-               row[10], row[11], True)
+        row = (
+            *row[:7],
+            _pct(w["high"].max(), entry),
+            _pct(w["low"].min(), entry),
+            _pct(w["close"].iloc[4], entry),
+            row[10],
+            row[11],
+            True,
+        )
     return row
 
 
 def pending_signals(force: bool = False) -> list[tuple[date, str, str]]:
     """待回填信号：新信号 + 未 complete 的；force=全量重算。"""
-    where = ("WHERE o.confirm_date IS NULL OR NOT o.complete" if not force else "")
+    where = "WHERE o.confirm_date IS NULL OR NOT o.complete" if not force else ""
     df = query_df(
         "SELECT s.confirm_date, s.code, s.action FROM signal s"
-        " LEFT JOIN signal_outcome o USING (confirm_date, code, action) "
-        + where)
+        " LEFT JOIN signal_outcome o USING (confirm_date, code, action) " + where
+    )
     return [(r.confirm_date, r.code, r.action) for r in df.itertuples()]
 
 
@@ -110,24 +139,23 @@ def _upsert_rows(rows: list[tuple]) -> int:
         return 0
     # P2（lkl 三轮审计）：行宽校验防错位静默写脏数据
     if len(rows[0]) != len(_COLS):
-        raise ValueError(f"upsert {_TABLE}：行宽 {len(rows[0])} != 列数 "
-                         f"{len(_COLS)}")
+        raise ValueError(f"upsert {_TABLE}：行宽 {len(rows[0])} != 列数 {len(_COLS)}")
     # 统一消毒：NaN / ±inf → NULL（PG numeric 可存 NaN/Inf，会击穿下游 ::bigint 转换）
-    clean = [tuple(None if isinstance(v, float) and not math.isfinite(v) else v
-                   for v in r) for r in rows]
+    clean = [
+        tuple(None if isinstance(v, float) and not math.isfinite(v) else v for v in r) for r in rows
+    ]
     batch = _cfg("UPSERT_BATCH", 1000)
     with transaction() as conn:
         with conn.cursor() as cur:
             for i in range(0, len(clean), batch):
-                cur.executemany(_UPSERT_SQL, clean[i:i + batch])
+                cur.executemany(_UPSERT_SQL, clean[i : i + batch])
     return len(clean)
 
 
 def backfill(force: bool = False) -> int:
     """回填全部未完成信号 → signal_outcome（幂等）。返回处理数。"""
     todo = pending_signals(force)
-    rows = [r for r in (
-        _outcome_row(d, c, a) for d, c, a in todo) if r is not None]
+    rows = [r for r in (_outcome_row(d, c, a) for d, c, a in todo) if r is not None]
     n = _upsert_rows(rows)
     log.info("signal_outcome：处理 %d 条（完成入库 %d）", len(todo), n)
     return n

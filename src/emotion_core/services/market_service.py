@@ -15,6 +15,7 @@
 显式续接昨日已落库 phase，只回写 [d, d]）。口径与 `dragon_env.py` 模块文档
 「行须已由 emotion.run_range 产出」的既有假设一致。
 """
+
 from __future__ import annotations
 
 import logging

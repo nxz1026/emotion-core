@@ -1,4 +1,5 @@
 """买入信号服务（services.signal_service）：run 转发，不连库。"""
+
 from __future__ import annotations
 
 import logging
@@ -12,14 +13,12 @@ from emotion_core.services import signal_service
 class TestRun:
     def test_returns_signal_when_present(self, monkeypatch):
         fake_signal = SimpleNamespace(action=SimpleNamespace(value="BUY"), code="000001")
-        monkeypatch.setattr(signal_service.entry, "check_signal",
-                            lambda d, s: fake_signal)
+        monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: fake_signal)
         result = signal_service.run(date(2026, 9, 25))
         assert result is fake_signal
 
     def test_returns_none_when_no_signal(self, monkeypatch):
-        monkeypatch.setattr(signal_service.entry, "check_signal",
-                            lambda d, s: None)
+        monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: None)
         assert signal_service.run(date(2026, 9, 25)) is None
 
     def test_default_source_is_live(self, monkeypatch):
@@ -46,15 +45,13 @@ class TestRun:
 
     def test_logs_signal_found(self, monkeypatch, caplog):
         fake_signal = SimpleNamespace(action=SimpleNamespace(value="BUY"), code="000001")
-        monkeypatch.setattr(signal_service.entry, "check_signal",
-                            lambda d, s: fake_signal)
+        monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: fake_signal)
         with caplog.at_level(logging.INFO, logger="emotion_core.signal_service"):
             signal_service.run(date(2026, 9, 25))
         assert any("BUY 000001" in r.getMessage() for r in caplog.records)
 
     def test_logs_no_signal(self, monkeypatch, caplog):
-        monkeypatch.setattr(signal_service.entry, "check_signal",
-                            lambda d, s: None)
+        monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: None)
         with caplog.at_level(logging.INFO, logger="emotion_core.signal_service"):
             signal_service.run(date(2026, 9, 25))
         assert any("无观察记录" in r.getMessage() for r in caplog.records)
@@ -65,20 +62,33 @@ class TestR58_4BuyWebhookHook:
 
     def _make_sig(self, action_value: str):
         from emotion_core.domain.signal import Action
+
         act = Action(action_value)
-        cl = SimpleNamespace(c1_uniqueness=True, c2_exchange=True,
-                             c3_elimination=True, c4_min_days=True,
-                             c5_strength_diverge=True, w1_crowding=True)
-        return SimpleNamespace(action=act, code="000017", date=date(2026, 9, 25),
-                               checklist=cl, name="测试龙", cont_days=5)
+        cl = SimpleNamespace(
+            c1_uniqueness=True,
+            c2_exchange=True,
+            c3_elimination=True,
+            c4_min_days=True,
+            c5_strength_diverge=True,
+            w1_crowding=True,
+        )
+        return SimpleNamespace(
+            action=act,
+            code="000017",
+            date=date(2026, 9, 25),
+            checklist=cl,
+            name="测试龙",
+            cont_days=5,
+        )
 
     def test_buy_signal_triggers_push(self, monkeypatch):
         """R58-4：action=BUY → notify.push_buy_signal 被调一次。"""
         sig = self._make_sig("BUY")
         monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: sig)
         captured: dict = {}
-        monkeypatch.setattr(signal_service.notify, "push_buy_signal",
-                            lambda **kw: captured.update(kw) or True)
+        monkeypatch.setattr(
+            signal_service.notify, "push_buy_signal", lambda **kw: captured.update(kw) or True
+        )
         signal_service.run(date(2026, 9, 25))
         assert captured.get("code") == "000017"
         assert captured.get("cont_days") == 5
@@ -89,8 +99,9 @@ class TestR58_4BuyWebhookHook:
         sig = self._make_sig("SECONDARY")
         monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: sig)
         called: list = []
-        monkeypatch.setattr(signal_service.notify, "push_buy_signal",
-                            lambda **kw: called.append(kw) or True)
+        monkeypatch.setattr(
+            signal_service.notify, "push_buy_signal", lambda **kw: called.append(kw) or True
+        )
         signal_service.run(date(2026, 9, 25))
         assert called == []
 
@@ -99,8 +110,9 @@ class TestR58_4BuyWebhookHook:
         sig = self._make_sig("RECOMMEND")
         monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: sig)
         called: list = []
-        monkeypatch.setattr(signal_service.notify, "push_buy_signal",
-                            lambda **kw: called.append(kw) or True)
+        monkeypatch.setattr(
+            signal_service.notify, "push_buy_signal", lambda **kw: called.append(kw) or True
+        )
         signal_service.run(date(2026, 9, 25))
         assert called == []
 
@@ -111,6 +123,7 @@ class TestR58_4BuyWebhookHook:
 
         def boom(**kw):
             raise RuntimeError("webhook 下游挂了")
+
         monkeypatch.setattr(signal_service.notify, "push_buy_signal", boom)
         # 不应抛
         result = signal_service.run(date(2026, 9, 25))
@@ -119,7 +132,8 @@ class TestR58_4BuyWebhookHook:
     def test_no_signal_does_not_trigger_push(self, monkeypatch):
         monkeypatch.setattr(signal_service.entry, "check_signal", lambda d, s: None)
         called: list = []
-        monkeypatch.setattr(signal_service.notify, "push_buy_signal",
-                            lambda **kw: called.append(kw) or True)
+        monkeypatch.setattr(
+            signal_service.notify, "push_buy_signal", lambda **kw: called.append(kw) or True
+        )
         signal_service.run(date(2026, 9, 25))
         assert called == []

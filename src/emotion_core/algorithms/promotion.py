@@ -94,12 +94,20 @@ def _today_bar_count(cur: Any, trade_date: date) -> int:
 
 def _fetch_pairs(cur: Any, trade_date: date, prev: date) -> list[Pair]:
     """取昨日→今日配对行（主板 + 剔次新，90 日门槛与地板取自 config 单一来源）。"""
-    cur.execute(_PAIRS_SQL, {"d": trade_date, "prev": prev,
-                             "boards": list(BOARD_PREFIXES),
-                             "days": CONFIG.NEW_ISSUER_MIN_DAYS,
-                             "floor": CONFIG.NEW_ISSUER_FLOOR})
-    return [(int(r[0]), int(r[1]), bool(r[2]), None if r[3] is None else float(r[3]))
-            for r in cur.fetchall()]
+    cur.execute(
+        _PAIRS_SQL,
+        {
+            "d": trade_date,
+            "prev": prev,
+            "boards": list(BOARD_PREFIXES),
+            "days": CONFIG.NEW_ISSUER_MIN_DAYS,
+            "floor": CONFIG.NEW_ISSUER_FLOOR,
+        },
+    )
+    return [
+        (int(r[0]), int(r[1]), bool(r[2]), None if r[3] is None else float(r[3]))
+        for r in cur.fetchall()
+    ]
 
 
 def _rate(part: int, whole: int, min_denom: int) -> float | None:
@@ -109,8 +117,9 @@ def _rate(part: int, whole: int, min_denom: int) -> float | None:
     return round(part / whole, 4)
 
 
-def _layer_row(trade_date: date, layer: str, lo: int, hi: int | None,
-               pairs: Sequence[Pair], min_denom: int) -> dict[str, Any]:
+def _layer_row(
+    trade_date: date, layer: str, lo: int, hi: int | None, pairs: Sequence[Pair], min_denom: int
+) -> dict[str, Any]:
     """单层统计：筛该层 → 数名义/换手晋级 → 算比率、背离、失败负反馈。"""
     sel = [p for p in pairs if p[0] >= lo and (hi is None or p[0] <= hi)]
     promoted = [p for p in sel if p[1] >= p[0] + 1]
@@ -135,11 +144,13 @@ def _layer_row(trade_date: date, layer: str, lo: int, hi: int | None,
     }
 
 
-def _matrix(trade_date: date, pairs: Sequence[Pair],
-            min_denom: int = CONFIG.PROMOTION_MIN_DENOM) -> list[dict[str, Any]]:
+def _matrix(
+    trade_date: date, pairs: Sequence[Pair], min_denom: int = CONFIG.PROMOTION_MIN_DENOM
+) -> list[dict[str, Any]]:
     """按 PROMOTION_LAYERS 生成全层行（纯函数）。"""
-    return [_layer_row(trade_date, name, lo, hi, pairs, min_denom)
-            for name, lo, hi in PROMOTION_LAYERS]
+    return [
+        _layer_row(trade_date, name, lo, hi, pairs, min_denom) for name, lo, hi in PROMOTION_LAYERS
+    ]
 
 
 class PromotionSkipped(RuntimeError):
@@ -190,8 +201,7 @@ def promotion_matrix(trade_date: date, *, conn: Any | None = None) -> list[dict[
             if prev is None:
                 raise PromotionSkipped(trade_date, "无前一交易日（独立日历源查不到）")
             if _today_bar_count(cur, trade_date) == 0:
-                raise PromotionSkipped(
-                    trade_date, "derived_bar 当日整体缺失（上游 derive 未产出）")
+                raise PromotionSkipped(trade_date, "derived_bar 当日整体缺失（上游 derive 未产出）")
             pairs = _fetch_pairs(cur, trade_date, prev)
     finally:
         if own:
@@ -239,9 +249,20 @@ def persist(trade_date: date) -> int:
         if not rows:
             log.info("promotion_day %s：当日无晋级数据（真平静，清空）", trade_date)
             return 0
-        data = [(r["date"], r["layer"], r["promote_from"], r["promote_nominal"],
-                 r["promote_exchange"], r["rate_nominal"], r["rate_exchange"],
-                 r["divergence"], r["fail_perf"]) for r in rows]
+        data = [
+            (
+                r["date"],
+                r["layer"],
+                r["promote_from"],
+                r["promote_nominal"],
+                r["promote_exchange"],
+                r["rate_nominal"],
+                r["rate_exchange"],
+                r["divergence"],
+                r["fail_perf"],
+            )
+            for r in rows
+        ]
         with conn.cursor() as cur:
             cur.executemany(_INSERT_SQL, data)
     log.info("promotion_day %s：%d 层", trade_date, len(rows))

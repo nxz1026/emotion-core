@@ -8,6 +8,7 @@
 `presentation/translate.py` 保留为薄壳 re-export，`translate_phase/window/rating`
 的公开签名不变（`tests/unit/test_translate.py` 仍按原路径调用）。
 """
+
 from __future__ import annotations
 
 #: 相位 → 人话。括号里仍会带上原相位名，方便和内部文档对照。

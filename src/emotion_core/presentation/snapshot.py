@@ -9,6 +9,7 @@
 - `resolve_date(raw)`：把 URL 上的 `date=YYYY-MM-DD` 收紧到合法快照日（非法/无数据 → 回最新）
 - `calendar_ctx()` / `banner_ctx()`：月历网格与"当前快照日期"提示
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ def clear_cache() -> None:
 
 def available_dates() -> list[date]:
     """有快照的交易日（降序）。来源 market_stat —— 只有跑过的交易日才有行。"""
+
     def _load() -> list[date]:
         df = query_df("SELECT date FROM market_stat ORDER BY date DESC")
         return [r for r in df["date"].tolist() if r is not None]
@@ -88,7 +90,7 @@ def resolve_date(raw: str | None, default: date | None = None) -> date | None:
 
 
 def _parse_month(raw: str | None, anchor: date) -> date:
-    """"YYYY-MM" → 该月 1 日；非法/缺省 → 锚点日所在月。"""
+    """ "YYYY-MM" → 该月 1 日；非法/缺省 → 锚点日所在月。"""
     text = (raw or "").strip()
     if text:
         try:
@@ -108,8 +110,9 @@ def _shift_month(first: date, delta: int) -> date:
     return date(y, m, 1)
 
 
-def calendar_ctx(selected: date | None, month: str | None = None,
-                 today: date | None = None) -> dict:
+def calendar_ctx(
+    selected: date | None, month: str | None = None, today: date | None = None
+) -> dict:
     """渲染月历所需的数据（周一为每周第一天，与国内看盘习惯一致）。"""
     dates = available_dates()
     have = set(dates)
@@ -119,26 +122,28 @@ def calendar_ctx(selected: date | None, month: str | None = None,
     prev = _shift_month(first, -1)
 
     weeks: list[list[dict]] = []
-    day = first - timedelta(days=first.weekday())      # 补到该周周一
+    day = first - timedelta(days=first.weekday())  # 补到该周周一
     last_day_of_month = (nxt - timedelta(days=1)).day
     while True:
         week = []
         for _ in range(7):
-            week.append({
-                "iso": day.isoformat(),
-                "day": day.day,
-                "in_month": day.month == first.month,
-                "has_data": day in have,
-                "is_selected": day == selected,
-                "is_latest": bool(dates) and day == dates[0],
-                "is_today": day == (today or date.today()),
-            })
+            week.append(
+                {
+                    "iso": day.isoformat(),
+                    "day": day.day,
+                    "in_month": day.month == first.month,
+                    "has_data": day in have,
+                    "is_selected": day == selected,
+                    "is_latest": bool(dates) and day == dates[0],
+                    "is_today": day == (today or date.today()),
+                }
+            )
             day += timedelta(days=1)
         weeks.append(week)
         # 收尾：已经盖过本月最后一天，且整周都在下月时停
         if day.month != first.month and day > nxt:
             break
-        if len(weeks) > 6:                              # 安全阀
+        if len(weeks) > 6:  # 安全阀
             break
 
     return {
@@ -150,8 +155,7 @@ def calendar_ctx(selected: date | None, month: str | None = None,
         "next_month": f"{nxt.year:04d}-{nxt.month:02d}",
         "prev_has_data": any(d.year == prev.year and d.month == prev.month for d in dates),
         "next_has_data": any(d.year == nxt.year and d.month == nxt.month for d in dates),
-        "month_days": sum(1 for w in weeks for c in w
-                          if c["in_month"] and c["has_data"]),
+        "month_days": sum(1 for w in weeks for c in w if c["in_month"] and c["has_data"]),
         "month_total": last_day_of_month,
     }
 
@@ -175,9 +179,15 @@ def banner_ctx(selected: date | None) -> dict:
     dates = available_dates()
     latest = dates[0] if dates else None
     if selected is None:
-        return {"selected": None, "latest": latest, "is_latest": False,
-                "prev": None, "next": None, "days_behind": None,
-                "weekday": ""}
+        return {
+            "selected": None,
+            "latest": latest,
+            "is_latest": False,
+            "prev": None,
+            "next": None,
+            "days_behind": None,
+            "weekday": "",
+        }
     try:
         idx = dates.index(selected)
     except ValueError:

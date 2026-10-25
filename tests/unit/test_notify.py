@@ -15,6 +15,7 @@
    `test_push_empty_text_skips` **没有任何断言**（测了个寂寞）。
    现已合并为单份，并补上飞书渠道与「HTTP 200 但 body 非成功码」的覆盖。
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,14 +66,12 @@ class TestCfg:
         assert notify._cfg("LKL_WEBHOOK_URL", "") == "https://bare/hook"
 
     def test_config_attribute_still_works(self, monkeypatch):
-        monkeypatch.setattr(notify, "CONFIG",
-                            type("C", (), {"SOME_KEY": "from-config"})())
+        monkeypatch.setattr(notify, "CONFIG", type("C", (), {"SOME_KEY": "from-config"})())
         assert notify._cfg("SOME_KEY", "fallback") == "from-config"
 
     def test_env_beats_config(self, monkeypatch):
         """环境变量优先于 CONFIG（部署期覆盖策略期配置）。"""
-        monkeypatch.setattr(notify, "CONFIG",
-                            type("C", (), {"SOME_KEY": "from-config"})())
+        monkeypatch.setattr(notify, "CONFIG", type("C", (), {"SOME_KEY": "from-config"})())
         monkeypatch.setenv("EMOTION_SOME_KEY", "from-env")
         assert notify._cfg("SOME_KEY", "fallback") == "from-env"
 
@@ -92,8 +91,7 @@ class TestGuessChannel:
     """
 
     def test_wecom_detected(self):
-        assert notify._guess_channel(
-            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send") == "wecom"
+        assert notify._guess_channel("https://qyapi.weixin.qq.com/cgi-bin/webhook/send") == "wecom"
 
     def test_dingtalk_detected(self):
         assert notify._guess_channel("https://oapi.dingtalk.com/robot/send") == "dingtalk"
@@ -103,8 +101,9 @@ class TestGuessChannel:
         assert notify._guess_channel(FEISHU_URL) == "feishu"
 
     def test_larksuite_detected(self):
-        assert notify._guess_channel(
-            "https://open.larksuite.com/open-apis/bot/v2/hook/x") == "feishu"
+        assert (
+            notify._guess_channel("https://open.larksuite.com/open-apis/bot/v2/hook/x") == "feishu"
+        )
 
     def test_generic_fallback(self):
         assert notify._guess_channel("https://example.com/hook") == "generic"
@@ -171,6 +170,7 @@ class TestPushWithUrl:
 
     def test_push_posts_to_url(self, monkeypatch):
         import requests as real_requests
+
         posted = []
 
         def mock_post(url, json=None, timeout=None):
@@ -212,6 +212,7 @@ class TestPushWithUrl:
 
     def test_wecom_payload_truncates_to_4000(self, monkeypatch):
         import requests as real_requests
+
         posted = []
 
         def mock_post(url, json=None, timeout=None):
@@ -226,6 +227,7 @@ class TestPushWithUrl:
 
     def test_dingtalk_payload_truncates_to_18000(self, monkeypatch):
         import requests as real_requests
+
         posted = []
 
         def mock_post(url, json=None, timeout=None):
@@ -244,6 +246,7 @@ class TestPushFeishu:
 
     def test_feishu_push_succeeds_on_code_zero(self, monkeypatch):
         import requests as real_requests
+
         posted = []
 
         def mock_post(url, json=None, timeout=None):
@@ -297,122 +300,149 @@ class TestPushBuySignal:
 
     @staticmethod
     def _cl():
-        return SimpleNamespace(c1_uniqueness=True, c2_exchange=True,
-                               c3_elimination=True, c4_min_days=True,
-                               c5_strength_diverge=True, w1_crowding=True)
+        return SimpleNamespace(
+            c1_uniqueness=True,
+            c2_exchange=True,
+            c3_elimination=True,
+            c4_min_days=True,
+            c5_strength_diverge=True,
+            w1_crowding=True,
+        )
 
     def _spy_post(self, posted):
         """统一 spy：append {args, kw} dict 让 posted[i]['kw']['json'] 可读。"""
-        import requests as real_requests
+
         def mock_post(*a, **kw):
             posted.append({"args": a, "kw": kw})
             return _resp(200, {"code": 0})
+
         return mock_post
 
     def test_disabled_by_default(self, monkeypatch):
         """A 止血：不带 EMOTION_PUSH_BUY 时不推（默认关）。"""
         posted = []
         import requests as real_requests
+
         monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         monkeypatch.delenv("EMOTION_PUSH_BUY", raising=False)
         monkeypatch.delenv("PUSH_BUY", raising=False)
         notify.reset_buy_dedup()
 
-        ok = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                    self._cl(), date(2026, 10, 10))
+        ok = notify.push_buy_signal(
+            "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+        )
         assert ok is False
         assert posted == []
 
     def test_first_push_attempts(self, monkeypatch):
         import requests as real_requests
+
         posted = []
         monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
-        ok = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                     self._cl(), date(2026, 10, 10))
+        ok = notify.push_buy_signal(
+            "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+        )
         assert ok is True
         assert len(posted) == 1
 
     def test_second_push_within_24h_skipped(self, monkeypatch):
         import requests as real_requests
+
         posted = []
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        monkeypatch.setattr(
+            real_requests, "post", lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0})
+        )
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
-        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                self._cl(), date(2026, 10, 10))
-        ok2 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                     self._cl(), date(2026, 10, 10))
+        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10))
+        ok2 = notify.push_buy_signal(
+            "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+        )
         assert ok2 is False, "24h 内同 (date,code) 重推应被节流"
         assert len(posted) == 1
 
     def test_different_code_pushes_again(self, monkeypatch):
         import requests as real_requests
+
         posted = []
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        monkeypatch.setattr(
+            real_requests, "post", lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0})
+        )
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
-        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                self._cl(), date(2026, 10, 10))
-        ok2 = notify.push_buy_signal("600001", "另一只", 5, "STANDARD",
-                                     self._cl(), date(2026, 10, 10))
+        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10))
+        ok2 = notify.push_buy_signal(
+            "600001", "另一只", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+        )
         assert ok2 is True, "不同 code 不应互相节流"
         assert len(posted) == 2
 
     def test_different_date_pushes_again(self, monkeypatch):
         import requests as real_requests
+
         posted = []
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
+        monkeypatch.setattr(
+            real_requests, "post", lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0})
+        )
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
-        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                self._cl(), date(2026, 10, 10))
-        ok2 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                     self._cl(), date(2026, 10, 11))
+        notify.push_buy_signal("000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10))
+        ok2 = notify.push_buy_signal(
+            "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 11)
+        )
         assert ok2 is True, "不同 date 不应互相节流"
         assert len(posted) == 2
 
     def test_network_error_does_not_pollute_dedup(self, monkeypatch):
         """R58-4：网络异常时不记节流——下次重试可推。"""
         import requests as real_requests
+
         posted = []
+
         def mock_post(*a, **kw):
             posted.append(1)
             raise real_requests.ConnectionError("dns")
+
         monkeypatch.setattr(real_requests, "post", mock_post)
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
         notify.reset_buy_dedup()
 
-        ok1 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                     self._cl(), date(2026, 10, 10))
+        ok1 = notify.push_buy_signal(
+            "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+        )
         assert ok1 is False
         # 修复后重试
-        monkeypatch.setattr(real_requests, "post",
-                            lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0}))
-        ok2 = notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                     self._cl(), date(2026, 10, 10))
+        monkeypatch.setattr(
+            real_requests, "post", lambda *a, **kw: posted.append(1) or _resp(200, {"code": 0})
+        )
+        ok2 = notify.push_buy_signal(
+            "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+        )
         assert ok2 is True, "网络异常未污染 dedup，重试应能推"
         assert len(posted) == 2
 
     def test_no_url_skips_silently(self, monkeypatch):
         monkeypatch.delenv("EMOTION_LKL_WEBHOOK_URL", raising=False)
         notify.reset_buy_dedup()
-        assert notify.push_buy_signal("000017", "测试龙", 5, "STANDARD",
-                                      self._cl(), date(2026, 10, 10)) is False
+        assert (
+            notify.push_buy_signal(
+                "000017", "测试龙", 5, "STANDARD", self._cl(), date(2026, 10, 10)
+            )
+            is False
+        )
 
     def test_payload_format_is_plain_language(self, monkeypatch):
         """简报走人话——代码/票名/板数保留，内部代号 c1..c5 不再出现；
         A 止血后正文不得出现买点/卖点/仓位（不再给操作指令）。"""
         import requests as real_requests
+
         posted = []
         monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
@@ -420,15 +450,14 @@ class TestPushBuySignal:
         monkeypatch.setattr(notify, "_humanize_alert", lambda t, kind="daily": t)
         notify.reset_buy_dedup()
 
-        notify.push_buy_signal("000017", "测试龙", 5, "ENHANCED",
-                                self._cl(), date(2026, 10, 10))
+        notify.push_buy_signal("000017", "测试龙", 5, "ENHANCED", self._cl(), date(2026, 10, 10))
         payload = posted[0]["kw"]["json"]
         assert payload["msg_type"] == "text"
         body = payload["content"]["text"]
         assert "000017" in body and "测试龙" in body
         assert "5 板" in body or "5板" in body
-        assert "唯一最强连板股" in body                          # 人话条件
-        assert "c1 " not in body and "c3 " not in body           # 不再出现内部代号
+        assert "唯一最强连板股" in body  # 人话条件
+        assert "c1 " not in body and "c3 " not in body  # 不再出现内部代号
         # A 止血红线：正文不得出现买点/卖点/仓位这类操作指令
         for banned in ("买点", "卖点", "仓位", "满仓", "半仓"):
             assert banned not in body, f"观察记录里不该出现「{banned}」"
@@ -436,6 +465,7 @@ class TestPushBuySignal:
     def test_zero_cont_days_in_body(self, monkeypatch):
         """cont_days 缺数（Signal 字段未填）→ 显示 0 板，不抛。"""
         import requests as real_requests
+
         posted = []
         monkeypatch.setattr(real_requests, "post", self._spy_post(posted))
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
@@ -444,8 +474,7 @@ class TestPushBuySignal:
         monkeypatch.setattr(notify, "_humanize_alert", lambda t, kind="daily": t)
         notify.reset_buy_dedup()
 
-        notify.push_buy_signal("000017", "测试龙", 0, "STANDARD",
-                                self._cl(), date(2026, 10, 10))
+        notify.push_buy_signal("000017", "测试龙", 0, "STANDARD", self._cl(), date(2026, 10, 10))
         body = posted[0]["kw"]["json"]["content"]["text"]
         assert "0 板" in body or "0板" in body
 
@@ -464,11 +493,13 @@ class TestHumanizeAlert:
         class _StubAgnes:
             def __init__(self):
                 pass
+
             def complete(self, *, prompt, temperature, max_tokens):
-                assert "盘后观察记录" in prompt      # 用的是 buy 专用 prompt
+                assert "盘后观察记录" in prompt  # 用的是 buy 专用 prompt
                 return "000017 测试龙 5 板，硬条件全过，进了观察名单。"
 
         import sys
+
         sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
         sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
         sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
@@ -488,13 +519,14 @@ class TestHumanizeAlert:
 
         # 把 agnes 模块整个替成抛错 stub
         import sys
+
         sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
         sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
         sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
 
         text = "## ⓪ 速览\n今日高潮，涨停 50。BUY 1 只。"
         out = notify._humanize_alert(text, kind="daily")
-        assert out == text   # 回退原文
+        assert out == text  # 回退原文
 
     def test_llm_success_returns_humanized(self, monkeypatch):
         """LLM 正常返回 → 用 LLM 输出而非原文。"""
@@ -503,10 +535,14 @@ class TestHumanizeAlert:
         class _StubAgnes:
             def __init__(self):
                 pass
+
             def complete(self, *, prompt, temperature, max_tokens):
-                return "今天市场处于高潮阶段，涨停家数 50 较高。出现 1 只 BUY 推荐，可考虑逢低介入。"
+                return (
+                    "今天市场处于高潮阶段，涨停家数 50 较高。出现 1 只 BUY 推荐，可考虑逢低介入。"
+                )
 
         import sys
+
         sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
         sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
         sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
@@ -514,7 +550,7 @@ class TestHumanizeAlert:
         text = "## ⓪ 速览\n**今日高潮** BUY 1 只 涨停 50"
         out = notify._humanize_alert(text, kind="daily")
         assert "高潮" in out and "涨停" in out
-        assert out != text   # 真正被改写了
+        assert out != text  # 真正被改写了
 
     def test_llm_empty_output_falls_back(self, monkeypatch):
         """LLM 返回空串 → 回退原文。"""
@@ -523,17 +559,19 @@ class TestHumanizeAlert:
         class _StubAgnes:
             def __init__(self):
                 pass
+
             def complete(self, *, prompt, temperature, max_tokens):
                 return "   "
 
         import sys
+
         sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
         sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
         sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
 
         text = "## ⓪ 速览\n**今日高潮**"
         out = notify._humanize_alert(text, kind="daily")
-        assert out == text   # 空字符串回退
+        assert out == text  # 空字符串回退
 
     def test_llm_result_cached_for_24h(self, monkeypatch):
         """同一段摘要第二次调用 LLM 走缓存（只调一次 LLM）。"""
@@ -543,11 +581,13 @@ class TestHumanizeAlert:
         class _StubAgnes:
             def __init__(self):
                 pass
+
             def complete(self, *, prompt, temperature, max_tokens):
                 call_count[0] += 1
                 return f"LLM 输出 #{call_count[0]}"
 
         import sys
+
         sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
         sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
         sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
@@ -556,7 +596,7 @@ class TestHumanizeAlert:
         out1 = notify._humanize_alert(text, kind="daily")
         out2 = notify._humanize_alert(text, kind="daily")
         assert out1 == out2 == "LLM 输出 #1"
-        assert call_count[0] == 1   # 第二次走缓存
+        assert call_count[0] == 1  # 第二次走缓存
 
     def test_different_text_triggers_new_llm_call(self, monkeypatch):
         notify.reset_humanize_dedup()
@@ -565,11 +605,13 @@ class TestHumanizeAlert:
         class _StubAgnes:
             def __init__(self):
                 pass
+
             def complete(self, *, prompt, temperature, max_tokens):
                 call_count[0] += 1
                 return f"#{call_count[0]}"
 
         import sys
+
         sys.modules["emotion_core.llm"] = type(sys)("emotion_core.llm")
         sys.modules["emotion_core.llm.agnes"] = type(sys)("emotion_core.llm.agnes")
         sys.modules["emotion_core.llm.agnes"].AgnesClient = _StubAgnes
@@ -592,9 +634,14 @@ class TestPushWatchSignals:
     @pytest.fixture(autouse=True)
     def _reset(self, monkeypatch):
         notify.reset_watch_dedup()
-        for k in ("EMOTION_PUSH_WATCH", "PUSH_WATCH",
-                  "EMOTION_WATCH_PUSH_MIN_SCORE", "WATCH_PUSH_MIN_SCORE",
-                  "EMOTION_WATCH_PUSH_MAX_CODES", "WATCH_PUSH_MAX_CODES"):
+        for k in (
+            "EMOTION_PUSH_WATCH",
+            "PUSH_WATCH",
+            "EMOTION_WATCH_PUSH_MIN_SCORE",
+            "WATCH_PUSH_MIN_SCORE",
+            "EMOTION_WATCH_PUSH_MAX_CODES",
+            "WATCH_PUSH_MAX_CODES",
+        ):
             monkeypatch.delenv(k, raising=False)
         monkeypatch.setenv("EMOTION_LKL_WEBHOOK_URL", FEISHU_URL)
 
@@ -622,8 +669,13 @@ class TestPushWatchSignals:
         return out
 
     def _row(self, code, strategy, score, reason="理由", name=None, **extra):
-        row = {"code": code, "strategy": strategy, "score": score,
-               "reason": reason, "action": "WATCH"}
+        row = {
+            "code": code,
+            "strategy": strategy,
+            "score": score,
+            "reason": reason,
+            "action": "WATCH",
+        }
         if name is not None:
             row["stock_name"] = name
         row.update(extra)
@@ -634,10 +686,12 @@ class TestPushWatchSignals:
         mock_post, requests = self._spy(posted)
         monkeypatch.setattr(requests, "post", mock_post)
 
-        rows = [self._row("600825", "bottom_volume", 75, "缩量回踩", name="新华传媒"),
-                self._row("600825", "emotion_cycle", 45, "情绪低点"),
-                self._row("600825", "bull_trend", 62, "趋势向上"),
-                self._row("002343", "bull_trend", 59, "差一分")]
+        rows = [
+            self._row("600825", "bottom_volume", 75, "缩量回踩", name="新华传媒"),
+            self._row("600825", "emotion_cycle", 45, "情绪低点"),
+            self._row("600825", "bull_trend", 62, "趋势向上"),
+            self._row("002343", "bull_trend", 59, "差一分"),
+        ]
         sent = notify.push_watch_signals(rows, self.D)
 
         assert sent == 1, "只有 600825 有 ≥60 分信号"
@@ -702,12 +756,18 @@ class TestPushWatchSignals:
         monkeypatch.setenv("EMOTION_PUSH_BUY", "1")
         notify.reset_buy_dedup()
 
-        cl = SimpleNamespace(c1_uniqueness=True, c2_exchange=True,
-                             c3_elimination=True, c4_min_days=True,
-                             c5_strength_diverge=True, w1_crowding=True)
+        cl = SimpleNamespace(
+            c1_uniqueness=True,
+            c2_exchange=True,
+            c3_elimination=True,
+            c4_min_days=True,
+            c5_strength_diverge=True,
+            w1_crowding=True,
+        )
         notify.push_buy_signal("600825", "新华传媒", 5, "STANDARD", cl, self.D)
         sent = notify.push_watch_signals(
-            [self._row("600825", "bottom_volume", 75, name="新华传媒")], self.D)
+            [self._row("600825", "bottom_volume", 75, name="新华传媒")], self.D
+        )
 
         assert sent == 1
         assert len(posted) == 2
@@ -719,7 +779,8 @@ class TestPushWatchSignals:
         monkeypatch.setenv("EMOTION_PUSH_WATCH", "0")
 
         sent = notify.push_watch_signals(
-            [self._row("600825", "bottom_volume", 99, name="新华传媒")], self.D)
+            [self._row("600825", "bottom_volume", 99, name="新华传媒")], self.D
+        )
 
         assert sent == 0
         assert posted == []
@@ -730,8 +791,12 @@ class TestPushWatchSignals:
         monkeypatch.setattr(requests, "post", mock_post)
         monkeypatch.delenv("EMOTION_LKL_WEBHOOK_URL", raising=False)
 
-        assert notify.push_watch_signals(
-            [self._row("600825", "bottom_volume", 99, name="新华传媒")], self.D) == 0
+        assert (
+            notify.push_watch_signals(
+                [self._row("600825", "bottom_volume", 99, name="新华传媒")], self.D
+            )
+            == 0
+        )
         assert posted == []
 
     def test_all_below_threshold_sends_nothing(self, monkeypatch):
@@ -763,8 +828,8 @@ class TestPushWatchSignals:
 
         long_reason = "缩" * 200
         notify.push_watch_signals(
-            [self._row("600825", "bottom_volume", 75, long_reason, name="新华传媒")],
-            self.D)
+            [self._row("600825", "bottom_volume", 75, long_reason, name="新华传媒")], self.D
+        )
 
         text = self._texts(posted)[0]
         line = next(ln for ln in text.splitlines() if ln.startswith("· "))
@@ -775,8 +840,7 @@ class TestPushWatchSignals:
         mock_post, requests = self._spy(posted)
         monkeypatch.setattr(requests, "post", mock_post)
 
-        rows = [self._row("600825", f"s{i}", 90 - i, f"理由{i}", name="新华传媒")
-                for i in range(5)]
+        rows = [self._row("600825", f"s{i}", 90 - i, f"理由{i}", name="新华传媒") for i in range(5)]
         notify.push_watch_signals(rows, self.D)
 
         text = self._texts(posted)[0]
@@ -792,8 +856,12 @@ class TestPushWatchSignals:
 
         monkeypatch.setattr(real_requests, "post", boom)
 
-        assert notify.push_watch_signals(
-            [self._row("600825", "bottom_volume", 75, name="新华传媒")], self.D) == 0
+        assert (
+            notify.push_watch_signals(
+                [self._row("600825", "bottom_volume", 75, name="新华传媒")], self.D
+            )
+            == 0
+        )
 
     def test_non_dict_and_empty_rows_are_noop(self, monkeypatch):
         posted = []
@@ -823,7 +891,8 @@ class TestPushWatchSignals:
         with caplog.at_level(logging.WARNING):
             # 回退 60 → 59 分仍被剔除
             sent = notify.push_watch_signals(
-                [self._row("600825", "s", 59, name="新华传媒")], self.D)
+                [self._row("600825", "s", 59, name="新华传媒")], self.D
+            )
 
         assert sent == 0
         assert any("不是整数" in r.getMessage() for r in caplog.records)
@@ -831,6 +900,7 @@ class TestPushWatchSignals:
     def test_failed_http_does_not_poison_dedup(self, monkeypatch):
         """HTTP 异常不记节流 → 恢复后同一天仍可再推。"""
         import requests as real_requests
+
         posted = []
 
         def flaky(url, **kw):

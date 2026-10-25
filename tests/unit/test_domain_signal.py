@@ -1,4 +1,5 @@
 """domain/signal.py 单元测试：Checklist / Signal / Action / SignalSource。"""
+
 from __future__ import annotations
 
 from datetime import date

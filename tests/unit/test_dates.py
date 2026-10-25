@@ -1,10 +1,10 @@
 """utils/dates.py 交易日历测试。"""
+
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from datetime import date, datetime, timedelta, UTC
+from unittest.mock import MagicMock
 
-import pytest
 
 from emotion_core.utils import dates
 
@@ -16,7 +16,7 @@ class TestTodaySh:
 
     def test_is_recent(self):
         result = dates.today_sh()
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         # Should be UTC+8
         expected = (now_utc + timedelta(hours=8)).date()
         assert result == expected

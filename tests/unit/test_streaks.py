@@ -1,4 +1,5 @@
 """连板数纯函数：全断/全连/中间停牌/首日是板。"""
+
 from emotion_core.algorithms.derive import _streaks
 
 

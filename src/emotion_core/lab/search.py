@@ -34,15 +34,19 @@ from emotion_core.lab.rules import BASELINE, LabRules, variants
 
 log = logging.getLogger(__name__)
 
-HOLD_DAYS = 120          # 最后 120 个交易日：只验证，不选参
-MIN_SEL_N = 60           # 选参区间最少信号数
-MIN_HOLD_N = 30          # 验证区间最少信号数（n<30 不给分）
-MIN_T = 3.0              # 多重比较：hold-out t 值下限（对应 α≈0.001 单边）
-RETIRE_GAP = 1.0         # 淘汰门限：hold-out LCB 比基线低 1pp 以上 → retired（可复活）
+HOLD_DAYS = 120  # 最后 120 个交易日：只验证，不选参
+MIN_SEL_N = 60  # 选参区间最少信号数
+MIN_HOLD_N = 30  # 验证区间最少信号数（n<30 不给分）
+MIN_T = 3.0  # 多重比较：hold-out t 值下限（对应 α≈0.001 单边）
+RETIRE_GAP = 1.0  # 淘汰门限：hold-out LCB 比基线低 1pp 以上 → retired（可复活）
 #: ±1 邻域的步长（只对连续型旋钮；0/1 型开关不造邻域，邻域不稳定对它们无意义）
 _NEIGHBOR_STEP: dict[str, float] = {
-    "min_leader_days": 1.0, "climax_zt": 10.0, "ebb_zt_perf": 0.5,
-    "ferment_zt_perf": 0.5, "ice_zt_max": 10.0, "diverge_min_turnover": 0.5,
+    "min_leader_days": 1.0,
+    "climax_zt": 10.0,
+    "ebb_zt_perf": 0.5,
+    "ferment_zt_perf": 0.5,
+    "ice_zt_max": 10.0,
+    "diverge_min_turnover": 0.5,
 }
 
 _INSERT_VARIANT = """
@@ -91,7 +95,7 @@ def _t(rets: list[float]) -> float:
     var = sum((r - mean) ** 2 for r in rets) / (n - 1)
     if var <= 0:
         return 0.0
-    return mean / ((var ** 0.5) / (n ** 0.5))
+    return mean / ((var**0.5) / (n**0.5))
 
 
 @dataclass(frozen=True)
@@ -106,8 +110,7 @@ class Window:
         return metrics.stats(self.rets)
 
 
-def _split(per: pd.DataFrame, sel_days: list[date],
-           hold_days: list[date]) -> tuple[Window, Window]:
+def _split(per: pd.DataFrame, sel_days: list[date], hold_days: list[date]) -> tuple[Window, Window]:
     sel_set, hold_set = set(sel_days), set(hold_days)
 
     def pick(keys: set[date]) -> list[float]:
@@ -128,17 +131,22 @@ def _neighbors(rules: LabRules) -> list[LabRules]:
         for delta in (-step, step):
             try:
                 out.append(rules.replace(**{name: round(cur + delta, 4)}))
-            except (TypeError, ValueError):      # pragma: no cover - 防御
+            except (TypeError, ValueError):  # pragma: no cover - 防御
                 continue
     return out
 
 
-def evaluate(prep: replay.Prepared, pan: pd.DataFrame, rules: LabRules,
-             *, as_of: date, sel_days: list[date],
-             hold_days: list[date]) -> dict[str, Any]:
+def evaluate(
+    prep: replay.Prepared,
+    pan: pd.DataFrame,
+    rules: LabRules,
+    *,
+    as_of: date,
+    sel_days: list[date],
+    hold_days: list[date],
+) -> dict[str, Any]:
     """回放一个变体 → 选参/验证两段统计。"""
-    sig = replay.signals(prep, rules, as_of=as_of,
-                         start=sel_days[0], end=hold_days[-1])
+    sig = replay.signals(prep, rules, as_of=as_of, start=sel_days[0], end=hold_days[-1])
     per = score.score_signals(sig, pan)
     if per.empty:
         sel = Window("sel", sel_days[0], sel_days[-1], [])
@@ -155,8 +163,9 @@ def evaluate(prep: replay.Prepared, pan: pd.DataFrame, rules: LabRules,
     }
 
 
-def _gates(ev: dict[str, Any], base: dict[str, Any], neighbors: list[dict[str, Any]]
-           ) -> tuple[bool, list[str]]:
+def _gates(
+    ev: dict[str, Any], base: dict[str, Any], neighbors: list[dict[str, Any]]
+) -> tuple[bool, list[str]]:
     """七道门禁。返回 (是否全过, 未过原因列表)。"""
     reasons: list[str] = []
     sel, hold = ev["sel"], ev["hold"]
@@ -168,22 +177,33 @@ def _gates(ev: dict[str, Any], base: dict[str, Any], neighbors: list[dict[str, A
         reasons.append(f"hold-out LCB≤0（{hold.stats['lcb']}%）")
     if hold.stats["mean"] <= base["hold"].stats["mean"]:
         reasons.append(
-            f"hold-out 未优于基线（{hold.stats['mean']}% vs {base['hold'].stats['mean']}%）")
+            f"hold-out 未优于基线（{hold.stats['mean']}% vs {base['hold'].stats['mean']}%）"
+        )
     if ev["hold_t"] < MIN_T:
         reasons.append(f"t={round(ev['hold_t'], 2)}<{MIN_T}（多重比较）")
     half = max(1, len(hold.rets) // 2)
     for i, part in enumerate((hold.rets[:half], hold.rets[half:]), 1):
         if part and sum(part) / len(part) <= 0:
             reasons.append(f"hold-out 第 {i} 段均值≤0")
-    weak = [n["variant_id"] for n in neighbors
-            if n["hold"].stats["n"] >= MIN_HOLD_N and n["hold"].stats["mean"] <= 0]
+    weak = [
+        n["variant_id"]
+        for n in neighbors
+        if n["hold"].stats["n"] >= MIN_HOLD_N and n["hold"].stats["mean"] <= 0
+    ]
     if weak:
         reasons.append(f"邻域不稳定（{len(weak)} 个 ±1 邻居 hold-out≤0）")
     return (not reasons), reasons
 
 
-def run(start: date, end: date, *, as_of: date, persist: bool = False,
-        limit: int | None = None, hold_days: int = HOLD_DAYS) -> dict[str, Any]:
+def run(
+    start: date,
+    end: date,
+    *,
+    as_of: date,
+    persist: bool = False,
+    limit: int | None = None,
+    hold_days: int = HOLD_DAYS,
+) -> dict[str, Any]:
     """跑全部单点变体：选参排序（sel LCB）+ hold-out 验证 + 门禁 + 提案。"""
     pan = panel.load()
     prep = replay.prepare(pan[pan["d0"] >= start])
@@ -192,11 +212,19 @@ def run(start: date, end: date, *, as_of: date, persist: bool = False,
         raise SystemExit(f"样本太短：{len(days)} 天 ≤ hold {hold_days} 天")
     sel_days, hold_days_list = days[:-hold_days], days[-hold_days:]
     cands = variants(limit)
-    log.info("变体 %d 个；选参 %s~%s；验证 %s~%s",
-             len(cands), sel_days[0], sel_days[-1], hold_days_list[0], hold_days_list[-1])
+    log.info(
+        "变体 %d 个；选参 %s~%s；验证 %s~%s",
+        len(cands),
+        sel_days[0],
+        sel_days[-1],
+        hold_days_list[0],
+        hold_days_list[-1],
+    )
 
-    evs = [evaluate(prep, pan, r, as_of=as_of, sel_days=sel_days,
-                    hold_days=hold_days_list) for r in cands]
+    evs = [
+        evaluate(prep, pan, r, as_of=as_of, sel_days=sel_days, hold_days=hold_days_list)
+        for r in cands
+    ]
     base = next(e for e in evs if e["variant_id"] == variant_id(BASELINE))
     ranked = sorted(evs, key=lambda e: e["sel"].stats["lcb"], reverse=True)
 
@@ -208,9 +236,9 @@ def run(start: date, end: date, *, as_of: date, persist: bool = False,
         if e["variant_id"] not in top_ids:
             continue
         neigh[e["variant_id"]] = [
-            evaluate(prep, pan, nr, as_of=as_of, sel_days=sel_days,
-                     hold_days=hold_days_list)
-            for nr in _neighbors(e["rules"])]
+            evaluate(prep, pan, nr, as_of=as_of, sel_days=sel_days, hold_days=hold_days_list)
+            for nr in _neighbors(e["rules"])
+        ]
 
     results: list[dict[str, Any]] = []
     proposals: list[dict[str, Any]] = []
@@ -235,17 +263,28 @@ def run(start: date, end: date, *, as_of: date, persist: bool = False,
             proposals.append(row)
 
     if persist:
-        _persist(results, proposals, base, (sel_days, hold_days_list),
-                 trials=len(evs))
-    return {"baseline": {"variant_id": base["variant_id"],
-                         "sel": base["sel"].stats, "hold": base["hold"].stats,
-                         "hold_t": round(base["hold_t"], 2)},
-            "vars": len(evs), "results": results, "proposals": proposals}
+        _persist(results, proposals, base, (sel_days, hold_days_list), trials=len(evs))
+    return {
+        "baseline": {
+            "variant_id": base["variant_id"],
+            "sel": base["sel"].stats,
+            "hold": base["hold"].stats,
+            "hold_t": round(base["hold_t"], 2),
+        },
+        "vars": len(evs),
+        "results": results,
+        "proposals": proposals,
+    }
 
 
-def _persist(results: list[dict[str, Any]],
-             proposals: list[dict[str, Any]], base: dict[str, Any],
-             windows: tuple[list[date], list[date]], *, trials: int) -> None:
+def _persist(
+    results: list[dict[str, Any]],
+    proposals: list[dict[str, Any]],
+    base: dict[str, Any],
+    windows: tuple[list[date], list[date]],
+    *,
+    trials: int,
+) -> None:
     """只写 lab schema：变体登记 + 两段评分 + 待批提案。"""
     sel_days, hold_days = windows
     base_lcb = base["hold"].stats["lcb"]
@@ -256,39 +295,68 @@ def _persist(results: list[dict[str, Any]],
                 status, note = "active", "基线"
             elif row["passes"]:
                 status, note = "pending", "过七道门禁待批"
-            elif (row["hold"]["n"] >= MIN_HOLD_N
-                  and base_lcb is not None
-                  and row["hold"]["lcb"] is not None
-                  and row["hold"]["lcb"] <= base_lcb - RETIRE_GAP):
+            elif (
+                row["hold"]["n"] >= MIN_HOLD_N
+                and base_lcb is not None
+                and row["hold"]["lcb"] is not None
+                and row["hold"]["lcb"] <= base_lcb - RETIRE_GAP
+            ):
                 status, note = "retired", "hold-out LCB 比基线低 1pp 以上（可复活）"
             else:
                 status, note = "draft", "；".join(row["reasons"][:2])
-            labdb.execute(conn, _INSERT_VARIANT,
-                          (row["variant_id"],
-                           json.dumps(row["params"], ensure_ascii=False),
-                           status, note))
-            for w, (w0, w1) in (("sel", (sel_days[0], sel_days[-1])),
-                                ("hold", (hold_days[0], hold_days[-1]))):
+            labdb.execute(
+                conn,
+                _INSERT_VARIANT,
+                (row["variant_id"], json.dumps(row["params"], ensure_ascii=False), status, note),
+            )
+            for w, (w0, w1) in (
+                ("sel", (sel_days[0], sel_days[-1])),
+                ("hold", (hold_days[0], hold_days[-1])),
+            ):
                 st = row[w]
-                labdb.execute(conn, _INSERT_SCORE, (
-                    row["variant_id"], w0, w1,
-                    st["n"], None, st["mean"], st["median"], st["win_rate"],
-                    st["lcb"], st["worst"], None, trials, w,
-                    json.dumps({"reliable": st["reliable"]}, ensure_ascii=False),
-                ))
+                labdb.execute(
+                    conn,
+                    _INSERT_SCORE,
+                    (
+                        row["variant_id"],
+                        w0,
+                        w1,
+                        st["n"],
+                        None,
+                        st["mean"],
+                        st["median"],
+                        st["win_rate"],
+                        st["lcb"],
+                        st["worst"],
+                        None,
+                        trials,
+                        w,
+                        json.dumps({"reliable": st["reliable"]}, ensure_ascii=False),
+                    ),
+                )
         for p in proposals:
-            changed = {k: v for k, v in p["params"].items()
-                       if v != getattr(BASELINE, k)}
-            labdb.execute(conn, _INSERT_PROMO, (
-                f"[Lab] {p['variant_id']}：{len(changed)} 个参数改动，"
-                f"hold-out 每信号 {p['hold']['mean']}% vs 基线 "
-                f"{base['hold'].stats['mean']}%",
-                json.dumps({"variant_id": p["variant_id"], "changes": changed},
-                           ensure_ascii=False),
-                json.dumps({"sel": p["sel"], "hold": p["hold"],
-                            "hold_t": p["hold_t"], "trials": trials},
-                           ensure_ascii=False),
-            ))
+            changed = {k: v for k, v in p["params"].items() if v != getattr(BASELINE, k)}
+            labdb.execute(
+                conn,
+                _INSERT_PROMO,
+                (
+                    f"[Lab] {p['variant_id']}：{len(changed)} 个参数改动，"
+                    f"hold-out 每信号 {p['hold']['mean']}% vs 基线 "
+                    f"{base['hold'].stats['mean']}%",
+                    json.dumps(
+                        {"variant_id": p["variant_id"], "changes": changed}, ensure_ascii=False
+                    ),
+                    json.dumps(
+                        {
+                            "sel": p["sel"],
+                            "hold": p["hold"],
+                            "hold_t": p["hold_t"],
+                            "trials": trials,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
         conn.commit()
         log.info("已写入 lab：变体 %d、提案 %d", len(results), len(proposals))
     finally:
@@ -305,21 +373,30 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--persist", action="store_true")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
-    out = run(date.fromisoformat(args.start), date.fromisoformat(args.end),
-              as_of=date.fromisoformat(args.as_of), persist=args.persist,
-              limit=args.limit, hold_days=args.hold)
+    out = run(
+        date.fromisoformat(args.start),
+        date.fromisoformat(args.end),
+        as_of=date.fromisoformat(args.as_of),
+        persist=args.persist,
+        limit=args.limit,
+        hold_days=args.hold,
+    )
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
         return 0
     b = out["baseline"]
-    print(f"基线 {b['variant_id']}：选参 {b['sel']['n']} 条 {b['sel']['mean']}% / "
-          f"hold-out {b['hold']['n']} 条 {b['hold']['mean']}% LCB={b['hold']['lcb']}% "
-          f"t={b['hold_t']}")
+    print(
+        f"基线 {b['variant_id']}：选参 {b['sel']['n']} 条 {b['sel']['mean']}% / "
+        f"hold-out {b['hold']['n']} 条 {b['hold']['mean']}% LCB={b['hold']['lcb']}% "
+        f"t={b['hold_t']}"
+    )
     print(f"变体 {out['vars']} 个，过门禁 {len(out['proposals'])} 个")
     for r in out["results"][:10]:
-        print(f"  #{r['rank']:2d} {r['variant_id']} sel={r['sel']['mean']}% "
-              f"hold={r['hold']['mean']}% t={r['hold_t']} "
-              f"{'✅' if r['passes'] else '· ' + r['reasons'][0]}")
+        print(
+            f"  #{r['rank']:2d} {r['variant_id']} sel={r['sel']['mean']}% "
+            f"hold={r['hold']['mean']}% t={r['hold_t']} "
+            f"{'✅' if r['passes'] else '· ' + r['reasons'][0]}"
+        )
     return 0
 
 

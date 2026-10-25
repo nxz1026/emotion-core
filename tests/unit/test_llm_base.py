@@ -1,4 +1,5 @@
 """llm/base.py 单元测试：LLMClient 协议、NullClient、get_client。"""
+
 from __future__ import annotations
 
 from emotion_core.llm.base import (
@@ -68,6 +69,7 @@ class TestLLMClientProtocol:
     def test_is_protocol(self):
         """LLMClient 是 Protocol 子类。"""
         import typing
+
         assert issubclass(LLMClient, typing.Protocol)
 
     def test_is_runtime_protocol(self):

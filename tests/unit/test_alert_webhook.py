@@ -18,6 +18,7 @@ from emotion_core.algorithms import alerts
 
 # ── 1. _push: 优先找到 services.notify ────────────────────────────────
 
+
 class TestPushPriority:
     """_push: services.notify 优先，algorithms.notify 兜底。"""
 
@@ -31,7 +32,9 @@ class TestPushPriority:
                 return mock_notify
             raise ImportError(f"No module named {path!r}")
 
-        with patch("emotion_core.algorithms.alerts.importlib.import_module", side_effect=fake_import_module):
+        with patch(
+            "emotion_core.algorithms.alerts.importlib.import_module", side_effect=fake_import_module
+        ):
             result = alerts._push("test message")
 
         assert result is True
@@ -47,7 +50,9 @@ class TestPushPriority:
                 return mock_notify
             raise ImportError(f"No module named {path!r}")
 
-        with patch("emotion_core.algorithms.alerts.importlib.import_module", side_effect=fake_import_module):
+        with patch(
+            "emotion_core.algorithms.alerts.importlib.import_module", side_effect=fake_import_module
+        ):
             result = alerts._push("test message")
 
         assert result is True
@@ -57,6 +62,7 @@ class TestPushPriority:
         """两条路径都不存在 → 返回 False + 记录 warning。"""
         mock_log = MagicMock()
         import emotion_core.algorithms.alerts as alerts_mod
+
         with patch.object(alerts_mod.importlib, "import_module", side_effect=ImportError):
             with patch.object(alerts_mod, "log", new=mock_log):
                 result = alerts_mod._push("test message")
@@ -68,6 +74,7 @@ class TestPushPriority:
 
 # ── 2. _push: 失败静默降级（不抛异常）──────────────────────────────────
 
+
 class TestPushFailureModes:
     """_push: 各种失败模式均不抛异常，返回 False。"""
 
@@ -76,7 +83,9 @@ class TestPushFailureModes:
         mock_notify = MagicMock()
         mock_notify.push.return_value = False
 
-        with patch("emotion_core.algorithms.alerts.importlib.import_module", return_value=mock_notify):
+        with patch(
+            "emotion_core.algorithms.alerts.importlib.import_module", return_value=mock_notify
+        ):
             result = alerts._push("test message")
 
         assert result is False
@@ -86,7 +95,9 @@ class TestPushFailureModes:
         mock_notify = MagicMock()
         mock_notify.push.side_effect = RuntimeError("webhook unreachable")
 
-        with patch("emotion_core.algorithms.alerts.importlib.import_module", return_value=mock_notify):
+        with patch(
+            "emotion_core.algorithms.alerts.importlib.import_module", return_value=mock_notify
+        ):
             result = alerts._push("test message")
 
         assert result is False
@@ -96,13 +107,16 @@ class TestPushFailureModes:
         mock_notify = MagicMock()
         mock_notify.push.return_value = True
 
-        with patch("emotion_core.algorithms.alerts.importlib.import_module", return_value=mock_notify):
+        with patch(
+            "emotion_core.algorithms.alerts.importlib.import_module", return_value=mock_notify
+        ):
             alerts._push("test message", trade_date="2026-09-29")
 
         mock_notify.push.assert_called_once_with("test message", "2026-09-29")
 
 
 # ── 3. push_pending_webhook: 完整流程 ──────────────────────────────────
+
 
 class TestPushPendingWebhook:
     """push_pending_webhook: 未确认 WARN/ERROR 触发 webhook。"""
@@ -125,10 +139,8 @@ class TestPushPendingWebhook:
         recent = (today_utc - timedelta(days=0)).isoformat()
         older = (today_utc - timedelta(days=1)).isoformat()
         fake_items = [
-            {"level": "ERROR", "source": "daily", "detail": "test error 1",
-             "created_at": recent},
-            {"level": "WARN", "source": "pool", "detail": "test warn 1",
-             "created_at": older},
+            {"level": "ERROR", "source": "daily", "detail": "test error 1", "created_at": recent},
+            {"level": "WARN", "source": "pool", "detail": "test warn 1", "created_at": older},
         ]
         with patch("emotion_core.algorithms.alerts.pending", return_value=fake_items):
             with patch("emotion_core.algorithms.alerts._push") as mock_push:
@@ -140,11 +152,12 @@ class TestPushPendingWebhook:
                 assert "未确认告警" in body
                 assert "ERROR" in body
                 assert f"创建于 {recent[:10]}" in body  # _fmt_date 字段
-                assert "第 1 天" in body                # 今日创建 → 第 1 天
-                assert "第 2 天" in body                # 昨日创建 → 第 2 天
+                assert "第 1 天" in body  # 今日创建 → 第 1 天
+                assert "第 2 天" in body  # 昨日创建 → 第 2 天
 
 
 # ── 4. _days_active: 日历日差口径 ──────────────────────────────────────
+
 
 class TestDaysActive:
     """_days_active: (today - created_date).days + 1，下限 1，异常归 1。"""

@@ -23,6 +23,7 @@ acked_at 置位（未 ack = 待处理队列）；去重按 **同 source 同 deta
 对账：真实库 alert 表差分（同输入下与 lkl.services.alerts 逐字段一致）与离线用例分离，
 离线用例见 tests/unit/test_alerts.py（无 DB，DB 全部桩掉）。
 """
+
 from __future__ import annotations
 
 import importlib
@@ -30,6 +31,7 @@ import logging
 from typing import Any
 
 from emotion_core.utils.db import execute, query_df
+from datetime import UTC
 
 log = logging.getLogger("emotion_core.alerts")
 
@@ -40,8 +42,10 @@ def record(level: str, source: str, detail: str) -> int | None:
     """入告警（非法 level 抛错——告警不能被静默降级）；返回 id。"""
     if level not in LEVELS:
         raise ValueError(f"level 须为 {'/'.join(LEVELS)}，got {level}")
-    df = query_df("INSERT INTO alert (level, source, detail) VALUES (%s,%s,%s)"
-                  " RETURNING id", (level, source, detail))
+    df = query_df(
+        "INSERT INTO alert (level, source, detail) VALUES (%s,%s,%s) RETURNING id",
+        (level, source, detail),
+    )
     row = df["id"].iloc[0] if not df.empty else None
     log.warning("告警入队 [%s/%s] %s (id=%s)", level, source, detail, row)
     return int(row) if row is not None else None
@@ -57,8 +61,9 @@ def record_dedup(level: str, source: str, detail: str) -> int | None:
     if level not in LEVELS:
         raise ValueError(f"level 须为 {'/'.join(LEVELS)}，got {level}")
     dup = query_df(
-        "SELECT 1 FROM alert WHERE source=%s AND detail=%s AND acked_at IS NULL"
-        " LIMIT 1", (source, detail))
+        "SELECT 1 FROM alert WHERE source=%s AND detail=%s AND acked_at IS NULL LIMIT 1",
+        (source, detail),
+    )
     if not dup.empty:
         return None
     return record(level, source, detail)
@@ -68,20 +73,29 @@ def pending(limit: int = 100) -> list[dict]:
     """未确认告警（新→旧），Dashboard 告警面板数据源。"""
     df = query_df(
         "SELECT id, level, source, detail, created_at FROM alert"
-        " WHERE acked_at IS NULL ORDER BY id DESC LIMIT %s", (limit,))
-    return [{"id": int(r.id), "level": r.level, "source": r.source,
-             "detail": r.detail,
-             "created_at": r.created_at.isoformat()} for r in df.itertuples()]
+        " WHERE acked_at IS NULL ORDER BY id DESC LIMIT %s",
+        (limit,),
+    )
+    return [
+        {
+            "id": int(r.id),
+            "level": r.level,
+            "source": r.source,
+            "detail": r.detail,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in df.itertuples()
+    ]
 
 
 def ack(ids: list[int]) -> int:
     """批量确认（人已处理）；不存在的 id 静默跳过，返回确认数。"""
     if not ids:
         return 0
-    execute("UPDATE alert SET acked_at=now() WHERE id = ANY(%s)"
-            " AND acked_at IS NULL", (ids,))
-    df = query_df("SELECT count(*) n FROM alert WHERE id = ANY(%s)"
-                  " AND acked_at IS NOT NULL", (ids,))
+    execute("UPDATE alert SET acked_at=now() WHERE id = ANY(%s) AND acked_at IS NULL", (ids,))
+    df = query_df(
+        "SELECT count(*) n FROM alert WHERE id = ANY(%s) AND acked_at IS NOT NULL", (ids,)
+    )
     return int(df["n"].iloc[0])
 
 
@@ -94,8 +108,7 @@ def _push(md: str, trade_date: Any = None) -> bool:
     ~09-28 连续 4 次 daily 失败全部只落了 alert 表，webhook 一条没发出去。现按 services
     优先、algorithms 兜底两路试，任一缺失仍降级为 False（lkl notify.push 的失败也是不抛的）。
     """
-    for modpath in ("emotion_core.services.notify",
-                    "emotion_core.algorithms.notify"):
+    for modpath in ("emotion_core.services.notify", "emotion_core.algorithms.notify"):
         try:
             notify = importlib.import_module(modpath)
         except ImportError:
@@ -115,7 +128,8 @@ def push_pending_webhook() -> None:
     if not items:
         return
     body = "\n".join(
-        f"[{a['level']}] {a['source']}: {a['detail']}（第 {_days_active(a['created_at'])} 天 / 创建于 {_fmt_date(a['created_at'])}）"
+        f"[{a['level']}] {a['source']}: {a['detail']}"
+        f"（第 {_days_active(a['created_at'])} 天 / 创建于 {_fmt_date(a['created_at'])}）"
         for a in items[:8]
     )
     # notify._summary 只认「## ⓪ 速览」段——告警文本包一层可提取结构
@@ -125,12 +139,13 @@ def push_pending_webhook() -> None:
 
 def _days_active(created_at: str) -> int:
     """从 created_at 计算连续活跃天数（日历日差 + 1，至少 1 天）。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     try:
         dt = datetime.fromisoformat(created_at)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        today = datetime.now(timezone.utc).date()
+            dt = dt.replace(tzinfo=UTC)
+        today = datetime.now(UTC).date()
         created_date = dt.date()
         return max(1, (today - created_date).days + 1)
     except (ValueError, TypeError):

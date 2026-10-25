@@ -265,8 +265,9 @@ def _wire(
     monkeypatch.setattr(runner, "RETRY_ROUND_DELAY", retry_round_delay)
     monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
     # R67-3 硬闸门会查库（tradable_codes）——本文件必须 DB-free，按日缓存也要清。
-    monkeypatch.setattr(runner, "tradable_codes",
-                        lambda _d: set(codes if tradable is None else tradable))
+    monkeypatch.setattr(
+        runner, "tradable_codes", lambda _d: set(codes if tradable is None else tradable)
+    )
     monkeypatch.setattr(runner, "_TRADABLE_CACHE", {})
     # R67-4：WATCH 推送必须打桩——替身默认回 WATCH，不打桩会真发 HTTP。
     pushed: list[tuple] = []
@@ -450,8 +451,13 @@ class TestWatchPushTrigger:
     def _reply(action: str, score: int) -> _Reply:
         r = _Reply()
         r.text = json.dumps(
-            {"action": action, "score": score, "confidence": 0.7,
-             "reason": f"{action} 测试", "evidence": {}},
+            {
+                "action": action,
+                "score": score,
+                "confidence": 0.7,
+                "reason": f"{action} 测试",
+                "evidence": {},
+            },
             ensure_ascii=False,
         )
         return r

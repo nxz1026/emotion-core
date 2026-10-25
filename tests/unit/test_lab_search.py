@@ -3,6 +3,7 @@
 搜索的价值全在门禁：没有门禁的搜索一定会挖出一个"选参区间 10 倍收益"的噪声变体。
 这里逐条钉住七道门禁与它们的边界，另钉 `_t()` 的数学与 digest 文案。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -44,10 +45,11 @@ def _passing_ev() -> dict:
 
 # ------------------------------------------------------------------ _t
 
+
 def test_t_value_math():
     assert search._t([]) == 0.0
     assert search._t([0.01]) == 0.0
-    assert search._t([0.02] * 5) == 0.0          # σ=0 → 不造无限 t
+    assert search._t([0.02] * 5) == 0.0  # σ=0 → 不造无限 t
     assert abs(search._t([0.02, 0.0]) - 1.0) < 1e-9
 
 
@@ -59,11 +61,11 @@ def test_t_value_grows_with_consistency():
 
 # ------------------------------------------------------------------ variant_id
 
+
 def test_variant_id_is_stable_and_sensitive():
     assert search.variant_id(BASELINE) == search.variant_id(LabRules())
-    assert search.variant_id(BASELINE) != search.variant_id(
-        BASELINE.replace(min_leader_days=3))
-    assert search.variant_id(BASELINE) == "baseline_mainline"   # 基线复用 P1 的 id
+    assert search.variant_id(BASELINE) != search.variant_id(BASELINE.replace(min_leader_days=3))
+    assert search.variant_id(BASELINE) == "baseline_mainline"  # 基线复用 P1 的 id
 
 
 def test_neighbors_are_plus_minus_one_step():
@@ -75,6 +77,7 @@ def test_neighbors_are_plus_minus_one_step():
 
 
 # ------------------------------------------------------------------ 七道门禁
+
 
 def test_gate_all_pass():
     ok, reasons = search._gates(_passing_ev(), _base(), [])
@@ -90,14 +93,14 @@ def test_gate_insufficient_samples():
 
 
 def test_gate_negative_lcb():
-    ev = _ev(sel=[0.03] * 300, hold=[0.010, -0.005] * 15)   # 均值正但噪声大 → LCB<0
+    ev = _ev(sel=[0.03] * 300, hold=[0.010, -0.005] * 15)  # 均值正但噪声大 → LCB<0
     ok, reasons = search._gates(ev, _base(), [])
     assert not ok
     assert any("LCB" in r for r in reasons)
 
 
 def test_gate_not_better_than_baseline():
-    ev = _ev(sel=[0.03] * 300, hold=[-0.01] * 40)            # 与基线同值
+    ev = _ev(sel=[0.03] * 300, hold=[-0.01] * 40)  # 与基线同值
     ok, reasons = search._gates(ev, _base(), [])
     assert not ok
     assert any("未优于基线" in r for r in reasons)
@@ -134,11 +137,21 @@ def test_gate_ignores_tiny_neighbor_samples():
 
 # ------------------------------------------------------------------ digest
 
+
 def test_digest_without_proposals_says_so():
-    out = {"vars": 17, "proposals": [],
-           "baseline": {"hold": {"n": 58, "mean": -1.178, "lcb": -2.699}},
-           "results": [{"variant_id": "v_x", "sel": {"mean": -0.871},
-                        "hold": {"mean": -1.293}, "reasons": ["hold-out LCB≤0"]}]}
+    out = {
+        "vars": 17,
+        "proposals": [],
+        "baseline": {"hold": {"n": 58, "mean": -1.178, "lcb": -2.699}},
+        "results": [
+            {
+                "variant_id": "v_x",
+                "sel": {"mean": -0.871},
+                "hold": {"mean": -1.293},
+                "reasons": ["hold-out LCB≤0"],
+            }
+        ],
+    }
     text = notify.digest(out)
     assert "过门禁 0 个" in text
     assert "没有变体过七道门禁" in text
@@ -146,10 +159,12 @@ def test_digest_without_proposals_says_so():
 
 
 def test_digest_with_proposals_points_to_page():
-    out = {"vars": 17, "proposals": [{"variant_id": "v_y", "hold": {"mean": 0.42},
-                                      "hold_t": 3.4}],
-           "baseline": {"hold": {"n": 58, "mean": -1.178, "lcb": -2.699}},
-           "results": []}
+    out = {
+        "vars": 17,
+        "proposals": [{"variant_id": "v_y", "hold": {"mean": 0.42}, "hold_t": 3.4}],
+        "baseline": {"hold": {"n": 58, "mean": -1.178, "lcb": -2.699}},
+        "results": [],
+    }
     text = notify.digest(out)
     assert "提案 v_y" in text
     assert "8091" in text

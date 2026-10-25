@@ -2,6 +2,7 @@
 
 不碰真库、不联网：`_fetch_open_dates` / `lookup` / `refresh` 全部可替换。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -11,15 +12,19 @@ import pytest
 from emotion_core.data import trade_calendar as cal
 from emotion_core.orchestration import daily
 
-SUN, MON, THU, FRI = (date(2026, 9, 27), date(2026, 9, 28),
-                      date(2026, 9, 24), date(2026, 9, 25))
+SUN, MON, THU, FRI = (date(2026, 9, 27), date(2026, 9, 28), date(2026, 9, 24), date(2026, 9, 25))
 
 
 # ── materialize：开市日列表 → 区间内每一自然日 ──────────────────
 def test_rows_materialize_covers_closed_days_in_range():
     rows = cal.rows_from_open_dates([THU, MON])
-    assert rows == [(THU, True), (FRI, False), (date(2026, 9, 26), False),
-                    (SUN, False), (MON, True)]
+    assert rows == [
+        (THU, True),
+        (FRI, False),
+        (date(2026, 9, 26), False),
+        (SUN, False),
+        (MON, True),
+    ]
     assert len(rows) == 5, "区间内每个自然日都要有行，否则分不清「休市」与「越界」"
 
 
@@ -97,7 +102,7 @@ def test_source_failure_falls_back_to_weekday(monkeypatch):
     monkeypatch.setattr(cal, "connect_ro", lambda: _Conn({}))
     monkeypatch.setattr(cal, "refresh", _boom)
     assert cal.is_trading_day(SUN) is False
-    assert cal.is_trading_day(date(2026, 9, 23)) is True   # 周三
+    assert cal.is_trading_day(date(2026, 9, 23)) is True  # 周三
 
 
 def test_db_failure_falls_back_to_weekday(monkeypatch):

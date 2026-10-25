@@ -1,10 +1,10 @@
 """derive.py 衍生层参考实现测试。"""
+
 from __future__ import annotations
 
 from datetime import date
 from unittest.mock import patch
 
-import pytest
 
 from emotion_core.algorithms import derive
 from emotion_core.utils.config import CONFIG

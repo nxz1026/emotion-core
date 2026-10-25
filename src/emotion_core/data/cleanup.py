@@ -15,10 +15,11 @@
 - daily_bar / derived_bar / market_stat / ladder_day / promotion_day
 - signal / signal_outcome / position / trade_event / review_report
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from emotion_core.utils.db import transaction
 
@@ -28,8 +29,8 @@ log = logging.getLogger("emotion_core.cleanup")
 RETENTION: dict[str, tuple[str, int | None]] = {
     "limit_pool_em": ("date", 30),
     "alert": ("created_at", 90),
-    "llm_call_log": ("id", None),   # 按条数保留，见 KEEP_LATEST
-    "eval_result": ("id", None),    # 按条数保留，见 KEEP_LATEST
+    "llm_call_log": ("id", None),  # 按条数保留，见 KEEP_LATEST
+    "eval_result": ("id", None),  # 按条数保留，见 KEEP_LATEST
     "ingest_progress": ("done_at", None),  # 归档或删除
 }
 
@@ -40,10 +41,15 @@ KEEP_LATEST: dict[str, int] = {
 
 # 不清理的表（业务事实/历史判定）
 PROTECTED: tuple[str, ...] = (
-    "daily_bar", "derived_bar", "market_stat",
-    "ladder_day", "promotion_day",
-    "signal", "signal_outcome",
-    "position", "trade_event",
+    "daily_bar",
+    "derived_bar",
+    "market_stat",
+    "ladder_day",
+    "promotion_day",
+    "signal",
+    "signal_outcome",
+    "position",
+    "trade_event",
     "review_report",
     "data_revision",  # 清理记录本身不清理
 )
@@ -65,7 +71,7 @@ def cleanup_dry_run() -> dict[str, int]:
                 elif days is not None:
                     cur.execute(
                         f"SELECT count(*) FROM {table} WHERE {col} < %s",
-                        (now - timedelta(days=days),)
+                        (now - timedelta(days=days),),
                     )
                     plan[table] = cur.fetchone()[0]
                 elif table in KEEP_LATEST:
@@ -96,8 +102,7 @@ def cleanup() -> dict[str, int]:
                     deleted[table] = cur.rowcount
                 elif days is not None:
                     cur.execute(
-                        f"DELETE FROM {table} WHERE {col} < %s",
-                        (now - timedelta(days=days),)
+                        f"DELETE FROM {table} WHERE {col} < %s", (now - timedelta(days=days),)
                     )
                     deleted[table] = cur.rowcount
                 elif table in KEEP_LATEST:

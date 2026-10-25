@@ -22,6 +22,7 @@ tests/unit/test_pipeline.py）。同表两个写者 = 两套截断口径/告警�
 表归属：`pipeline_state` / `alert` 建在 emotion_core 库（`utils/db.py` 的 `_DBNAME`），
 DDL 见 `data/schema.py`，与 lkl 同名同列，仅库不同。
 """
+
 from __future__ import annotations
 
 from datetime import date

@@ -1,6 +1,6 @@
 """建表 DDL（幂等）。emotion-core 数据层 schema。
 
-**36 张表**（2026-10-15 按 `len(DDL)` 实测；原文写「27」且下面的清单只列了
+**37 张表**（2026-10-26 按 `len(DDL)` 实测；原文写「27」且下面的清单只列了
 23 个 —— 三个数互相对不上），按新项目需求设计（基于 lkl schema，去掉迁移逻辑）。
 新库直接建最新 schema，不需要 _MIGRATIONS。
 
@@ -26,6 +26,7 @@ CPT（Chan_Pattern_Trader）共用的 10 张 `cpt_*`。**这不是矛盾**：「
 —— `create_all` 在本仓 `src` 里**无调用方**，新增表后必须**手动跑一次**，
 否则 DDL 与库内静默漂移。
 """
+
 from __future__ import annotations
 
 DDL: dict[str, str] = {
@@ -542,8 +543,7 @@ _INDEXES: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_ref_rs_code_date ON ref_rs (code, as_of_date)",
     "CREATE INDEX IF NOT EXISTS idx_holding_decision_code_date"
     " ON holding_decision (code, trade_date DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_ref_limit_state_code"
-    " ON ref_limit_state (code, date)",
+    "CREATE INDEX IF NOT EXISTS idx_ref_limit_state_code ON ref_limit_state (code, date)",
 )
 
 

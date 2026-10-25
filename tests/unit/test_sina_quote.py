@@ -19,8 +19,7 @@ def _fields(
     bid_vol: str = "19635490",
     bid_price: str = "10.89",
 ) -> list[str]:
-    f = [name, "10.00", "9.90", last, "10.90", "9.95", "10.10", "10.20",
-         "1234567", "13000000.00"]
+    f = [name, "10.00", "9.90", last, "10.90", "9.95", "10.10", "10.20", "1234567", "13000000.00"]
     for _ in range(5):
         f.extend([bid_vol, bid_price])
     for _ in range(5):
@@ -134,7 +133,6 @@ class TestFetchQuotes:
         assert sq.SinaQuoteProvider().fetch_quotes([]) == {}
 
     def test_http_error_raises(self, monkeypatch):
-        import urllib.error
 
         def boom(self, symbols):
             raise ProviderError("boom")

@@ -2,6 +2,7 @@
 
 Native emotion-core implementation (ported pattern from lkl/strategy/loader.py).
 """
+
 from __future__ import annotations
 
 import ast
@@ -120,6 +121,11 @@ def _load_one(path: Path) -> Skill:
             instr_lines.append(stripped.strip())
 
     instructions = " ".join(instr_lines).strip()
-    return Skill(name=name, display_name=display_name,
-                 instructions=instructions, aliases=aliases,
-                 default_priority=priority, enabled=enabled)
+    return Skill(
+        name=name,
+        display_name=display_name,
+        instructions=instructions,
+        aliases=aliases,
+        default_priority=priority,
+        enabled=enabled,
+    )

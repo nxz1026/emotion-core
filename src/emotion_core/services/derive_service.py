@@ -2,6 +2,7 @@
 
 职责：从 daily_bar 取数据 → 调 algorithms.compute_derived → 写回 derived_bar。
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,9 +55,7 @@ def _load_bars(trade_date: date) -> list[Bar]:
     只加载在 trade_date 有数据的股票的最近 30 天日线。
     """
     # 获取 trade_date 有数据的所有股票代码
-    codes_df = query_df(
-        "SELECT DISTINCT code FROM daily_bar WHERE date = %s", (trade_date,)
-    )
+    codes_df = query_df("SELECT DISTINCT code FROM daily_bar WHERE date = %s", (trade_date,))
     if codes_df.empty:
         return []
     codes = list(codes_df["code"])
@@ -94,13 +93,18 @@ def _persist_derived(rows: list) -> int:
     if not rows:
         return 0
     with transaction() as conn:
-        conn.execute(
-            "DELETE FROM derived_bar WHERE date = %s", (rows[0].date,)
-        )
+        conn.execute("DELETE FROM derived_bar WHERE date = %s", (rows[0].date,))
         data = [
             (
-                r.code, r.date, r.is_limit_up, r.touched_limit, r.is_bomb,
-                r.is_one_word, r.is_exchange, r.is_limit_down, r.cont_days,
+                r.code,
+                r.date,
+                r.is_limit_up,
+                r.touched_limit,
+                r.is_bomb,
+                r.is_one_word,
+                r.is_exchange,
+                r.is_limit_down,
+                r.cont_days,
                 r.amplitude,
             )
             for r in rows

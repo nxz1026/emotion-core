@@ -76,11 +76,28 @@ ORDER BY b0.d0, b0.code
 """
 
 _FLOAT_COLS = (
-    "pre_close", "open", "high", "low", "close", "volume",
-    "n1_open", "n1_high", "n1_low", "n1_close", "n1_pre_close", "n1_volume",
-    "n2_open", "n2_close", "n3_open",
-    "bomb_rate", "zt_performance", "zt_performance_median", "top_amplitude",
-    "bomb_threshold", "oneword_ratio", "turnover_rate",
+    "pre_close",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "n1_open",
+    "n1_high",
+    "n1_low",
+    "n1_close",
+    "n1_pre_close",
+    "n1_volume",
+    "n2_open",
+    "n2_close",
+    "n3_open",
+    "bomb_rate",
+    "zt_performance",
+    "zt_performance_median",
+    "top_amplitude",
+    "bomb_threshold",
+    "oneword_ratio",
+    "turnover_rate",
 )
 
 

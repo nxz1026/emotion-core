@@ -28,6 +28,7 @@ checkout 上任何 `import emotion_core.core` 都会在**模块导入期**炸掉
 ⚠️ 生产上 `.so` 与解释器匹配，行为与从前一致；
 且 `cargo build` 后必须按 `docs/06` §3.3 跑一遍 `tests/oracle` 对账。
 """
+
 from __future__ import annotations
 
 import importlib.util as _ilu
@@ -37,8 +38,11 @@ import sys as _sys
 __all__ = ["available", "load_error", "so_path"]
 
 # src/emotion_core/core/__init__.py → 上溯两级到 src/ → core_lib/emotion_core_rust.so
-SO_PATH = _os.path.normpath(_os.path.join(
-    _os.path.dirname(__file__), _os.pardir, _os.pardir, "core_lib", "emotion_core_rust.so"))
+SO_PATH = _os.path.normpath(
+    _os.path.join(
+        _os.path.dirname(__file__), _os.pardir, _os.pardir, "core_lib", "emotion_core_rust.so"
+    )
+)
 
 _loaded = False
 _last_error: str | None = None
@@ -130,9 +134,8 @@ def __getattr__(name: str):
     try:
         value = getattr(module, name)
     except AttributeError:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}") from None
-    globals()[name] = value                      # 缓存，后续走正常查找
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    globals()[name] = value  # 缓存，后续走正常查找
     return value
 
 
@@ -141,6 +144,6 @@ def __dir__() -> list[str]:
     if available():
         try:
             base += [n for n in dir(_load()) if not n.startswith("_")]
-        except RustCoreUnavailable:              # 产物在但加载失败：dir 仍可用
+        except RustCoreUnavailable:  # 产物在但加载失败：dir 仍可用
             pass
     return sorted(set(base))

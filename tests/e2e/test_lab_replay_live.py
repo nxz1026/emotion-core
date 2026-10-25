@@ -10,6 +10,7 @@
 跑法：
     EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_lab_replay_live.py -q
 """
+
 from __future__ import annotations
 
 import os
@@ -20,7 +21,8 @@ import pytest
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("EC_LIVE_DB") != "1",
-    reason="真库校准：设 EC_LIVE_DB=1 才跑（默认 DB-free 基线不受影响）")
+    reason="真库校准：设 EC_LIVE_DB=1 才跑（默认 DB-free 基线不受影响）",
+)
 
 START, END = date(2024, 1, 1), date(2026, 10, 20)
 #: 主线全史回放的执行日（`signal` 表 377 条 replay BUY 就是那天写进去的）：
@@ -31,6 +33,7 @@ AS_OF = date(2026, 10, 21)
 @pytest.fixture(scope="module")
 def panel():
     from emotion_core.lab import panel as labpanel
+
     try:
         return labpanel.load()
     except FileNotFoundError as exc:  # pragma: no cover - 环境缺面板
@@ -48,12 +51,15 @@ def test_baseline_matches_signal_table(panel):
     live = labdb.query_df(
         "SELECT confirm_date AS d0, code FROM signal"
         " WHERE action = 'BUY' AND source = 'replay'"
-        "   AND confirm_date BETWEEN %s AND %s", (START, END))
+        "   AND confirm_date BETWEEN %s AND %s",
+        (START, END),
+    )
     live["d0"] = pd.to_datetime(live["d0"]).dt.date
     lab_set = {(r.d0, r.code) for r in sig.itertuples()}
     db_set = {(r.d0, r.code) for r in live.itertuples()}
     assert lab_set == db_set, (
-        f"仅在 lab：{sorted(lab_set - db_set)[:10]}；仅在 signal：{sorted(db_set - lab_set)[:10]}")
+        f"仅在 lab：{sorted(lab_set - db_set)[:10]}；仅在 signal：{sorted(db_set - lab_set)[:10]}"
+    )
 
 
 def test_baseline_phase_matches_market_stat(panel):
@@ -69,10 +75,11 @@ def test_baseline_phase_matches_market_stat(panel):
     prep = replay.prepare(panel)
     st = replay.phases(prep, BASELINE)
     db = labdb.query_df(
-        "SELECT date, phase, buy_window FROM market_stat WHERE date BETWEEN %s AND %s",
-        (START, END))
-    diff = [(r.date, r.phase, r.buy_window, st[r.date].phase, st[r.date].buy_window)
-            for r in db.itertuples()
-            if r.date in st and (st[r.date].phase != r.phase
-                                 or st[r.date].buy_window != r.buy_window)]
+        "SELECT date, phase, buy_window FROM market_stat WHERE date BETWEEN %s AND %s", (START, END)
+    )
+    diff = [
+        (r.date, r.phase, r.buy_window, st[r.date].phase, st[r.date].buy_window)
+        for r in db.itertuples()
+        if r.date in st and (st[r.date].phase != r.phase or st[r.date].buy_window != r.buy_window)
+    ]
     assert not diff, f"相位漂移 {len(diff)} 天，样例 {diff[:5]}"

@@ -1,4 +1,5 @@
 """data/normalize.py 归一化测试。"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -74,14 +75,16 @@ class TestDate:
 
 class TestNormalizeDailyRows:
     def test_basic(self):
-        rows = [{
-            "trade_date": "2024-06-15",
-            "open": 10.0,
-            "high": 11.0,
-            "low": 9.5,
-            "close": 10.5,
-            "volume": 1000.0,
-        }]
+        rows = [
+            {
+                "trade_date": "2024-06-15",
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.5,
+                "close": 10.5,
+                "volume": 1000.0,
+            }
+        ]
         result = normalize_daily_rows(rows, "600519", "test")
         assert len(result) == 1
         bar = result[0]
@@ -94,8 +97,22 @@ class TestNormalizeDailyRows:
 
     def test_multiple_rows(self):
         rows = [
-            {"trade_date": "2024-06-14", "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.5, "volume": 1000.0},
-            {"trade_date": "2024-06-15", "open": 10.5, "high": 11.0, "low": 10.0, "close": 11.0, "volume": 1100.0},
+            {
+                "trade_date": "2024-06-14",
+                "open": 10.0,
+                "high": 10.5,
+                "low": 9.5,
+                "close": 10.5,
+                "volume": 1000.0,
+            },
+            {
+                "trade_date": "2024-06-15",
+                "open": 10.5,
+                "high": 11.0,
+                "low": 10.0,
+                "close": 11.0,
+                "volume": 1100.0,
+            },
         ]
         result = normalize_daily_rows(rows, "600519", "test")
         assert len(result) == 2
@@ -112,17 +129,44 @@ class TestNormalizeDailyRows:
 
     def test_invalid_quality(self):
         """high < max(open, close, low) → invalid."""
-        rows = [{"trade_date": "2024-06-15", "open": 10.0, "high": 9.0, "low": 9.5, "close": 10.5, "volume": 1000.0}]
+        rows = [
+            {
+                "trade_date": "2024-06-15",
+                "open": 10.0,
+                "high": 9.0,
+                "low": 9.5,
+                "close": 10.5,
+                "volume": 1000.0,
+            }
+        ]
         result = normalize_daily_rows(rows, "600519", "test")
         assert result[0].quality == "invalid"
 
     def test_amount_optional(self):
-        rows = [{"trade_date": "2024-06-15", "open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5, "volume": 1000.0}]
+        rows = [
+            {
+                "trade_date": "2024-06-15",
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.5,
+                "close": 10.5,
+                "volume": 1000.0,
+            }
+        ]
         result = normalize_daily_rows(rows, "600519", "test")
         assert result[0].amount is None
 
     def test_chinese_keys(self):
-        rows = [{"trade_date": "2024-06-15", "开盘": 10.0, "最高": 11.0, "最低": 9.5, "收盘": 10.5, "成交量": 1000.0}]
+        rows = [
+            {
+                "trade_date": "2024-06-15",
+                "开盘": 10.0,
+                "最高": 11.0,
+                "最低": 9.5,
+                "收盘": 10.5,
+                "成交量": 1000.0,
+            }
+        ]
         result = normalize_daily_rows(rows, "600519", "test")
         assert len(result) == 1
         assert result[0].open == Decimal("10.0")

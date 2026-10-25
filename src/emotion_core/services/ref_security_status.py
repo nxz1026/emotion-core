@@ -24,6 +24,7 @@ Wind 每次调用消耗真实额度。ST 历史回填是低频运维任务（非
 - 批量串行，每次调用间隔 0.5s 避免限流
 - 落库时记录原始响应与配额消耗
 """
+
 from __future__ import annotations
 
 import logging
@@ -78,12 +79,14 @@ def _parse_events(data: dict) -> list[dict]:
                     effective_from = date.fromisoformat(str(event_date)[:10])
                 except (ValueError, TypeError):
                     continue
-                events.append({
-                    "code": raw.get("Wind代码", "").split(".")[0],
-                    "status": raw.get("实施ST后简称", ""),
-                    "effective_from": effective_from,
-                    "reason": raw.get("实施ST原因", ""),
-                })
+                events.append(
+                    {
+                        "code": raw.get("Wind代码", "").split(".")[0],
+                        "status": raw.get("实施ST后简称", ""),
+                        "effective_from": effective_from,
+                        "reason": raw.get("实施ST原因", ""),
+                    }
+                )
             # 格式 2: 违规处分
             elif "违规公告日期" in raw:
                 event_date = raw.get("违规公告日期", "")
@@ -97,12 +100,14 @@ def _parse_events(data: dict) -> list[dict]:
                 # 只保留 ST/风险警示/撤销相关
                 if not any(kw in event_type for kw in ("ST", "风险警示", "撤销")):
                     continue
-                events.append({
-                    "code": raw.get("Wind代码", "").split(".")[0],
-                    "status": event_type,
-                    "effective_from": effective_from,
-                    "reason": raw.get("违规行为", ""),
-                })
+                events.append(
+                    {
+                        "code": raw.get("Wind代码", "").split(".")[0],
+                        "status": event_type,
+                        "effective_from": effective_from,
+                        "reason": raw.get("违规行为", ""),
+                    }
+                )
     return events
 
 
@@ -298,13 +303,15 @@ def _parse_bulk_rows(columns: list[str], rows: list[list], kind: str) -> list[di
             event_date = date.fromisoformat(date_text[:10])
         except (ValueError, TypeError):
             continue
-        events.append({
-            "code": code,
-            "date": event_date,
-            "kind": kind,
-            "status": status,
-            "reason": reason[:200] or f"{kind}ST",
-        })
+        events.append(
+            {
+                "code": code,
+                "date": event_date,
+                "kind": kind,
+                "status": status,
+                "reason": reason[:200] or f"{kind}ST",
+            }
+        )
     return events
 
 
@@ -397,8 +404,7 @@ def _enumerate_window(
 
 
 def _seed_question(group: str, day: date) -> str:
-    return (f"筛选{day:%Y年%m月%d日}处于ST（风险警示）状态的{group}A股股票，"
-            f"列出证券简称")
+    return f"筛选{day:%Y年%m月%d日}处于ST（风险警示）状态的{group}A股股票，列出证券简称"
 
 
 def _parse_seed_rows(columns: list[str], rows: list[list], day: date) -> list[dict]:
@@ -410,13 +416,15 @@ def _parse_seed_rows(columns: list[str], rows: list[list], day: date) -> list[di
         if len(code) != 6 or not code.isdigit():
             continue
         st = _normalize_status(_pick(raw, "证券简称", "证券名称"))
-        events.append({
-            "code": code,
-            "date": day,
-            "kind": _KIND_IMPLEMENT,
-            "status": st if st != _STATUS_NORMAL else _STATUS_ST,
-            "reason": "起始日已在风险警示板（种子）",
-        })
+        events.append(
+            {
+                "code": code,
+                "date": day,
+                "kind": _KIND_IMPLEMENT,
+                "status": st if st != _STATUS_NORMAL else _STATUS_ST,
+                "reason": "起始日已在风险警示板（种子）",
+            }
+        )
     return events
 
 
@@ -465,12 +473,12 @@ def _write_intervals(code: str, intervals: list[dict]) -> int:
 
 
 _SEED_PREFIX = "seed:"
-_DEFAULT_CALL_BUDGET = 40            # 与逐日涨跌停对账共用同一个日额度闸
+_DEFAULT_CALL_BUDGET = 40  # 与逐日涨跌停对账共用同一个日额度闸
 
 _WINDOW_OK = "ok"
-_WINDOW_EXHAUSTED = "exhausted"      # 本地预算用尽（不是 Wind 报错）
-_WINDOW_QUOTA = "quota"              # Wind 报额度/积分不足
-_WINDOW_ERROR = "error"              # 单窗口取数失败（可重跑）
+_WINDOW_EXHAUSTED = "exhausted"  # 本地预算用尽（不是 Wind 报错）
+_WINDOW_QUOTA = "quota"  # Wind 报额度/积分不足
+_WINDOW_ERROR = "error"  # 单窗口取数失败（可重跑）
 
 
 class _BudgetExhausted(Exception):
@@ -504,8 +512,9 @@ def _default_call_budget() -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning("EMOTION_WIND_DAILY_CALL_BUDGET=%r 不是整数，改用默认 %d",
-                       raw, _DEFAULT_CALL_BUDGET)
+        logger.warning(
+            "EMOTION_WIND_DAILY_CALL_BUDGET=%r 不是整数，改用默认 %d", raw, _DEFAULT_CALL_BUDGET
+        )
         return _DEFAULT_CALL_BUDGET
 
 
@@ -532,13 +541,13 @@ def _window_status() -> dict[tuple[str, date, date], str]:
     """窗口进度：``{(kind, start, end): status}``。"""
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT kind, start_date, end_date, status"
-                        " FROM ref_security_status_window")
+            cur.execute("SELECT kind, start_date, end_date, status FROM ref_security_status_window")
             return {(r[0], r[1], r[2]): r[3] for r in cur.fetchall()}
 
 
-def _mark_window(kind: str, start: date, end: date, status: str, n_events: int,
-                 calls: int, note: str | None) -> None:
+def _mark_window(
+    kind: str, start: date, end: date, status: str, n_events: int, calls: int, note: str | None
+) -> None:
     with db_connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -549,7 +558,8 @@ def _mark_window(kind: str, start: date, end: date, status: str, n_events: int,
                    SET status = EXCLUDED.status, n_events = EXCLUDED.n_events,
                        calls = EXCLUDED.calls, note = EXCLUDED.note,
                        fetched_at = now()""",
-                (kind, start, end, status, n_events, calls, note))
+                (kind, start, end, status, n_events, calls, note),
+            )
         conn.commit()
 
 
@@ -565,8 +575,11 @@ def _persist_events(events: list[dict]) -> int:
                    VALUES (%s, %s, %s, %s, %s, 'wind', now())
                    ON CONFLICT (code, date, kind) DO UPDATE
                    SET status = EXCLUDED.status, reason = EXCLUDED.reason""",
-                [(e["code"], e["date"], e["kind"], e.get("status"), e.get("reason"))
-                 for e in events])
+                [
+                    (e["code"], e["date"], e["kind"], e.get("status"), e.get("reason"))
+                    for e in events
+                ],
+            )
         conn.commit()
     return len(events)
 
@@ -580,16 +593,18 @@ def rebuild_intervals_from_events() -> tuple[int, int]:
     """
     with db_connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT code, date, kind, status, reason"
-                        " FROM ref_security_status_event ORDER BY code, date")
+            cur.execute(
+                "SELECT code, date, kind, status, reason"
+                " FROM ref_security_status_event ORDER BY code, date"
+            )
             rows = cur.fetchall()
             if not rows:
                 return 0, 0
             by_code: dict[str, list[dict]] = {}
             for code, day, kind, status, reason in rows:
                 by_code.setdefault(code, []).append(
-                    {"code": code, "date": day, "kind": kind,
-                     "status": status, "reason": reason})
+                    {"code": code, "date": day, "kind": kind, "status": status, "reason": reason}
+                )
             cur.execute("DELETE FROM ref_security_status WHERE source = 'wind'")
             written = 0
             for code, events in by_code.items():
@@ -603,8 +618,11 @@ def rebuild_intervals_from_events() -> tuple[int, int]:
                        ON CONFLICT (code, status, effective_from) DO UPDATE
                        SET effective_to = EXCLUDED.effective_to,
                            reason = EXCLUDED.reason""",
-                    [(code, i["status"], i["effective_from"], i["effective_to"],
-                      i["reason"]) for i in intervals])
+                    [
+                        (code, i["status"], i["effective_from"], i["effective_to"], i["reason"])
+                        for i in intervals
+                    ],
+                )
                 written += len(intervals)
         conn.commit()
     logger.info("ST 区间重建：%d 个 code，%d 条区间", len(by_code), written)
@@ -620,8 +638,7 @@ def bulk_progress(start: date | None = None, end: date | None = None) -> dict:
     plan = window_plan(start, end)
     done = _window_status()
     ok = [w for w in plan if done.get(w) == _WINDOW_OK]
-    failed = [w for w in plan
-              if done.get(w) in (_WINDOW_ERROR, _WINDOW_QUOTA, _WINDOW_EXHAUSTED)]
+    failed = [w for w in plan if done.get(w) in (_WINDOW_ERROR, _WINDOW_QUOTA, _WINDOW_EXHAUSTED)]
     return {
         "total": len(plan),
         "ok": len(ok),
@@ -664,49 +681,64 @@ def backfill_security_status_bulk(
     plan = window_plan(start, end)
     done = _window_status()
     todo = [w for w in plan if force or done.get(w) != _WINDOW_OK]
-    logger.info("ST 批量回填：窗口 %d 个、待办 %d 个、本次预算 %s 次调用",
-                len(plan), len(todo), budget)
+    logger.info(
+        "ST 批量回填：窗口 %d 个、待办 %d 个、本次预算 %s 次调用", len(plan), len(todo), budget
+    )
 
     wrapped = _BudgetClient(client, budget)
     for kind, win_start, win_end in todo:
         before = wrapped.calls
         try:
             if kind.startswith(_SEED_PREFIX):
-                group = kind[len(_SEED_PREFIX):]
+                group = kind[len(_SEED_PREFIX) :]
                 tables = _fetch_with_retry(wrapped, _seed_question(group, win_start))
-                events = [e for columns, rows in tables
-                          for e in _parse_seed_rows(columns, rows, win_start)]
+                events = [
+                    e
+                    for columns, rows in tables
+                    for e in _parse_seed_rows(columns, rows, win_start)
+                ]
             else:
                 events = _enumerate_window(wrapped, kind, win_start, win_end)
         except _BudgetExhausted as exc:
-            _mark_window(kind, win_start, win_end, _WINDOW_EXHAUSTED, 0,
-                         wrapped.calls - before, str(exc))
-            logger.info("本地预算用尽，停在 %s %s~%s（本次已用 %d 次）",
-                        kind, win_start, win_end, wrapped.calls)
+            _mark_window(
+                kind, win_start, win_end, _WINDOW_EXHAUSTED, 0, wrapped.calls - before, str(exc)
+            )
+            logger.info(
+                "本地预算用尽，停在 %s %s~%s（本次已用 %d 次）",
+                kind,
+                win_start,
+                win_end,
+                wrapped.calls,
+            )
             break
         except WindQuotaError as exc:
             _mark_window(kind, win_start, win_end, _WINDOW_QUOTA, 0, 0, str(exc)[:200])
-            logger.warning("Wind 额度耗尽，停在 %s %s~%s：%s",
-                           kind, win_start, win_end, exc)
+            logger.warning("Wind 额度耗尽，停在 %s %s~%s：%s", kind, win_start, win_end, exc)
             break
         except (WindSourceError, WindUnavailableError) as exc:
-            _mark_window(kind, win_start, win_end, _WINDOW_ERROR, 0,
-                         wrapped.calls - before, str(exc)[:200])
-            logger.warning("窗口取数失败（下次重跑）：%s %s~%s：%s",
-                           kind, win_start, win_end, exc)
+            _mark_window(
+                kind, win_start, win_end, _WINDOW_ERROR, 0, wrapped.calls - before, str(exc)[:200]
+            )
+            logger.warning("窗口取数失败（下次重跑）：%s %s~%s：%s", kind, win_start, win_end, exc)
             continue
         _persist_events(events)
-        _mark_window(kind, win_start, win_end, _WINDOW_OK, len(events),
-                     wrapped.calls - before, None)
-        logger.info("ST %s %s~%s：%d 事件（累计 %d 次调用）",
-                    kind, win_start, win_end, len(events), wrapped.calls)
+        _mark_window(
+            kind, win_start, win_end, _WINDOW_OK, len(events), wrapped.calls - before, None
+        )
+        logger.info(
+            "ST %s %s~%s：%d 事件（累计 %d 次调用）",
+            kind,
+            win_start,
+            win_end,
+            len(events),
+            wrapped.calls,
+        )
         time.sleep(sleep_sec)
 
     done = _window_status()
     pending = [w for w in plan if done.get(w) != _WINDOW_OK]
     if pending:
-        logger.info("ST 批量回填未完成：还剩 %d 个窗口（重复跑同一条命令即续拉）",
-                    len(pending))
+        logger.info("ST 批量回填未完成：还剩 %d 个窗口（重复跑同一条命令即续拉）", len(pending))
         return 0, 0
     return rebuild_intervals_from_events()
 
@@ -783,8 +815,7 @@ def populate_is_st_from_wind(
                         with db_connect() as conn:
                             with conn.cursor() as cur:
                                 cur.execute(
-                                    "UPDATE stock_basic SET is_st = true WHERE code = %s",
-                                    (code,)
+                                    "UPDATE stock_basic SET is_st = true WHERE code = %s", (code,)
                                 )
                                 conn.commit()
                         st_count += 1

@@ -41,6 +41,7 @@
 ★2026-10-15 本仓新增两条检查（`check_limit_state_audit` / `check_theme_coverage`），
 SQL 与阈值为本仓自有——lkl 无 Wind 逐日对账、也没有新浪题材源，故不构成口径偏离。
 """
+
 from __future__ import annotations
 
 import logging
@@ -57,21 +58,21 @@ _DATE_IN_TEXT = re.compile(r"\d{4}-\d{2}-\d{2}")
 log = logging.getLogger("emotion_core.health")
 
 # 阈值（交易日）——与 daily.sh 一次跑通周期对齐，非交易日 SKIP 不计数
-REPORT_GAP_DAYS = 2          # 报告断档：>1 交易日前有报告即算断
-DATA_GAP_DAYS = 2            # 数据链：derived_bar 缺最近交易日
-OUTCOME_STALE_DAYS = 6       # 信号结果：>5 交易日前信号仍 incomplete
-POOL_STALE_DAYS = 2          # 东财三池：落后衍生层 1 个交易日即算断
+REPORT_GAP_DAYS = 2  # 报告断档：>1 交易日前有报告即算断
+DATA_GAP_DAYS = 2  # 数据链：derived_bar 缺最近交易日
+OUTCOME_STALE_DAYS = 6  # 信号结果：>5 交易日前信号仍 incomplete
+POOL_STALE_DAYS = 2  # 东财三池：落后衍生层 1 个交易日即算断
 # ★2026-10-15 新增：对账与题材的消费端阈值（此前两者只落数据、无人消费）
-LIMIT_AUDIT_DAYS = 10            # 对账台账窗口：最近 N 条 (日期,方向)
-LIMIT_AUDIT_STALE_DAYS = 3       # 对账台账落后 derived_bar 的交易日数
+LIMIT_AUDIT_DAYS = 10  # 对账台账窗口：最近 N 条 (日期,方向)
+LIMIT_AUDIT_STALE_DAYS = 3  # 对账台账落后 derived_bar 的交易日数
 LIMIT_AUDIT_ONLY_WIND_PCT = 5.0  # only_wind 占 Wind 名单比例上限（%，已知 ST 偏差约 2.3）
-THEME_STALE_DAYS = 2             # 题材标签落后 derived_bar 的交易日数
-THEME_COVERAGE_MIN_PCT = 40.0    # 题材标签覆盖率下限（标签票数 / 当日有行情票数）
-THEME_PRIMARY_MIN_PCT = 60.0     # primary_theme 非空占标签行比例下限（实测 84%）
+THEME_STALE_DAYS = 2  # 题材标签落后 derived_bar 的交易日数
+THEME_COVERAGE_MIN_PCT = 40.0  # 题材标签覆盖率下限（标签票数 / 当日有行情票数）
+THEME_PRIMARY_MIN_PCT = 60.0  # primary_theme 非空占标签行比例下限（实测 84%）
 
 
 class _CalendarUnavailable(RuntimeError):
-    """交易日历读不到 ⇒ 断档检查**给不出结论**。
+    r"""交易日历读不到 ⇒ 断档检查**给不出结论**。
 
     ⚠️ 2026-10-25 静态审计：原来读不到时**返回空列表** ⇒
     \`_trading_gap\` 对空列表求和 ⇒ **gap = 0** ⇒
@@ -106,14 +107,14 @@ def _recent_trading_days(d: date, n: int) -> list[date]:
     try:
         df = query_df(
             "SELECT date FROM trade_calendar WHERE is_open AND date <= %s"
-            " ORDER BY date DESC LIMIT %s", (d, n))
+            " ORDER BY date DESC LIMIT %s",
+            (d, n),
+        )
     except Exception as exc:  # noqa: BLE001
         log.error("交易日历读取失败，断档检查给不出可信结论：%s: %s", type(exc).__name__, exc)
         # ⚠️ 原来这里 `return []` ⇒ 上层算出 gap=0 ⇒ **当成「没断档」** ⇒
         #    6 条断档检查一起静默放行。⇒ 改成**显式抛**，让上层报「无法判定」。
-        raise _CalendarUnavailable(
-            f"交易日历读取失败（{type(exc).__name__}: {exc}）"
-        ) from exc
+        raise _CalendarUnavailable(f"交易日历读取失败（{type(exc).__name__}: {exc}）") from exc
     return sorted(df["date"])
 
 
@@ -135,32 +136,36 @@ def _trading_gap(trade_date: date, since: date | None) -> int | None:
 
 def check_report_gap(trade_date: date) -> str | None:
     """最近成功报告距今是否 ≥REPORT_GAP_DAYS 交易日；无报告返回告警文本。"""
-    df = query_df("SELECT max(date) AS d FROM review_report"
-                  " WHERE date < %s", (trade_date,))
+    df = query_df("SELECT max(date) AS d FROM review_report WHERE date < %s", (trade_date,))
     last = df["d"].iloc[0] if not df.empty else None
     if last is None:
         return f"从未产出报告（截至 {trade_date} 无 review_report 落盘）"
     gap = _trading_gap(trade_date, last)
     if gap is None:
         return "报告断档：**无法判定**（交易日历不可用）—— 宁可说算不出来，也不报『没断档』"
-    return (f"报告断档：最近成功报告 {last} 距今 {gap} 个交易日（阈值"
-            f" {REPORT_GAP_DAYS}），疑似 daily.sh 未跑/中断"
-            if gap >= REPORT_GAP_DAYS else None)
+    return (
+        f"报告断档：最近成功报告 {last} 距今 {gap} 个交易日（阈值"
+        f" {REPORT_GAP_DAYS}），疑似 daily.sh 未跑/中断"
+        if gap >= REPORT_GAP_DAYS
+        else None
+    )
 
 
 def check_data_gap(trade_date: date) -> str | None:
     """derived_bar 最近数据日距今是否 ≥DATA_GAP_DAYS 交易日（采集停摆）。"""
-    df = query_df("SELECT max(date) AS d FROM derived_bar WHERE date < %s",
-                  (trade_date,))
+    df = query_df("SELECT max(date) AS d FROM derived_bar WHERE date < %s", (trade_date,))
     last = df["d"].iloc[0] if not df.empty else None
     if last is None:
         return f"derived_bar 无任何历史数据（截至 {trade_date}）"
     gap = _trading_gap(trade_date, last)
     if gap is None:
         return "derived_bar 断档：**无法判定**（交易日历不可用）"
-    return (f"derived_bar 最近数据日 {last} 距今 {gap} 个交易日（阈值"
-            f" {DATA_GAP_DAYS}），疑似 fetch/derive 采集停摆"
-            if gap >= DATA_GAP_DAYS else None)
+    return (
+        f"derived_bar 最近数据日 {last} 距今 {gap} 个交易日（阈值"
+        f" {DATA_GAP_DAYS}），疑似 fetch/derive 采集停摆"
+        if gap >= DATA_GAP_DAYS
+        else None
+    )
 
 
 def check_outcome_stale(trade_date: date) -> str | None:
@@ -175,19 +180,23 @@ def check_outcome_stale(trade_date: date) -> str | None:
         # ⚠️ 原来日历读不到 ⇒ cutoff=[] ⇒ len(cutoff)=0 < 7 ⇒ **当没过期**
         return "BUY 结果回填：**无法判定**（交易日历不可用）"
     if len(cutoff) < OUTCOME_STALE_DAYS + 1:
-        return None                        # 历史不足，无从判定
-    stale = cutoff[0]                      # 第 6 个交易日前
+        return None  # 历史不足，无从判定
+    stale = cutoff[0]  # 第 6 个交易日前
     df = query_df(
         "SELECT s.confirm_date, s.code FROM signal s"
         " LEFT JOIN signal_outcome o USING (confirm_date, code, action)"
         " WHERE s.action = 'BUY' AND s.confirm_date <= %s"
         "   AND (o.confirm_date IS NULL OR NOT o.complete)"
-        " ORDER BY s.confirm_date DESC LIMIT 5", (stale,))
+        " ORDER BY s.confirm_date DESC LIMIT 5",
+        (stale,),
+    )
     if df.empty:
         return None
     names = "、".join(f"{r.confirm_date} {r.code}" for r in df.itertuples())
-    return (f"{len(df)} 条 ≥{OUTCOME_STALE_DAYS} 交易日前 BUY 信号无 complete"
-            f" outcome（L3 未回填）：{names}")
+    return (
+        f"{len(df)} 条 ≥{OUTCOME_STALE_DAYS} 交易日前 BUY 信号无 complete"
+        f" outcome（L3 未回填）：{names}"
+    )
 
 
 def check_pipeline_failed(trade_date: date) -> str | None:
@@ -205,10 +214,11 @@ def check_pipeline_failed(trade_date: date) -> str | None:
     bad = [s for s in _pipeline_mod.failures()]
     if not bad:
         return None
-    names = "、".join(f"{s['step']}({s['for_date'] or '无日期'})"
-                      f"{'：' + s['detail'][:120] if s['detail'] else ''}"
-                      for s in bad[:5])
-    return (f"日更链有 {len(bad)} 个步骤停在 FAILED（未恢复）：{names}")
+    names = "、".join(
+        f"{s['step']}({s['for_date'] or '无日期'}){'：' + s['detail'][:120] if s['detail'] else ''}"
+        for s in bad[:5]
+    )
+    return f"日更链有 {len(bad)} 个步骤停在 FAILED（未恢复）：{names}"
 
 
 def check_pool_stale(trade_date: date) -> str | None:
@@ -231,17 +241,22 @@ def check_pool_stale(trade_date: date) -> str | None:
     last_pool = got["d"].iloc[0] if not got.empty else None
     last_data = have["d"].iloc[0] if not have.empty else None
     if last_pool is None:
-        return ("limit_pool_em 无任何数据：东财三池从未同步——c5「炸板≥1次回封」"
-                "补偿分支恒不成立，复盘双源对账不可信")
+        return (
+            "limit_pool_em 无任何数据：东财三池从未同步——c5「炸板≥1次回封」"
+            "补偿分支恒不成立，复盘双源对账不可信"
+        )
     if last_data is None:
-        return None                        # 衍生层也无数据，归 data 断档管
+        return None  # 衍生层也无数据，归 data 断档管
     gap = _trading_gap(last_data, last_pool)
     if gap is None:
         return "东财三池断档：**无法判定**（交易日历不可用）"
-    return (f"东财三池断档：limit_pool_em 最近 {last_pool}，落后 derived_bar"
-            f" {last_data} 共 {gap} 个交易日（阈值 {POOL_STALE_DAYS}）——"
-            f"c5 炸板回封补偿与双源对账均失效"
-            if gap >= POOL_STALE_DAYS else None)
+    return (
+        f"东财三池断档：limit_pool_em 最近 {last_pool}，落后 derived_bar"
+        f" {last_data} 共 {gap} 个交易日（阈值 {POOL_STALE_DAYS}）——"
+        f"c5 炸板回封补偿与双源对账均失效"
+        if gap >= POOL_STALE_DAYS
+        else None
+    )
 
 
 def check_limit_state_audit(trade_date: date) -> str | None:
@@ -264,10 +279,14 @@ def check_limit_state_audit(trade_date: date) -> str | None:
     df = query_df(
         "SELECT date, direction, status, n_wind, n_only_wind, n_only_self"
         " FROM ref_limit_state_run WHERE date <= %s"
-        " ORDER BY date DESC LIMIT %s", (trade_date, LIMIT_AUDIT_DAYS))
+        " ORDER BY date DESC LIMIT %s",
+        (trade_date, LIMIT_AUDIT_DAYS),
+    )
     if df.empty:
-        return ("Wind 逐日涨跌停对账台账为空（ref_limit_state_run 无记录）——"
-                "逐日对账未启动或全部失败，derived_bar 涨停口径无权威校验")
+        return (
+            "Wind 逐日涨跌停对账台账为空（ref_limit_state_run 无记录）——"
+            "逐日对账未启动或全部失败，derived_bar 涨停口径无权威校验"
+        )
     rows = df.to_dict("records")
     bad = [r for r in rows if str(r.get("status")) in ("truncated", "suspect")]
     ok_rows = [r for r in rows if str(r.get("status")) == "ok"]
@@ -299,8 +318,10 @@ def check_limit_state_audit(trade_date: date) -> str | None:
         )
     pct = only_wind / wind * 100 if wind else 0.0
     if wind and pct > LIMIT_AUDIT_ONLY_WIND_PCT:
-        problems.append(f"only_wind 占比 {pct:.2f}%（阈值 {LIMIT_AUDIT_ONLY_WIND_PCT}%，"
-                        f"自算漏票 {only_wind}/{wind}）")
+        problems.append(
+            f"only_wind 占比 {pct:.2f}%（阈值 {LIMIT_AUDIT_ONLY_WIND_PCT}%，"
+            f"自算漏票 {only_wind}/{wind}）"
+        )
     if bad:
         days = "、".join(f"{r['date']}:{r['direction']}({r['status']})" for r in bad[:5])
         problems.append(f"{len(bad)} 天名单不全待重抓：{days}")
@@ -312,16 +333,20 @@ def check_limit_state_audit(trade_date: date) -> str | None:
         if gap is None:
             problems.append("台账落后度：**无法判定**（交易日历不可用）")
         elif gap >= LIMIT_AUDIT_STALE_DAYS:
-            problems.append(f"台账最近抓取日 {last_ledger}，落后 derived_bar"
-                            f" {last_data} 共 {gap} 个交易日（阈值 {LIMIT_AUDIT_STALE_DAYS}）")
+            problems.append(
+                f"台账最近抓取日 {last_ledger}，落后 derived_bar"
+                f" {last_data} 共 {gap} 个交易日（阈值 {LIMIT_AUDIT_STALE_DAYS}）"
+            )
     if known_deviations:
         # 有已知差异但没有真问题 ⇒ **不告警**（返回 None）
         # ⇒ 调用方（CHECKS 框架）不会记 alert ⇒ watchdog 不再为此亮红
         log.info("Wind 对账已知差异：%s", "；".join(known_deviations))
     if not problems:
         return None
-    detail = (f"Wind 逐日涨跌停对账异常（窗口 {len(rows)} 条台账、"
-              f"{len(ok_rows)} 条可算）：" + "；".join(problems))
+    detail = (
+        f"Wind 逐日涨跌停对账异常（窗口 {len(rows)} 条台账、"
+        f"{len(ok_rows)} 条可算）：" + "；".join(problems)
+    )
     if known_deviations:
         detail += "（另有已知数据源差异：" + "；".join(known_deviations) + "）"
     return detail
@@ -345,48 +370,64 @@ def check_theme_coverage(trade_date: date) -> str | None:
     last_theme = got["d"].iloc[0] if not got.empty else None
     last_data = have["d"].iloc[0] if not have.empty else None
     if last_theme is None:
-        return ("theme_tag 无任何数据：题材未自产（provider 未激活或走 NullProvider"
-                "空转），题材组/题材标签全为空壳")
+        return (
+            "theme_tag 无任何数据：题材未自产（provider 未激活或走 NullProvider"
+            "空转），题材组/题材标签全为空壳"
+        )
     if last_data is not None and last_data == trade_date and last_theme < trade_date:
-        return (f"题材当日空转（假 OK）：derived_bar 已有 {trade_date} 数据，"
-                f"theme_tag 最新仍为 {last_theme}——题材步骤报 OK 但无产出")
+        return (
+            f"题材当日空转（假 OK）：derived_bar 已有 {trade_date} 数据，"
+            f"theme_tag 最新仍为 {last_theme}——题材步骤报 OK 但无产出"
+        )
     if last_data is not None:
         gap = _trading_gap(last_data, last_theme)
         if gap is None:
             return "题材断档：**无法判定**（交易日历不可用）"
         if gap >= THEME_STALE_DAYS:
-            return (f"题材断档：theme_tag 最近 {last_theme}，落后 derived_bar"
-                    f" {last_data} 共 {gap} 个交易日（阈值 {THEME_STALE_DAYS}）")
-    cov = query_df("SELECT count(DISTINCT code) AS tagged, count(primary_theme) AS primary"
-                   " FROM theme_tag WHERE date = %s", (last_theme,))
+            return (
+                f"题材断档：theme_tag 最近 {last_theme}，落后 derived_bar"
+                f" {last_data} 共 {gap} 个交易日（阈值 {THEME_STALE_DAYS}）"
+            )
+    cov = query_df(
+        "SELECT count(DISTINCT code) AS tagged, count(primary_theme) AS primary"
+        " FROM theme_tag WHERE date = %s",
+        (last_theme,),
+    )
     tagged = int(cov["tagged"].iloc[0]) if not cov.empty else 0
     primary = int(cov["primary"].iloc[0]) if not cov.empty else 0
-    uni = query_df("SELECT count(DISTINCT code) AS n FROM daily_bar WHERE date = %s",
-                   (last_theme,))
+    uni = query_df("SELECT count(DISTINCT code) AS n FROM daily_bar WHERE date = %s", (last_theme,))
     total = int(uni["n"].iloc[0]) if not uni.empty else 0
     problems: list[str] = []
     if total and tagged / total * 100 < THEME_COVERAGE_MIN_PCT:
-        problems.append(f"标签覆盖率 {tagged}/{total} = {tagged / total * 100:.1f}%"
-                        f"（阈值 {THEME_COVERAGE_MIN_PCT}%）")
+        problems.append(
+            f"标签覆盖率 {tagged}/{total} = {tagged / total * 100:.1f}%"
+            f"（阈值 {THEME_COVERAGE_MIN_PCT}%）"
+        )
     if tagged and primary / tagged * 100 < THEME_PRIMARY_MIN_PCT:
-        problems.append(f"primary_theme 非空占比 {primary}/{tagged} = "
-                        f"{primary / tagged * 100:.1f}%（阈值 {THEME_PRIMARY_MIN_PCT}%）")
+        problems.append(
+            f"primary_theme 非空占比 {primary}/{tagged} = "
+            f"{primary / tagged * 100:.1f}%（阈值 {THEME_PRIMARY_MIN_PCT}%）"
+        )
     if not problems:
         return None
     return f"题材覆盖率异常（{last_theme}）：" + "；".join(problems)
 
 
-CHECKS = (("report", check_report_gap), ("data", check_data_gap),
-          ("outcome", check_outcome_stale), ("pipeline", check_pipeline_failed),
-          ("pool", check_pool_stale), ("limit_audit", check_limit_state_audit),
-          ("theme", check_theme_coverage))
+CHECKS = (
+    ("report", check_report_gap),
+    ("data", check_data_gap),
+    ("outcome", check_outcome_stale),
+    ("pipeline", check_pipeline_failed),
+    ("pool", check_pool_stale),
+    ("limit_audit", check_limit_state_audit),
+    ("theme", check_theme_coverage),
+)
 
 
 def run(trade_date: date | None = None) -> list[str]:
     """全部检查，返回告警 detail 列表（未断档的不含）。"""
     td = trade_date or dates.today_sh()
-    return [detail for _, fn in CHECKS
-            for detail in [fn(td)] if detail]
+    return [detail for _, fn in CHECKS for detail in [fn(td)] if detail]
 
 
 def _dedup_key(detail: str) -> str:
@@ -418,9 +459,8 @@ def record_once(details: list[str], trade_date: date | None = None) -> int:
        但**跨日**判重必须先在 Python 侧抹掉日期，见 `_dedup_key`。
     """
     try:
-        seen = {_dedup_key(a["detail"]) for a in alerts.pending(200)
-                if a["source"] == "health"}
-    except Exception:                            # noqa: BLE001
+        seen = {_dedup_key(a["detail"]) for a in alerts.pending(200) if a["source"] == "health"}
+    except Exception:  # noqa: BLE001
         log.warning("health 未确认告警读取失败（退化为仅本轮内去重）")
         seen = set()
     n = 0
@@ -432,7 +472,7 @@ def record_once(details: list[str], trade_date: date | None = None) -> int:
         try:
             if alerts.record_dedup("WARN", "health", detail) is not None:
                 n += 1
-        except Exception:                        # noqa: BLE001
+        except Exception:  # noqa: BLE001
             log.warning("health 告警入队失败：%s", detail)
     return n
 
@@ -446,6 +486,6 @@ def push(trade_date: date | None = None) -> int:
     n = record_once(run(trade_date), trade_date)
     try:
         alerts.push_pending_webhook()
-    except Exception:                        # noqa: BLE001
+    except Exception:  # noqa: BLE001
         log.warning("health webhook 推送失败（不影响告警入队）")
     return n

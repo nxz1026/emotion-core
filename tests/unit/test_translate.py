@@ -1,4 +1,5 @@
 """presentation/translate.py 决策语言翻译测试。"""
+
 from __future__ import annotations
 
 from emotion_core.presentation.translate import (

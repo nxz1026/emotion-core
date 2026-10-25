@@ -84,9 +84,7 @@ class TestTableMissing:
         import psycopg
 
         def boom(*a, **k):
-            raise psycopg.errors.UndefinedTable(
-                'relation "intraday_seal_snapshot" does not exist'
-            )
+            raise psycopg.errors.UndefinedTable('relation "intraday_seal_snapshot" does not exist')
 
         monkeypatch.setattr(ci, "connect_ro", boom)
         assert ci.fetch_quotes_from_cpt(["600519"]) is None

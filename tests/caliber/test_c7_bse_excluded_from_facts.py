@@ -11,6 +11,7 @@ bj 前缀）只留在 `daily_bar` / `stock_basic`，**不进判据层**——涨
 3. `emotion._counts` 的最高板限主板、家数读 derived_bar（已剔北交所）；
 4. `utils/price.board_pct_milli` 对北交所给 30%（300 千分比），不是主板的 10%。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -34,8 +35,7 @@ def test_derive_sql_excludes_every_bse_prefix():
     for p in CONFIG.BSE_EXCLUDED_PREFIXES:
         assert f"left(s.code, {len(p)}) <> '{p}'" in sql, f"缺北交所前缀排除 {p}"
     for code in _BSE_CODES:
-        assert code.startswith(tuple(CONFIG.BSE_EXCLUDED_PREFIXES)), (
-            f"{code} 未被子串排除覆盖")
+        assert code.startswith(tuple(CONFIG.BSE_EXCLUDED_PREFIXES)), f"{code} 未被子串排除覆盖"
 
 
 def test_derive_sql_carries_no_bare_percent():
@@ -51,11 +51,11 @@ def test_derive_sql_carries_no_bare_percent():
 def test_board_prefixes_are_mainboard_only():
     for p in ("4", "8", "92", "bj"):
         assert not any(x.startswith(p) for x in CONFIG.BOARD_PREFIXES), (
-            f"最高板/梯队口径混入北交所前缀 {p}")
+            f"最高板/梯队口径混入北交所前缀 {p}"
+        )
     # 2026-10-22 补深市主板 003 号段（此前整段漏在候选池外，见 docs/15「003 补录」）。
     # 钉成显式元组而不是 == 7，是为了让「加主板号段」必须改这一行 —— 北交所仍进不来。
-    assert CONFIG.BOARD_PREFIXES == ("600", "601", "603", "605",
-                                     "000", "001", "002", "003")
+    assert CONFIG.BOARD_PREFIXES == ("600", "601", "603", "605", "000", "001", "002", "003")
 
 
 def test_counts_maxh_limited_to_mainboard_and_reads_derived_bar(monkeypatch):
@@ -64,8 +64,7 @@ def test_counts_maxh_limited_to_mainboard_and_reads_derived_bar(monkeypatch):
     def fake_query(sql: str, params=()):
         seen["sql"] = sql
         seen["params"] = tuple(params)
-        return pd.DataFrame([{"zt": 0, "zb": 0, "touched": 0, "dt": 0,
-                              "maxh": None}])
+        return pd.DataFrame([{"zt": 0, "zb": 0, "touched": 0, "dt": 0, "maxh": None}])
 
     monkeypatch.setattr(emotion, "query_df", fake_query)
     emotion._counts(date(2026, 9, 25))

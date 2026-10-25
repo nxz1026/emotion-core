@@ -1,4 +1,5 @@
 """逻辑层视图：市场参数展示。"""
+
 from __future__ import annotations
 
 

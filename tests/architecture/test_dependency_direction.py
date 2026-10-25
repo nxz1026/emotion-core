@@ -19,6 +19,7 @@
 为什么用 AST 而不是 grep：字符串/注释里的模块名（SQL、文档、`importlib` 动态路径）
 不算依赖；动态 import 另由 `test_notify_seam_keeps_two_paths` 单独钉住。
 """
+
 from __future__ import annotations
 
 import ast
@@ -33,20 +34,20 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "emotion_core"
 _LEVEL = {
     "utils": 0,
     "core": 1,
-    "core_lib": 1,        # Rust 编译产物目录（只有 .so），与 core 同级
+    "core_lib": 1,  # Rust 编译产物目录（只有 .so），与 core 同级
     "algorithms": 3,
     "data": 4,
     "services": 5,
     "orchestration": 6,
     "presentation": 7,
-    "llm": 3,             # 旁支：与 algorithms 同级
+    "llm": 3,  # 旁支：与 algorithms 同级
 }
-_SHARED = {"domain"}      # 全员可 import，不视为违规
+_SHARED = {"domain"}  # 全员可 import，不视为违规
 
 # 信号链路禁止 import llm（§4）：这些文件惰性 import llm 是已知例外。
 _LAZY_LLM_ALLOWLIST = {
-    "services/stock_service.py",      # use_llm=True 时才惰性 import llm.render
-    "services/notify.py",             # R58-5：_humanize_alert 函数内惰性 import llm.agnes
+    "services/stock_service.py",  # use_llm=True 时才惰性 import llm.render
+    "services/notify.py",  # R58-5：_humanize_alert 函数内惰性 import llm.agnes
 }
 
 # ── 历史欠账：登记的是「现状违规」的精确位置，只许减少。────────────────────
@@ -170,7 +171,11 @@ def test_signal_chain_does_not_import_llm():
             continue
         # 只检查顶层语句（模块级 import），嵌套的由 test_lazy_llm_imports_allowlisted 管
         for node in ast.iter_child_nodes(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("emotion_core.llm"):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.startswith("emotion_core.llm")
+            ):
                 bad.append((str(rel), node.lineno))
             elif isinstance(node, ast.Import):
                 for a in node.names:

@@ -24,6 +24,7 @@ Python 参考：`src/emotion_core/algorithms/entry.py`（SQL/落库/`_ctx` 的 I
 - `test_c5_threshold_format_pin`：Rust 用 `{}` 打印 f64 会给 `5%`，Python 给 `5.0%`；
   已改 `{:?}` 对齐。
 """
+
 from __future__ import annotations
 
 import sys
@@ -45,9 +46,17 @@ ALL_LABELS = COND_LABELS + WARN_LABELS
 
 
 def _py_cand(code: str = CAND_CODE, days: int = 5, ex: bool = True):
-    return entry.LadderDay(date=D1, code=code, cont_days=days, is_exchange=ex,
-                           is_top=False, is_sole_top=False, y_top_group_count=0,
-                           y_top_survivor_count=0, is_suspended=False)
+    return entry.LadderDay(
+        date=D1,
+        code=code,
+        cont_days=days,
+        is_exchange=ex,
+        is_top=False,
+        is_sole_top=False,
+        y_top_group_count=0,
+        y_top_survivor_count=0,
+        is_suspended=False,
+    )
 
 
 def _rs_cand(code: str = CAND_CODE, days: int = 5, ex: bool = True):
@@ -59,20 +68,43 @@ def _ctx(**over):
     code = over.pop("code", CAND_CODE)
     days = over.pop("days", 5)
     ex = over.pop("ex", True)
-    p = {"sole": _py_cand(code, days, ex), "rows": [_py_cand(code, days, ex)],
-         "y_comp": (2, 1), "y_surv": ({code}, {code}), "y_peer": 2,
-         "window": "NORMAL", "min_days": 4, "diverge_min": 5.0,
-         "c5_verifiable": True, "name": "", "turnover_rate": None, "bomb_times": None}
+    p = {
+        "sole": _py_cand(code, days, ex),
+        "rows": [_py_cand(code, days, ex)],
+        "y_comp": (2, 1),
+        "y_surv": ({code}, {code}),
+        "y_peer": 2,
+        "window": "NORMAL",
+        "min_days": 4,
+        "diverge_min": 5.0,
+        "c5_verifiable": True,
+        "name": "",
+        "turnover_rate": None,
+        "bomb_times": None,
+    }
     p.update(over)
 
     def _rs_of(c):
         return None if c is None else _rs_cand(c.code, c.cont_days, c.is_exchange)
 
     y_codes, survivors = p["y_surv"]
-    r = {"sole": _rs_of(p["sole"]), "rows": [_rs_of(c) for c in p["rows"]],
-         "y_codes": set(y_codes), "survivors": set(survivors)}
-    for k in ("y_comp", "y_peer", "window", "min_days", "diverge_min", "c5_verifiable",
-              "name", "turnover_rate", "bomb_times"):
+    r = {
+        "sole": _rs_of(p["sole"]),
+        "rows": [_rs_of(c) for c in p["rows"]],
+        "y_codes": set(y_codes),
+        "survivors": set(survivors),
+    }
+    for k in (
+        "y_comp",
+        "y_peer",
+        "window",
+        "min_days",
+        "diverge_min",
+        "c5_verifiable",
+        "name",
+        "turnover_rate",
+        "bomb_times",
+    ):
         r[k] = p[k]
     return p, rust.EntryCtx(**r)
 
@@ -86,12 +118,14 @@ def _cmp(cand, funcs, py_ctx, rs_ctx, what=""):
         assert tuple(rs) == tuple(py), f"{what} {name}\n  Rust   {rs}\n  Python {py}"
 
 
-_ALL = [("c1", entry.c1_uniqueness, rust.c1_uniqueness),
-        ("c2", entry.c2_exchange, rust.c2_exchange),
-        ("c3", entry.c3_elimination, rust.c3_elimination),
-        ("c4", entry.c4_min_days, rust.c4_min_days),
-        ("c5", entry.c5_strength_diverge, rust.c5_strength_diverge),
-        ("w1", entry.w1_crowding, rust.w1_crowding)]
+_ALL = [
+    ("c1", entry.c1_uniqueness, rust.c1_uniqueness),
+    ("c2", entry.c2_exchange, rust.c2_exchange),
+    ("c3", entry.c3_elimination, rust.c3_elimination),
+    ("c4", entry.c4_min_days, rust.c4_min_days),
+    ("c5", entry.c5_strength_diverge, rust.c5_strength_diverge),
+    ("w1", entry.w1_crowding, rust.w1_crowding),
+]
 
 
 def test_default_ctx_all_conditions():
@@ -125,16 +159,15 @@ def test_c1_name_fallback_pin():
 def test_c3_matrix():
     """c3 五条分支：竞争不足 / 幸存不唯一 / 候选不在昨日组 / 幸存者非候选 / 通过。"""
     cases = [
-        {"y_comp": (1, 1)},                                  # 昨日组仅 1 只 → 无竞争
-        {"y_comp": (2, 2)},                                  # 幸存 2 只 → 不唯一
-        {"y_surv": ({OTHER}, {CAND_CODE})},                   # 候选不在昨日最高组
-        {"y_surv": ({CAND_CODE}, {OTHER})},                   # 幸存者非候选
+        {"y_comp": (1, 1)},  # 昨日组仅 1 只 → 无竞争
+        {"y_comp": (2, 2)},  # 幸存 2 只 → 不唯一
+        {"y_surv": ({OTHER}, {CAND_CODE})},  # 候选不在昨日最高组
+        {"y_surv": ({CAND_CODE}, {OTHER})},  # 幸存者非候选
         {"y_comp": (3, 1), "y_surv": ({CAND_CODE, OTHER}, {CAND_CODE})},  # 通过
     ]
     for over in cases:
         p, r = _ctx(**over)
-        _cmp(_py_cand(), [("c3", entry.c3_elimination, rust.c3_elimination)], p, r,
-             f"c3 {over}")
+        _cmp(_py_cand(), [("c3", entry.c3_elimination, rust.c3_elimination)], p, r, f"c3 {over}")
 
 
 def test_c3_competition_switch_pinned_on():
@@ -149,26 +182,39 @@ def test_c3_competition_switch_pinned_on():
 def test_c4_threshold():
     for days, md in [(5, 4), (4, 4), (3, 4), (3, 3), (4, 5)]:
         p, r = _ctx(days=days, min_days=md)
-        _cmp(_py_cand(days=days), [("c4", entry.c4_min_days, rust.c4_min_days)], p, r,
-             f"c4 days={days} md={md}")
+        _cmp(
+            _py_cand(days=days),
+            [("c4", entry.c4_min_days, rust.c4_min_days)],
+            p,
+            r,
+            f"c4 days={days} md={md}",
+        )
 
 
-@pytest.mark.parametrize("over", [
-    {"window": "NORMAL"},                                  # 标准窗口不适用
-    {"window": "ENHANCED"},                                # 缺换手 → ⚠ 无法核验
-    {"window": "ENHANCED", "bomb_times": 2},               # 炸板回封
-    {"window": "ENHANCED", "turnover_rate": 6.25},         # 换手达标
-    {"window": "ENHANCED", "turnover_rate": 2.5},          # 换手不足
-    {"window": "ENHANCED", "turnover_rate": 6.255},        # 三位小数取整
-    {"window": "ENHANCED", "turnover_rate": float("nan")},  # NaN = 缺失
-    {"window": "ENHANCED", "c5_verifiable": False},        # EM 池窗口外 → UNKNOWN
-    {"window": "ENHANCED", "diverge_min": 3.5, "turnover_rate": 3.5},  # 阈值边界（>=）
-    {"window": "ENHANCED", "diverge_min": 3.5, "turnover_rate": 3.49},
-])
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"window": "NORMAL"},  # 标准窗口不适用
+        {"window": "ENHANCED"},  # 缺换手 → ⚠ 无法核验
+        {"window": "ENHANCED", "bomb_times": 2},  # 炸板回封
+        {"window": "ENHANCED", "turnover_rate": 6.25},  # 换手达标
+        {"window": "ENHANCED", "turnover_rate": 2.5},  # 换手不足
+        {"window": "ENHANCED", "turnover_rate": 6.255},  # 三位小数取整
+        {"window": "ENHANCED", "turnover_rate": float("nan")},  # NaN = 缺失
+        {"window": "ENHANCED", "c5_verifiable": False},  # EM 池窗口外 → UNKNOWN
+        {"window": "ENHANCED", "diverge_min": 3.5, "turnover_rate": 3.5},  # 阈值边界（>=）
+        {"window": "ENHANCED", "diverge_min": 3.5, "turnover_rate": 3.49},
+    ],
+)
 def test_c5_matrix(over):
     p, r = _ctx(**over)
-    _cmp(_py_cand(), [("c5", entry.c5_strength_diverge, rust.c5_strength_diverge)], p, r,
-         f"c5 {over}")
+    _cmp(
+        _py_cand(),
+        [("c5", entry.c5_strength_diverge, rust.c5_strength_diverge)],
+        p,
+        r,
+        f"c5 {over}",
+    )
 
 
 def test_c5_unknown_not_veto():
@@ -208,18 +254,22 @@ def test_w1_crowding():
 
 # ---------- 聚合：passed_of / split_checklist ----------
 
+
 def _rows(oks: list) -> list:
     """按真实标签顺序构造行：5 条件 + W1 警告。"""
     return [(label, ok, f"note-{label}") for label, ok in zip(ALL_LABELS, oks, strict=True)]
 
 
-@pytest.mark.parametrize("oks,expected", [
-    ([True, True, True, True, True, True], True),
-    ([True, False, True, True, True, True], False),
-    ([True, None, True, True, True, True], True),   # UNKNOWN 不否决
-    ([None, None, None, None, None, None], True),   # 全 None 也算过（显式契约）
-    ([True, True, True, True, True, False], True),  # 警告 False 也不否决
-])
+@pytest.mark.parametrize(
+    "oks,expected",
+    [
+        ([True, True, True, True, True, True], True),
+        ([True, False, True, True, True, True], False),
+        ([True, None, True, True, True, True], True),  # UNKNOWN 不否决
+        ([None, None, None, None, None, None], True),  # 全 None 也算过（显式契约）
+        ([True, True, True, True, True, False], True),  # 警告 False 也不否决
+    ],
+)
 def test_passed_of_parity(oks, expected):
     rows = _rows(oks)
     assert rust.passed_of(rows) is expected
@@ -230,18 +280,25 @@ def test_split_checklist_parity():
     """Rust 切分投影（条件 None→False，警告 None→True）与 Python 结构分离同语义。"""
     rows = _rows([True, False, None, True, True, None])
     conds, warns = rust.split_checklist(rows)
-    assert conds == [(COND_LABELS[0], True, "note-" + COND_LABELS[0]),
-                     (COND_LABELS[1], False, "note-" + COND_LABELS[1]),
-                     (COND_LABELS[2], False, "note-" + COND_LABELS[2]),
-                     (COND_LABELS[3], True, "note-" + COND_LABELS[3]),
-                     (COND_LABELS[4], True, "note-" + COND_LABELS[4])]
+    assert conds == [
+        (COND_LABELS[0], True, "note-" + COND_LABELS[0]),
+        (COND_LABELS[1], False, "note-" + COND_LABELS[1]),
+        (COND_LABELS[2], False, "note-" + COND_LABELS[2]),
+        (COND_LABELS[3], True, "note-" + COND_LABELS[3]),
+        (COND_LABELS[4], True, "note-" + COND_LABELS[4]),
+    ]
     assert warns == [(WARN_LABELS[0], True, "note-" + WARN_LABELS[0])]
 
     cl, wo = entry.split_checklist(entry._to_checklist(rows))
-    assert cl.w1_crowding is None                      # 警告被移出条件列
+    assert cl.w1_crowding is None  # 警告被移出条件列
     assert wo.w1_crowding is None
-    assert (cl.c1_uniqueness, cl.c2_exchange, cl.c3_elimination,
-            cl.c4_min_days, cl.c5_strength_diverge) == (True, False, None, True, True)
+    assert (
+        cl.c1_uniqueness,
+        cl.c2_exchange,
+        cl.c3_elimination,
+        cl.c4_min_days,
+        cl.c5_strength_diverge,
+    ) == (True, False, None, True, True)
     assert cl.passed is False and rust.passed_of(rows) is False
 
 

@@ -1,13 +1,12 @@
 """state.py 状态机测试。"""
+
 from __future__ import annotations
 
 from datetime import date
 
-import pytest
 
 from emotion_core.algorithms.state import (
     DayMetrics,
-    EmotionState,
     _rule_climax,
     _rule_ebb,
     _rule_ferment,
@@ -160,7 +159,9 @@ class TestClassifySeries:
         """退潮优先级 > 高潮（EBB_ZT_PERF = -2.0）。"""
         series = [
             make_metrics(date(2024, 6, 14), limit_up_count=30, zt_performance=0.3),
-            make_metrics(date(2024, 6, 15), limit_up_count=200, top_broke=True, zt_performance=-3.0),
+            make_metrics(
+                date(2024, 6, 15), limit_up_count=200, top_broke=True, zt_performance=-3.0
+            ),
         ]
         result = classify_series(series)
         assert result[1].phase == "退潮"
@@ -168,7 +169,9 @@ class TestClassifySeries:
     def test_inherit_previous(self):
         """无规则命中时继承昨日状态。"""
         series = [
-            make_metrics(date(2024, 6, 14), max_limit_days=3, limit_up_count=50, zt_performance=0.3),
+            make_metrics(
+                date(2024, 6, 14), max_limit_days=3, limit_up_count=50, zt_performance=0.3
+            ),
             make_metrics(date(2024, 6, 15), limit_up_count=30),
         ]
         result = classify_series(series)

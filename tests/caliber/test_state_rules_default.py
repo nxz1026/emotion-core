@@ -9,6 +9,7 @@ P2（docs/20 §7）把状态机参数化，唯一允许的改动是「新增可�
 2. `classify_series(series)` 与 `classify_series(series, DEFAULT_RULES)` 逐条相等；
 3. `replace()` 换参真的生效（否则 Lab 搜索搜索的是空气）。
 """
+
 from __future__ import annotations
 
 from dataclasses import fields, replace as dc_replace
@@ -43,12 +44,12 @@ def _day(i: int, **kw) -> DayMetrics:
 # 覆盖四种相位 + 继承日的一段序列（够触发全部规则分支）
 SERIES = [
     _day(0),
-    _day(1, limit_up_count=90),            # 高潮（涨停数越阈）
-    _day(2, zt_performance=-3.0),          # 退潮
+    _day(1, limit_up_count=90),  # 高潮（涨停数越阈）
+    _day(2, zt_performance=-3.0),  # 退潮
     _day(3, limit_up_count=60, zt_performance=2.0),
     _day(4, limit_up_count=20, max_limit_days=2, has_candidate=False),  # 冰点
     _day(5, top_broke=True),
-    _day(6, top_broke=True),               # 两天最高板都断 → 退潮
+    _day(6, top_broke=True),  # 两天最高板都断 → 退潮
     _day(7),
 ]
 
@@ -81,8 +82,9 @@ def test_no_rules_arg_is_bitwise_equal():
     """不传 rules 与传 DEFAULT_RULES 必须完全一致（含 reason 文本）。"""
     a = state.classify_series(list(SERIES))
     b = state.classify_series(list(SERIES), DEFAULT_RULES)
-    assert [(s.date, s.phase, s.buy_window, s.force_liquidate, s.reason) for s in a] == \
-           [(s.date, s.phase, s.buy_window, s.force_liquidate, s.reason) for s in b]
+    assert [(s.date, s.phase, s.buy_window, s.force_liquidate, s.reason) for s in a] == [
+        (s.date, s.phase, s.buy_window, s.force_liquidate, s.reason) for s in b
+    ]
 
 
 def test_replace_actually_changes_phase_sequence():

@@ -5,6 +5,7 @@
 `in_market=count(*) FROM stock_basic WHERE in_market`，`ratio<0.90 → 拒绝装配`。
 emotion-core 的退出码取 docs/01 A12 规定的 **76**（asel 脚本当年用 1/2）。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -23,14 +24,17 @@ def test_exit_code_is_76():
     assert CONFIG.MIN_COVERAGE == 0.90
 
 
-@pytest.mark.parametrize("covered,in_market,ok", [
-    (9978, 10000, True),    # asel 实测正常日 0.9978
-    (9000, 10000, True),    # 恰好等于门槛
-    (8999, 10000, False),   # 差 1 只就拦
-    (180, 5569, False),     # asel 实测半截数据 0.032
-    (0, 10000, False),
-    (100, 0, False),        # 分母不可用同样拒绝
-])
+@pytest.mark.parametrize(
+    "covered,in_market,ok",
+    [
+        (9978, 10000, True),  # asel 实测正常日 0.9978
+        (9000, 10000, True),  # 恰好等于门槛
+        (8999, 10000, False),  # 差 1 只就拦
+        (180, 5569, False),  # asel 实测半截数据 0.032
+        (0, 10000, False),
+        (100, 0, False),  # 分母不可用同样拒绝
+    ],
+)
 def test_decide_branches(covered, in_market, ok):
     got, line = coverage.decide(covered, in_market)
     assert got is ok
@@ -98,7 +102,8 @@ class _Pipeline:
 
 def _blocked(trade_date):
     raise coverage.CoverageBlocked(
-        "coverage covered=180 in_market=5569 ratio=0.0323 min=0.9 -> 拒绝装配")
+        "coverage covered=180 in_market=5569 ratio=0.0323 min=0.9 -> 拒绝装配"
+    )
 
 
 def test_run_daily_returns_76_when_blocked(monkeypatch):
@@ -121,8 +126,9 @@ def test_run_daily_continues_past_a_passing_gate(monkeypatch):
     monkeypatch.setattr(daily, "_trading_day_guard", lambda d: True)
     monkeypatch.setattr(daily, "pipeline", pipe)
     monkeypatch.setattr(coverage, "gate", lambda d: "coverage ratio=0.9978")
-    monkeypatch.setattr(derive_service, "run",
-                        lambda d: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        derive_service, "run", lambda d: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
 
     assert daily.run_daily(D, from_step="coverage") == 1
     assert pipe.calls[1][:2] == ("done", "coverage")

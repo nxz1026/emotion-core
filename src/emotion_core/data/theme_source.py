@@ -14,6 +14,7 @@ CONFIG 是 frozen dataclass，新增字段会改变 `config_hash()`，让 `pipel
 与 MEMORY 里那条踩坑）。生产激活走 `deploy/env/emotion-core.env`（daily 单元的
 `EnvironmentFile=` 已在读），因此**不需要改任何 systemd 单元**。
 """
+
 from __future__ import annotations
 
 import logging
@@ -81,13 +82,15 @@ class SinaConceptProvider:
             if not usable:
                 continue
             ordered = sorted(usable, key=lambda n: (-n.member_count, n.node))
-            rows.append({
-                "code": code,
-                "tag_date": trade_date,
-                "primary_theme": ordered[0].name,
-                "secondary_themes": [n.name for n in ordered[1:]],
-                "source": SOURCE,
-            })
+            rows.append(
+                {
+                    "code": code,
+                    "tag_date": trade_date,
+                    "primary_theme": ordered[0].name,
+                    "secondary_themes": [n.name for n in ordered[1:]],
+                    "source": SOURCE,
+                }
+            )
         log.info("新浪概念 %s：%d 票标签", trade_date, len(rows))
         return rows
 
@@ -98,17 +101,20 @@ class SinaConceptProvider:
             fetch_concept_nodes,
         )
 
-        return [{
-            "date": trade_date,
-            "node": n.node,
-            "theme": n.name,
-            "member_count": n.member_count,
-            "pct_chg": n.pct_chg,
-            "amount": n.amount,
-            "leading_code": n.leading_code,
-            "leading_name": n.leading_name,
-            "source": SOURCE,
-        } for n in fetch_concept_nodes()]
+        return [
+            {
+                "date": trade_date,
+                "node": n.node,
+                "theme": n.name,
+                "member_count": n.member_count,
+                "pct_chg": n.pct_chg,
+                "amount": n.amount,
+                "leading_code": n.leading_code,
+                "leading_name": n.leading_name,
+                "source": SOURCE,
+            }
+            for n in fetch_concept_nodes()
+        ]
 
 
 def get_provider(name: str | None = None) -> ThemeProvider:

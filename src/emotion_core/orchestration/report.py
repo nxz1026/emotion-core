@@ -31,8 +31,7 @@ def _list_dates(n: int) -> list[date]:
     刻意不用 `daily_bar`：derived_bar 是衍生层根表，报告的晋级/梯队/信号
     全部由它派生，它缺行 = 那天没跑过 derive，出报告只会满屏缺数。
     """
-    df = query_df("SELECT DISTINCT date FROM derived_bar"
-                  " ORDER BY date DESC LIMIT %s", (n,))
+    df = query_df("SELECT DISTINCT date FROM derived_bar ORDER BY date DESC LIMIT %s", (n,))
     return [r.date for r in df.itertuples()]
 
 
@@ -44,13 +43,13 @@ def _latest() -> date | None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="python -m emotion_core.orchestration.report",
-        description="生成复盘报告（终端 + reports/*.md|json + review_report 入库）")
+        description="生成复盘报告（终端 + reports/*.md|json + review_report 入库）",
+    )
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--date", help="交易日 YYYY-MM-DD")
     g.add_argument("--latest", action="store_true", help="最近一个已入库的交易日")
     g.add_argument("--list", type=int, metavar="N", help="列出最近 N 个可出报告的交易日")
-    p.add_argument("--dry-run", action="store_true",
-                   help="只渲染到终端，不落盘、不入库、不推送")
+    p.add_argument("--dry-run", action="store_true", help="只渲染到终端，不落盘、不入库、不推送")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -78,10 +77,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         from emotion_core.algorithms.review import collect, render_markdown
+
         print(render_markdown(trade_date, collect(trade_date)))
         return 0
 
     from emotion_core.algorithms.review import publish
+
     try:
         out = publish(trade_date)
     except RuntimeError as exc:

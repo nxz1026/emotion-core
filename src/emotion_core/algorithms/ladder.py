@@ -66,9 +66,13 @@ def sole_top(rows: list[LadderDay], min_days: int | None = None) -> LadderDay | 
     return tg[0] if len(tg) == 1 and tg[0].cont_days >= md else None
 
 
-def fold(trade_date: date, rows: list[Candidate],
-         prev_rows: list[Candidate], today_exchange: set[str],
-         suspended: list[tuple[str, int]] | None = None) -> list[LadderDay]:
+def fold(
+    trade_date: date,
+    rows: list[Candidate],
+    prev_rows: list[Candidate],
+    today_exchange: set[str],
+    suspended: list[tuple[str, int]] | None = None,
+) -> list[LadderDay]:
     """纯函数：候选行 → 梯队行（is_top/is_sole_top/R2 计数），按板数降序。
 
     Args:
@@ -79,29 +83,51 @@ def fold(trade_date: date, rows: list[Candidate],
             停牌行 is_exchange=False、is_top=is_sole_top=False、不进最高组，
             只在 ②段单独展示，**不影响任何身位数字口径**。
     """
+
     def _mk(day: date, candidate: Candidate) -> LadderDay:
         code, days, exchange = candidate
-        return LadderDay(date=day, code=code, cont_days=days, is_exchange=exchange,
-                         is_top=False, is_sole_top=False,
-                         y_top_group_count=0, y_top_survivor_count=0)
+        return LadderDay(
+            date=day,
+            code=code,
+            cont_days=days,
+            is_exchange=exchange,
+            is_top=False,
+            is_sole_top=False,
+            y_top_group_count=0,
+            y_top_survivor_count=0,
+        )
 
     base = [_mk(trade_date, r) for r in rows]
-    base.extend(LadderDay(date=trade_date, code=code, cont_days=days,
-                          is_exchange=False, is_top=False, is_sole_top=False,
-                          y_top_group_count=0, y_top_survivor_count=0,
-                          is_suspended=True)
-                for code, days in (suspended or []))
+    base.extend(
+        LadderDay(
+            date=trade_date,
+            code=code,
+            cont_days=days,
+            is_exchange=False,
+            is_top=False,
+            is_sole_top=False,
+            y_top_group_count=0,
+            y_top_survivor_count=0,
+            is_suspended=True,
+        )
+        for code, days in (suspended or [])
+    )
     base.sort(key=lambda r: (-r.cont_days, r.code))
     top_codes = {r.code for r in top_group(base)}
     sole = sole_top(base)
     prev_top = {r.code for r in top_group([_mk(trade_date, r) for r in prev_rows])}
     group_count = len(prev_top)
     survivor_count = len(prev_top & today_exchange)
-    return [replace(r, is_top=r.code in top_codes,
-                    is_sole_top=sole is not None and r.code == sole.code,
-                    y_top_group_count=group_count,
-                    y_top_survivor_count=survivor_count)
-            for r in base]
+    return [
+        replace(
+            r,
+            is_top=r.code in top_codes,
+            is_sole_top=sole is not None and r.code == sole.code,
+            y_top_group_count=group_count,
+            y_top_survivor_count=survivor_count,
+        )
+        for r in base
+    ]
 
 
 def build(trade_date: date) -> list[LadderDay]:
@@ -145,8 +171,9 @@ def _guard_no_data(trade_date: date) -> None:
     derived_bar 是全市场衍生表，任何交易日都应有数千行；有行而梯队为空才是真平静。
     """
     if count_derived_rows(trade_date) == 0:
-        raise RuntimeError(f"ladder_day {trade_date}：derived_bar 当日 0 行——"
-                           "上游缺数，拒绝清空，请先重跑采集")
+        raise RuntimeError(
+            f"ladder_day {trade_date}：derived_bar 当日 0 行——上游缺数，拒绝清空，请先重跑采集"
+        )
 
 
 def persist(trade_date: date) -> int:
@@ -162,6 +189,11 @@ def persist(trade_date: date) -> int:
         log.warning("ladder_day %s：当日无梯队（真平静，清空旧记录）", trade_date)
         return 0
     n = replace_ladder_day(trade_date, rows)
-    log.info("ladder_day %s：%d 行（最高组 %d 只，唯一高标 %s）", trade_date, n,
-             len(top_group(rows)), (sole.code if (sole := sole_top(rows)) else "无"))
+    log.info(
+        "ladder_day %s：%d 行（最高组 %d 只，唯一高标 %s）",
+        trade_date,
+        n,
+        len(top_group(rows)),
+        (sole.code if (sole := sole_top(rows)) else "无"),
+    )
     return n

@@ -34,7 +34,7 @@ def _series() -> pd.DataFrame:
         streaks.append(k)
     df["streak"] = streaks
     # 次日是否仍是同一相位（最后一天没有次日 → False 且标记 NaN 由样本剔除处理）
-    same_next = (df["phase"].shift(-1) == df["phase"])
+    same_next = df["phase"].shift(-1) == df["phase"]
     df["same_next"] = same_next.where(df["phase"].shift(-1).notna())
     return df
 
@@ -54,15 +54,18 @@ def persistence(trade_date: date) -> dict:
         return {}
     phase = str(hit.iloc[0]["phase"])
     streak = int(hit.iloc[0]["streak"])
-    hist = df[(df["phase"] == phase) & (df["streak"] == streak)
-              & df["same_next"].notna()]
+    hist = df[(df["phase"] == phase) & (df["streak"] == streak) & df["same_next"].notna()]
     n = int(hist.shape[0])
     if n == 0:
-        return {"phase": phase, "streak": streak, "n": 0, "rate": None,
-                "same_next_n": 0}
+        return {"phase": phase, "streak": streak, "n": 0, "rate": None, "same_next_n": 0}
     same = int(hist["same_next"].astype(bool).sum())
-    return {"phase": phase, "streak": streak, "n": n,
-            "rate": round(same / n * 100, 0), "same_next_n": same}
+    return {
+        "phase": phase,
+        "streak": streak,
+        "n": n,
+        "rate": round(same / n * 100, 0),
+        "same_next_n": same,
+    }
 
 
 def line(res: dict) -> str:
@@ -72,6 +75,8 @@ def line(res: dict) -> str:
     head = f"{res['phase']}已连续 {res['streak']} 天"
     if not res.get("n"):
         return head + f"；历史上没有「第 {res['streak']} 天」的同类样本，不给延续率"
-    return (head + f"；历史上第 {res['streak']} 天的{res['phase']}，"
-            f"次日仍{res['phase']} {res['same_next_n']}/{res['n']} 次"
-            f"（{res['rate']:.0f}%）")
+    return (
+        head + f"；历史上第 {res['streak']} 天的{res['phase']}，"
+        f"次日仍{res['phase']} {res['same_next_n']}/{res['n']} 次"
+        f"（{res['rate']:.0f}%）"
+    )

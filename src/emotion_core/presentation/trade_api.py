@@ -9,12 +9,13 @@ Endpoints:
   GET  /api/trade/results?date=YYYY-MM-DD    → latest results JSON
   GET  /api/trade/health                     → {ok: true}
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from pathlib import Path
 from threading import Lock
 
@@ -69,6 +70,7 @@ def _query_signals(for_date: date) -> list[dict]:
 def handle_trade_decisions(query_str: str) -> tuple[dict, int]:
     """GET /api/trade/decisions?date=YYYY-MM-DD"""
     from urllib.parse import parse_qs
+
     q = parse_qs(query_str)
     for_date_str = q.get("date", [date.today().isoformat()])[0]
 
@@ -105,21 +107,27 @@ def handle_trade_decisions(query_str: str) -> tuple[dict, int]:
                 )
                 continue
             seen_codes.add(code)
-            actions.append({
-                "code": code,
-                "action": "BUY",
-                "exec": "OPEN_POS",
-                "volume": 100,
-                "reason": row.get("reason", ""),
-            })
+            actions.append(
+                {
+                    "code": code,
+                    "action": "BUY",
+                    "exec": "OPEN_POS",
+                    "volume": 100,
+                    "reason": row.get("reason", ""),
+                }
+            )
 
         batch_id = str(uuid.uuid4())
         payload = {"batch_id": batch_id, "for_date": for_date_str, "actions": actions}
         state["decisions"][for_date_str] = payload
         _save_state(state)
 
-        log.info("generated decisions for %s (batch=%s, %d actions)",
-                 for_date_str, batch_id, len(actions))
+        log.info(
+            "generated decisions for %s (batch=%s, %d actions)",
+            for_date_str,
+            batch_id,
+            len(actions),
+        )
         return payload, 200
 
 
@@ -150,11 +158,9 @@ def handle_trade_results_post(body: bytes) -> tuple[dict, int]:
             return {"status": "ok", "batch_id": batch_id, "note": "idempotent"}, 200
 
         # Write results file
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         results_file = TRADE_DIR / f"results_{for_date}_{ts}.json"
-        results_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        results_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
         # Mark processed
         state.setdefault("processed", []).append(batch_id)
@@ -167,6 +173,7 @@ def handle_trade_results_post(body: bytes) -> tuple[dict, int]:
 def handle_trade_results_get(query_str: str) -> tuple[dict, int]:
     """GET /api/trade/results?date=YYYY-MM-DD"""
     from urllib.parse import parse_qs
+
     q = parse_qs(query_str)
     for_date = q.get("date", [date.today().isoformat()])[0]
     results = sorted(TRADE_DIR.glob(f"results_{for_date}_*.json"), reverse=True)

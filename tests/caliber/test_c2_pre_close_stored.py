@@ -10,6 +10,7 @@
 3. lkl 导出样本（tests/oracle/fixtures/daily_bar_sample.json）里每根 bar 都带
    pre_close，且 ≥99% 等于前一交易日收盘（少数不等即除权日——正是不能靠 LAG 的原因）。
 """
+
 from __future__ import annotations
 
 import json

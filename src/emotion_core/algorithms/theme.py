@@ -71,21 +71,63 @@ def _cfg(name: str, default: Any) -> Any:
 
 
 # ── STYLE_ONLY 判据（lkl lkl/config.py 原值逐字；三重判据不用同一匹配方式）──
-THEME_STYLE_BLACKLIST: frozenset[str] = _cfg("THEME_STYLE_BLACKLIST", frozenset({
-    "全部A股", "新质生产力综合", "连板", "打板", "外资企业", "市场情绪",
-    "TMT", "小市值", "微盘股", "融资融券", "深股通", "沪股通", "次新股",
-    "举牌", "年报预增", "预盈预亏", "ST板块", "低价股", "破净股",
-    "超涨", "首板", "领涨龙头", "贷款回购", "合资企业", "养老金",
-    "昨日涨停", "昨日连板", "昨日触板", "涨停板", "昨日炸板",
-    "龙虎榜", "成交主力", "高振幅", "破净", "预减", "预增", "预盈",
-    "预亏", "股票质押", "连板反包", "反包", "趋势股",
-}))
-THEME_STYLE_PREFIXES: tuple[str, ...] = _cfg("THEME_STYLE_PREFIXES", (
-    "全A", "标普", "富时", "纳入", "MSCI", "上证", "深证",
-    "股权激励", "财报披露", "首板"))
-THEME_STYLE_CONTAINS: tuple[str, ...] = _cfg("THEME_STYLE_CONTAINS", (
-    "重仓", "标的", "综合", "点位贡献", "指数", "国资",
-    "微盘", "小盘", "大盘", "中盘", "等权"))  # R4：市值/指数族漏网
+THEME_STYLE_BLACKLIST: frozenset[str] = _cfg(
+    "THEME_STYLE_BLACKLIST",
+    frozenset(
+        {
+            "全部A股",
+            "新质生产力综合",
+            "连板",
+            "打板",
+            "外资企业",
+            "市场情绪",
+            "TMT",
+            "小市值",
+            "微盘股",
+            "融资融券",
+            "深股通",
+            "沪股通",
+            "次新股",
+            "举牌",
+            "年报预增",
+            "预盈预亏",
+            "ST板块",
+            "低价股",
+            "破净股",
+            "超涨",
+            "首板",
+            "领涨龙头",
+            "贷款回购",
+            "合资企业",
+            "养老金",
+            "昨日涨停",
+            "昨日连板",
+            "昨日触板",
+            "涨停板",
+            "昨日炸板",
+            "龙虎榜",
+            "成交主力",
+            "高振幅",
+            "破净",
+            "预减",
+            "预增",
+            "预盈",
+            "预亏",
+            "股票质押",
+            "连板反包",
+            "反包",
+            "趋势股",
+        }
+    ),
+)
+THEME_STYLE_PREFIXES: tuple[str, ...] = _cfg(
+    "THEME_STYLE_PREFIXES",
+    ("全A", "标普", "富时", "纳入", "MSCI", "上证", "深证", "股权激励", "财报披露", "首板"),
+)
+THEME_STYLE_CONTAINS: tuple[str, ...] = _cfg(
+    "THEME_STYLE_CONTAINS",
+    ("重仓", "标的", "综合", "点位贡献", "指数", "国资", "微盘", "小盘", "大盘", "中盘", "等权"),
+)  # R4：市值/指数族漏网
 
 # ── 属性桶扩展（emotion-core 自有，**加在 lkl 原值之上**；2026-10-14 用户拍板）──
 # 判据：名称描述「股票的身份 / 交易状态 / 财务状态 / 股本结构 / 指数名额」，
@@ -102,27 +144,58 @@ THEME_STYLE_CONTAINS: tuple[str, ...] = _cfg("THEME_STYLE_CONTAINS", (
 # 基准），本扩展只在 Python 层生效；若将来 Rust 也承担题材过滤，须同步移植本表。
 THEME_STYLE_BLACKLIST_ATTR: frozenset[str] = _cfg(
     "THEME_STYLE_BLACKLIST_ATTR",
-    frozenset({
-        # 参股 / 股东背景
-        "参股金融", "金融参股", "参股保险", "参股券商", "参股银行",
-        "外资背景", "高校背景", "民营背景", "国资背景",
-        # 财务 / 业绩属性
-        "业绩预升", "业绩预降", "业绩预增", "业绩预减", "业绩预告",
-        # 股本 / 事件属性
-        "含B股", "含H股", "含GDR", "含红筹", "本月解禁", "下月解禁", "解禁",
-        "送转潜力", "未股改", "股期概念",
-        # 交易状态 / 资质 / 指数名额
-        "准ST股", "摘帽概念", "三板精选", "专精特新",
-        "央企50", "科创50", "双创50", "中证500", "中证1000",
-    }))
+    frozenset(
+        {
+            # 参股 / 股东背景
+            "参股金融",
+            "金融参股",
+            "参股保险",
+            "参股券商",
+            "参股银行",
+            "外资背景",
+            "高校背景",
+            "民营背景",
+            "国资背景",
+            # 财务 / 业绩属性
+            "业绩预升",
+            "业绩预降",
+            "业绩预增",
+            "业绩预减",
+            "业绩预告",
+            # 股本 / 事件属性
+            "含B股",
+            "含H股",
+            "含GDR",
+            "含红筹",
+            "本月解禁",
+            "下月解禁",
+            "解禁",
+            "送转潜力",
+            "未股改",
+            "股期概念",
+            # 交易状态 / 资质 / 指数名额
+            "准ST股",
+            "摘帽概念",
+            "三板精选",
+            "专精特新",
+            "央企50",
+            "科创50",
+            "双创50",
+            "中证500",
+            "中证1000",
+        }
+    ),
+)
 
 
 def is_style(tag: str) -> bool:
     """STYLE_ONLY 噪声：lkl 三重判据（黑名单 / 全A* 前缀 / *重仓* 包含）+ 属性桶扩展。"""
-    return (tag in THEME_STYLE_BLACKLIST
-            or tag in THEME_STYLE_BLACKLIST_ATTR
-            or tag.startswith(THEME_STYLE_PREFIXES)
-            or any(s in tag for s in THEME_STYLE_CONTAINS))
+    return (
+        tag in THEME_STYLE_BLACKLIST
+        or tag in THEME_STYLE_BLACKLIST_ATTR
+        or tag.startswith(THEME_STYLE_PREFIXES)
+        or any(s in tag for s in THEME_STYLE_CONTAINS)
+    )
 
 
 def theme_filter(tags: list[str]) -> list[str]:
@@ -157,17 +230,18 @@ def _fetch_cont_days(pairs: Iterable[tuple[date, str]]) -> dict[tuple[date, str]
     if not pairs:
         return {}
     df = query_df(
-        "SELECT date, code, cont_days FROM ladder_day"
-        " WHERE date = ANY(%s) AND code = ANY(%s)",
-        (sorted({d for d, _ in pairs}), sorted({c for _, c in pairs})))
+        "SELECT date, code, cont_days FROM ladder_day WHERE date = ANY(%s) AND code = ANY(%s)",
+        (sorted({d for d, _ in pairs}), sorted({c for _, c in pairs})),
+    )
     got = {(r.date, str(r.code)): int(r.cont_days) for r in df.itertuples(index=False)}
     return {p: got[p] for p in pairs if p in got}
 
 
 def load_cont_days(trade_date: date, codes: Sequence[str]) -> dict[str, int]:
     """当日 ladder_day 的 {code: cont_days}（group_stats 的单日读入口，可被替换/注入）。"""
-    return {code: days for (_, code), days in
-            _fetch_cont_days((trade_date, c) for c in codes).items()}
+    return {
+        code: days for (_, code), days in _fetch_cont_days((trade_date, c) for c in codes).items()
+    }
 
 
 def group_stats_of(members: list[tuple[str, int]]) -> dict:
@@ -185,8 +259,7 @@ def group_stats_of(members: list[tuple[str, int]]) -> dict:
     mid = sum(1 for x in days if 3 <= x < h)
     low = sum(1 for x in days if x == 2)
     top = max(members, key=lambda m: m[1])[0]
-    comp = round(10 * min(h, 8) + 30 * (1 - gap_rate)
-                 + 20 * min(1.0, len(days) / 5), 1)
+    comp = round(10 * min(h, 8) + 30 * (1 - gap_rate) + 20 * min(1.0, len(days) / 5), 1)
     if h >= 4 and mid and low:
         status = "梯队完整"
     elif h >= 4 and not mid:
@@ -195,13 +268,21 @@ def group_stats_of(members: list[tuple[str, int]]) -> dict:
         status = "低位扩散"
     else:
         status = "一般"
-    return {"highest_board": h, "top_code": top, "mid_count": mid,
-            "low_count": low, "first_board_count": 0, "completeness": comp,
-            "status": status, "member_count": len(days)}
+    return {
+        "highest_board": h,
+        "top_code": top,
+        "mid_count": mid,
+        "low_count": low,
+        "first_board_count": 0,
+        "completeness": comp,
+        "status": status,
+        "member_count": len(days),
+    }
 
 
-def group_stats(codes: list[str], trade_date: date,
-                cont_days: Mapping[str, int] | None = None) -> dict:
+def group_stats(
+    codes: list[str], trade_date: date, cont_days: Mapping[str, int] | None = None
+) -> dict:
     """题材组统计：成员代码 + 交易日 → 梯队聚合（聚合本体见 group_stats_of）。
 
     lkl 收 [(code, cont_days)]（调用方已 JOIN）；本模块按 (trade_date, code) 读 ladder_day
@@ -234,7 +315,7 @@ def aggregate(theme_tags: list[dict]) -> dict[str, dict]:
     for row in theme_tags:
         code, td = row.get("code"), row.get("tag_date")
         if not code or td is None:
-            continue          # 无股票/无日期：无从 JOIN 梯队，丢行（不是记 0）
+            continue  # 无股票/无日期：无从 JOIN 梯队，丢行（不是记 0）
         cd = row.get("cont_days")
         for theme in _row_themes(row):
             if not is_style(theme):
@@ -273,7 +354,6 @@ def false_relation_pairs(rows: list[tuple[str, str, list[str]]]) -> list[tuple[s
     for i in range(len(rows)):
         for j in range(i + 1, len(rows)):
             (c1, n1, t1), (c2, n2, t2) = rows[i], rows[j]
-            if n1[:2] == n2[:2] and not (set(theme_filter(t1))
-                                         & set(theme_filter(t2))):
+            if n1[:2] == n2[:2] and not (set(theme_filter(t1)) & set(theme_filter(t2))):
                 out.append((f"{n1}({c1})", f"{n2}({c2})"))
     return out

@@ -4,6 +4,7 @@
 - 本文件是策略语义的唯一住所，改任何值必须记 ADR。
 - config_hash() 每次运行计算，写入 pipeline_state / signal / eval_result。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -23,13 +24,11 @@ class Config:
     # 2026-10-22 补 "003"（深市主板新号段）：库内 42 只、664 根涨停 bar，
     # 此前被整体漏在候选池外。改值会让 config_hash() 换代（新写入的
     # signal/pipeline_state 带新指纹，历史行保留旧值），历史口径需重跑。
-    BOARD_PREFIXES: tuple[str, ...] = (
-        "600", "601", "603", "605", "000", "001", "002", "003")
+    BOARD_PREFIXES: tuple[str, ...] = ("600", "601", "603", "605", "000", "001", "002", "003")
     LIMIT_RATIO: float = 0.10
-    LIMIT_PCT_BY_PREFIX: dict[str, int] = field(
-        default_factory=lambda: {"68": 120, "30": 120})
-    LIMIT_PCT_DEFAULT: int = 110       # round((1 + LIMIT_RATIO) * 100)
-    NEW_ISSUER_MIN_DAYS: int = 90   # 次新排除：首个 bar 距目标日不足 90 自然日
+    LIMIT_PCT_BY_PREFIX: dict[str, int] = field(default_factory=lambda: {"68": 120, "30": 120})
+    LIMIT_PCT_DEFAULT: int = 110  # round((1 + LIMIT_RATIO) * 100)
+    NEW_ISSUER_MIN_DAYS: int = 90  # 次新排除：首个 bar 距目标日不足 90 自然日
     # 次新豁免地板 = **数据层最早 bar 日期**（不变式：地板 ≥ daily_bar 的 min(date)）。
     # 语义：first_bar_date <= GREATEST(目标日-90d, 地板) 视作老股豁免。
     # 原值 date(2023,11,26) 是 lkl 的数据起点，被逐字搬到窗口不同的本库
@@ -44,9 +43,9 @@ class Config:
     BSE_EXCLUDED_PREFIXES: tuple[str, ...] = ("4", "8", "920", "bj")
 
     # ── 状态机（lkl emotion.py）──────────────
-    CLIMAX_ZT: int = 80              # 高潮：涨停家数 >
+    CLIMAX_ZT: int = 80  # 高潮：涨停家数 >
     CLIMAX_AMPLITUDE: float = 15.0  # 高潮：最高板振幅 ≥(%)
-    FERMENT_ZT_PERF: float = 1.5    # 发酵：昨涨停表现 ≥(%)
+    FERMENT_ZT_PERF: float = 1.5  # 发酵：昨涨停表现 ≥(%)
     ICE_ZT_MAX: int = 40  # 冰点：涨停家数 < 且最高板 ≤ 3
     BOMB_RATE_FALLBACK: float = 0.42  # 自适应炸板阈值 fallback
     BOMB_RATE_WINDOW: int = 30  # 前 30 交易日 median+σ
@@ -63,12 +62,12 @@ class Config:
     MIN_COVERAGE: float = 0.90  # 覆盖率硬门槛（asel A12）
 
     # ── 状态机额外阈值（lkl emotion.py）──────────────
-    EBB_ZT_PERF: float = -2.0              # 退潮：昨涨停表现 ≤ (%)
-    EBB_LD_MIN: int = 15                   # 退潮：跌停数绝对下限
-    EBB_LD_MULT: float = 2.0               # 退潮：跌停数 ≥ 昨日的 EBB_LD_MULT 倍
-    ICE_MAX_DAYS: int = 3                  # 冰点持续上限
-    DIVERGE_NEG_MIN: int = 3               # 高潮分歧降级：负反馈 ≥
-    DIVERGE_WINDOW: str = "NONE"           # 分歧降级窗口
+    EBB_ZT_PERF: float = -2.0  # 退潮：昨涨停表现 ≤ (%)
+    EBB_LD_MIN: int = 15  # 退潮：跌停数绝对下限
+    EBB_LD_MULT: float = 2.0  # 退潮：跌停数 ≥ 昨日的 EBB_LD_MULT 倍
+    ICE_MAX_DAYS: int = 3  # 冰点持续上限
+    DIVERGE_NEG_MIN: int = 3  # 高潮分歧降级：负反馈 ≥
+    DIVERGE_WINDOW: str = "NONE"  # 分歧降级窗口
 
     # ── 开关 ──────────────────────────────────
     SECONDARY_EXPORT_ENABLED: bool = False  # 次级推荐影子模式
@@ -84,7 +83,11 @@ class Config:
     STOCK_LLM_MAX_TOKENS: int = int(os.environ.get("EC_STOCK_LLM_MAX_TOKENS", "800"))
 
     # ── 策略观察台 ─────────────────────────────
-    STRATEGY_ENABLED: bool = os.environ.get("EC_STRATEGY_ENABLED", "").lower() in ("1", "true", "yes")
+    STRATEGY_ENABLED: bool = os.environ.get("EC_STRATEGY_ENABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     STRATEGY_PROFILE: str = os.environ.get("EC_STRATEGY_PROFILE", "agnes")
     STRATEGY_MAX_TOKENS: int = int(os.environ.get("EC_STRATEGY_MAX_TOKENS", "8192"))
     # 2026-10-09 用户拍板「上调配额」：50 只够 3.3 只票（50 / 15 个策略），
@@ -99,7 +102,9 @@ class Config:
     STRATEGY_MAX_UNIVERSE: int = int(os.environ.get("EC_STRATEGY_MAX_UNIVERSE", "80"))
     STRATEGY_HOT_N: int = int(os.environ.get("EC_STRATEGY_HOT_N", "20"))
     STRATEGY_VERSION: str = os.environ.get("EC_STRATEGY_VERSION", "emotion-core-dev")
-    STRATEGY_REPORTS_DIR: str = os.environ.get("EC_STRATEGY_REPORTS_DIR", "/home/ubuntu/DSH/longkonglong/reports")
+    STRATEGY_REPORTS_DIR: str = os.environ.get(
+        "EC_STRATEGY_REPORTS_DIR", "/home/ubuntu/DSH/longkonglong/reports"
+    )
 
 
 CONFIG = Config()

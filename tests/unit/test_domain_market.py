@@ -1,4 +1,5 @@
 """domain/market.py 单元测试：MarketStat / Phase / BuyWindow。"""
+
 from __future__ import annotations
 
 from datetime import date

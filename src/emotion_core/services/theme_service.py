@@ -6,6 +6,7 @@
 2026-10-14 起生效源是 `SinaConceptProvider`（新浪概念，免费，0 Wind 额度），
 激活方式见 `data/theme_source.py` 的模块文档（环境变量，不动 CONFIG/不动 systemd 单元）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,8 +19,17 @@ from emotion_core.utils.db import transaction
 log = logging.getLogger("emotion_core.theme_service")
 
 _TAG_COLS = ("date", "code", "primary_theme", "secondary_themes", "source")
-_SPOT_COLS = ("date", "node", "theme", "member_count", "pct_chg", "amount",
-              "leading_code", "leading_name", "source")
+_SPOT_COLS = (
+    "date",
+    "node",
+    "theme",
+    "member_count",
+    "pct_chg",
+    "amount",
+    "leading_code",
+    "leading_name",
+    "source",
+)
 
 
 def _fetch_spots(provider, trade_date: date) -> list[dict]:
@@ -34,8 +44,9 @@ def _fetch_spots(provider, trade_date: date) -> list[dict]:
     try:
         return fn(trade_date)
     except Exception as exc:  # noqa: BLE001 —— 附加产物，不阻断主链
-        log.warning("theme_spot %s：板块热点榜获取失败（题材标签照写）：%s",
-                    trade_date, str(exc)[:120])
+        log.warning(
+            "theme_spot %s：板块热点榜获取失败（题材标签照写）：%s", trade_date, str(exc)[:120]
+        )
         return []
 
 
@@ -48,8 +59,7 @@ def _clean_tag_row(row: dict) -> dict:
     """
     primary = row.get("primary_theme")
     secondary = list(row.get("secondary_themes") or [])
-    valid = theme.theme_filter(
-        [t for t in ([primary] if primary else []) + secondary if t])
+    valid = theme.theme_filter([t for t in ([primary] if primary else []) + secondary if t])
     out = dict(row)
     out["primary_theme"] = valid[0] if valid else None
     out["secondary_themes"] = valid[1:]
@@ -94,9 +104,16 @@ def run(trade_date: date) -> int:
             cur.executemany(
                 f"INSERT INTO theme_tag ({', '.join(_TAG_COLS)})"
                 f" VALUES ({', '.join(['%s'] * len(_TAG_COLS))})",
-                [(trade_date, r["code"], r.get("primary_theme"),
-                  list(r.get("secondary_themes") or []),
-                  r.get("source") or "unknown") for r in rows],
+                [
+                    (
+                        trade_date,
+                        r["code"],
+                        r.get("primary_theme"),
+                        list(r.get("secondary_themes") or []),
+                        r.get("source") or "unknown",
+                    )
+                    for r in rows
+                ],
             )
         for theme_name, stats in result.items():
             conn.execute(
@@ -104,10 +121,18 @@ def run(trade_date: date) -> int:
                 " member_count, completeness, status, mid_count, low_count,"
                 " first_board_count)"
                 " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (trade_date, theme_name, stats["highest_board"],
-                 stats["top_code"], stats["member_count"],
-                 stats["completeness"], stats["status"], stats["mid_count"],
-                 stats["low_count"], stats["first_board_count"]),
+                (
+                    trade_date,
+                    theme_name,
+                    stats["highest_board"],
+                    stats["top_code"],
+                    stats["member_count"],
+                    stats["completeness"],
+                    stats["status"],
+                    stats["mid_count"],
+                    stats["low_count"],
+                    stats["first_board_count"],
+                ),
             )
         if spots:
             conn.execute("DELETE FROM theme_spot WHERE date = %s", (trade_date,))
@@ -118,6 +143,11 @@ def run(trade_date: date) -> int:
                     [tuple(s[c] for c in _SPOT_COLS) for s in spots],
                 )
 
-    log.info("theme_service %s: %d 票标签 / %d 个题材组 / %d 个板块热点",
-             trade_date, len(tags), len(result), len(spots))
+    log.info(
+        "theme_service %s: %d 票标签 / %d 个题材组 / %d 个板块热点",
+        trade_date,
+        len(tags),
+        len(result),
+        len(spots),
+    )
     return len(result)

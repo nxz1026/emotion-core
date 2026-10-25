@@ -7,6 +7,7 @@ docs/04 §2.1 双源设计：
 
 增量策略：只拉最近 N 天 + ON CONFLICT DO UPDATE（幂等）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -60,8 +61,7 @@ def sync_daily(days: int = 5) -> int:
     return upsert_daily_bars(rows)
 
 
-def fetch_snapshot(trade_date: date, *,
-                   allow_data_date_mismatch: bool = False) -> list[tuple]:
+def fetch_snapshot(trade_date: date, *, allow_data_date_mismatch: bool = False) -> list[tuple]:
     """东财 clist 全市场快照 → daily_bar 行（**只许写快照自己的日期**）。
 
     2026-10-17 加日期闸门：快照自带 `f124`（源说自己是哪个交易日），与
@@ -83,12 +83,14 @@ def fetch_snapshot(trade_date: date, *,
         try:
             src_date = em_data_date()
         except Exception as exc:  # noqa: BLE001 —— 守卫不可用时不假装通过
-            raise DataError(f"快照无 f124 且日期守卫不可用（{exc}）："
-                            "无法确认快照属于哪一天，拒绝入库") from exc
+            raise DataError(
+                f"快照无 f124 且日期守卫不可用（{exc}）：无法确认快照属于哪一天，拒绝入库"
+            ) from exc
     if src_date != trade_date and not allow_data_date_mismatch:
         raise DataError(
             f"快照自带日期 {src_date} ≠ 请求写入日期 {trade_date}："
-            "拒绝把当前快照盖上别的日期（补数请核对目标交易日）")
+            "拒绝把当前快照盖上别的日期（补数请核对目标交易日）"
+        )
     raw = raw.rename(columns=_SPOT_MAP)
     # 过滤 bj*（北交所）
     raw = raw[~raw["code"].astype(str).str.startswith("bj")]
@@ -96,14 +98,20 @@ def fetch_snapshot(trade_date: date, *,
     # 转为 daily_bar 行
     rows = []
     for r in raw.itertuples():
-        rows.append((
-            str(r.code).zfill(6), r.date,
-            float(r.open), float(r.high), float(r.low), float(r.close),
-            float(r.pre_close) if pd.notna(r.pre_close) else None,
-            float(r.volume) if pd.notna(r.volume) else None,
-            float(r.amount) if pd.notna(r.amount) else None,
-            float(r.turnover_rate) if pd.notna(r.turnover_rate) else None,
-        ))
+        rows.append(
+            (
+                str(r.code).zfill(6),
+                r.date,
+                float(r.open),
+                float(r.high),
+                float(r.low),
+                float(r.close),
+                float(r.pre_close) if pd.notna(r.pre_close) else None,
+                float(r.volume) if pd.notna(r.volume) else None,
+                float(r.amount) if pd.notna(r.amount) else None,
+                float(r.turnover_rate) if pd.notna(r.turnover_rate) else None,
+            )
+        )
     return rows
 
 
@@ -123,8 +131,7 @@ def fallback_rows(codes: list[str], start: date, end: date) -> list[tuple]:
     return rows
 
 
-def upsert_daily_bars(rows: list[tuple], *, validate: bool = True,
-                      allow_gap: bool = False) -> int:
+def upsert_daily_bars(rows: list[tuple], *, validate: bool = True, allow_gap: bool = False) -> int:
     """写入 daily_bar（幂等 upsert）。返回写入行数。
 
     2026-10-17：写库前过一遍 `data.bar_guard` 自检（形状 / 顺延 / 整批自洽）。

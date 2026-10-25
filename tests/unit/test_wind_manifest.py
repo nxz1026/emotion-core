@@ -1,10 +1,9 @@
 """wind_manifest 配额台账测试。"""
+
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from emotion_core.services.wind_manifest import _hash_params, record_call
 

@@ -20,6 +20,7 @@ Python 侧的前缀全集改从 Emotion-CPT 取 ⇒
 展示层（`presentation/server.py`）的文案必须从 `utils/price.board_pct_milli` 现算，
 不得写死数字——这条单独断言（审核文档 §9 第 4 条）。
 """
+
 from __future__ import annotations
 
 import ast
@@ -28,6 +29,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "emotion_core"
 PRICE_MODULE = SRC / "utils" / "price.py"
+
 
 #: ★ 唯一实现的**真源**（Emotion-CPT 已安装 ⇒ 从它的包位置取，不写死路径）
 def _contract_price_module() -> Path:
@@ -38,6 +40,8 @@ def _contract_price_module() -> Path:
             "emotion_cpt 没装 ⇒ 无法核对唯一实现（pip install -e ../Emotion-CPT）"
         ) from exc
     return Path(m.__file__).resolve()
+
+
 RUST_INDICATORS = SRC / "core" / "src" / "indicators.rs"
 
 BANNED_FLOATS = {1.1, 1.2}
@@ -106,12 +110,11 @@ def test_no_second_limit_price_formula_in_ast():
     for path in _iter_py_files():
         offenders.extend(_numeric_mult_violations(path))
     assert not offenders, (
-        "涨停价只能由 utils/price.py 实现，以下位置出现第二套公式：\n"
-        + "\n".join(offenders))
+        "涨停价只能由 utils/price.py 实现，以下位置出现第二套公式：\n" + "\n".join(offenders)
+    )
 
 
-_RUST_MULT = re.compile(
-    r"\*\s*(" + "|".join(str(v) for v in sorted(BANNED_INTS)) + r")\b")
+_RUST_MULT = re.compile(r"\*\s*(" + "|".join(str(v) for v in sorted(BANNED_INTS)) + r")\b")
 
 
 def test_no_second_limit_price_formula_in_rust():
@@ -128,7 +131,8 @@ def test_no_second_limit_price_formula_in_rust():
                 offenders.append(f"{path}:{lineno} 整数板比乘数 {line.strip()}")
     assert not offenders, (
         "涨停价板块比例只能由 board_pct_milli 给出，以下位置出现硬编码乘数：\n"
-        + "\n".join(offenders))
+        + "\n".join(offenders)
+    )
 
 
 def _is_starts_with(func: ast.expr) -> bool:
@@ -138,8 +142,7 @@ def _is_starts_with(func: ast.expr) -> bool:
     过滤导致提取结果恒为空字典，下面的对等断言**空转通过**——门禁看起来在跑，
     实际什么都没比。）
     """
-    return (isinstance(func, ast.Attribute)
-            and func.attr.replace("_", "").lower() == "startswith")
+    return isinstance(func, ast.Attribute) and func.attr.replace("_", "").lower() == "startswith"
 
 
 def _python_board_prefixes() -> dict[int, list[str]]:
@@ -167,15 +170,18 @@ def _python_board_prefixes() -> dict[int, list[str]]:
         if isinstance(value, int) and not isinstance(value, bool):
             consts[node.target.id] = value
 
-    fn = next(n for n in tree.body
-              if isinstance(n, ast.FunctionDef) and n.name == "board_pct_milli")
+    fn = next(
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "board_pct_milli"
+    )
     out: dict[int, list[str]] = {}
     for node in fn.body:
         if not isinstance(node, ast.If):
             continue
         ret = next((s for s in node.body if isinstance(s, ast.Return)), None)
-        call = next((s for s in ast.walk(node.test)
-                     if isinstance(s, ast.Call) and _is_starts_with(s.func)), None)
+        call = next(
+            (s for s in ast.walk(node.test) if isinstance(s, ast.Call) and _is_starts_with(s.func)),
+            None,
+        )
         if ret is None or call is None:
             continue
         if isinstance(ret.value, ast.Constant):
@@ -189,8 +195,8 @@ def _python_board_prefixes() -> dict[int, list[str]]:
         prefix = call.args[0]
         items = prefix.elts if isinstance(prefix, ast.Tuple) else [prefix]
         out.setdefault(value, []).extend(
-            i.value for i in items
-            if isinstance(i, ast.Constant) and isinstance(i.value, str))
+            i.value for i in items if isinstance(i, ast.Constant) and isinstance(i.value, str)
+        )
     return out
 
 
@@ -263,8 +269,8 @@ def test_limit_price_functions_defined_once():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and (
-                    node.name.startswith("limit_up_price")
-                    or node.name.startswith("limit_down_price")):
+                node.name.startswith("limit_up_price") or node.name.startswith("limit_down_price")
+            ):
                 defs.append(f"{path}:{node.lineno} {node.name}")
     assert not defs, (
         "涨停/跌停价的唯一定义处是 Emotion-CPT 的 emotion_cpt.structure.price，"
@@ -284,6 +290,7 @@ def test_limit_price_functions_defined_once():
 def test_presentation_formula_is_derived_not_hardcoded():
     server = (SRC / "presentation" / "server.py").read_text(encoding="utf-8")
     assert "board_pct_milli" in server, (
-        "展示层涨停价文案必须由价口径现算（现转发到 Emotion-CPT），不得写死 110")
+        "展示层涨停价文案必须由价口径现算（现转发到 Emotion-CPT），不得写死 110"
+    )
     assert "pre_close_cents * 110" not in server
     assert '"涨停价": "(pre_close_cents * 110 + 50) // 1000"' not in server

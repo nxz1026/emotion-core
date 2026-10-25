@@ -1,4 +1,5 @@
 """ladder_service 胶水层测试。"""
+
 from __future__ import annotations
 
 from datetime import date

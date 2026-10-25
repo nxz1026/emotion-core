@@ -6,6 +6,7 @@ _verdict 优先级、_ser 的 None→null、persist jsonb 载荷、以及 ladder
 promotion_strength 两个只读汇总视图。真实库差分对账（vs lkl.services.dragon_env）
 见模块 docstring。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -45,12 +46,12 @@ class FakeQuery:
         if "max(CASE WHEN is_exchange THEN cont_days END)" in sql:
             # 真 SQL 是 ORDER BY date DESC LIMIT n，_series 内部再 reversed()；
             # 替身照此契约取「最近 n 日、倒序」返回，测试里 self.series 按时间升序给定。
-            newest_first = list(reversed(self.series))[:int(params[-1])]
+            newest_first = list(reversed(self.series))[: int(params[-1])]
             return pd.DataFrame({"h": newest_first})
         if "member_count >= %s" in sql:
             return pd.DataFrame(
-                self.g2_ok, columns=["theme", "member_count",
-                                     "first_board_count", "highest_board"])
+                self.g2_ok, columns=["theme", "member_count", "first_board_count", "highest_board"]
+            )
         if "SELECT theme, member_count FROM theme_group" in sql:
             return pd.DataFrame(self.g2_top, columns=["theme", "member_count"])
         if "SELECT fail_perf FROM promotion_day" in sql:
@@ -66,12 +67,22 @@ class FakeQuery:
             p, c = self.b3
             return pd.DataFrame({"p": [p], "c": [c]})
         if "SELECT code, cont_days, is_exchange, is_sole_top FROM ladder_day" in sql:
-            return pd.DataFrame(self.ladder_rows,
-                                columns=["code", "cont_days", "is_exchange", "is_sole_top"])
+            return pd.DataFrame(
+                self.ladder_rows, columns=["code", "cont_days", "is_exchange", "is_sole_top"]
+            )
         if "FROM promotion_day WHERE date = %s ORDER BY layer" in sql:
-            return pd.DataFrame(self.promo_rows, columns=[
-                "layer", "promote_nominal", "promote_exchange",
-                "rate_nominal", "rate_exchange", "divergence", "fail_perf"])
+            return pd.DataFrame(
+                self.promo_rows,
+                columns=[
+                    "layer",
+                    "promote_nominal",
+                    "promote_exchange",
+                    "rate_nominal",
+                    "rate_exchange",
+                    "divergence",
+                    "fail_perf",
+                ],
+            )
         if "SELECT date FROM market_stat WHERE date BETWEEN" in sql:
             return pd.DataFrame({"date": list(self.days)})
         raise AssertionError(f"未预期的 SQL: {sql}")
@@ -144,8 +155,9 @@ def test_g2_unknown_when_theme_group_empty(fake):
 # ── G3 断板负反馈温和 ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("perfs, expected", [
-    ([-3.0, -2.0], True), ([-5.0, -4.0], False), ([-3.0, -3.0], False)])
+@pytest.mark.parametrize(
+    "perfs, expected", [([-3.0, -2.0], True), ([-5.0, -4.0], False), ([-3.0, -3.0], False)]
+)
 def test_g3_threshold_strict_greater(fake, perfs, expected):
     """严格大于阈值：等值不算温和（lkl 原式 avg > DRAGON_G3_MIN_PERF）。"""
     fake.fail_perf = perfs
@@ -246,7 +258,9 @@ def test_b3_live_reads_no_future(fake):
 def test_b3_replay_extends_bound_and_flags_mode(fake):
     fake.b3 = (-8.5, 4)
     ok, note = dragon_env.b3_next_day_dump(D, "replay")
-    assert ok is True and note == "近4次胜出次日均涨幅 -8.5%（复盘态：读到次日收盘，当日实盘不可见）"
+    assert (
+        ok is True and note == "近4次胜出次日均涨幅 -8.5%（复盘态：读到次日收盘，当日实盘不可见）"
+    )
     assert fake.params[-1][2] == D + timedelta(days=3)
 
 
@@ -283,8 +297,12 @@ def test_verdict_neutral_when_good_falsified():
 
 def test_verdict_favorable_when_core_true_and_enhancements_unknown():
     """增强条件 UNKNOWN 不再封死 FAVORABLE（theme_group 08-31 才上线）。"""
-    goods = [_cond("G1 可交易高度扩张", True), _cond("G2 主线梯队完整", None),
-             _cond("G3 断板负反馈温和", None), _cond("G4 胜者上方有空间", True)]
+    goods = [
+        _cond("G1 可交易高度扩张", True),
+        _cond("G2 主线梯队完整", None),
+        _cond("G3 断板负反馈温和", None),
+        _cond("G4 胜者上方有空间", True),
+    ]
     bads = [_cond("B1 加速事件", False), _cond("B4 无板块支持", None)]
     assert dragon_env._verdict(goods, bads) == "FAVORABLE"
 
@@ -296,28 +314,36 @@ def test_verdict_neutral_when_all_unknown():
 
 def test_rate_uses_passed_accel_and_locks_condition_order(fake, monkeypatch):
     monkeypatch.setattr(accelerate, "detect", lambda d: pytest.fail("不应重复查询加速事件"))
-    fake.series = [6, 2, 2, 2, 2, 2, 2, 4, 4, 5]   # G1: 4→4→5 扩张；G4: H=5 <= 6-1
+    fake.series = [6, 2, 2, 2, 2, 2, 2, 4, 4, 5]  # G1: 4→4→5 扩张；G4: H=5 <= 6-1
     fake.g2_ok = [("机器人", 5, 0, 4)]
     fake.fail_perf = [-2.0, -2.5]
-    monkeypatch.setattr(dragon_env, "_tradable_theme_members",
-                        lambda d: [("600001", "机器人", 5)])
+    monkeypatch.setattr(dragon_env, "_tradable_theme_members", lambda d: [("600001", "机器人", 5)])
     fake.cross = (1, 1, 1)
     fake.b3 = (None, 0)
 
     r = dragon_env.rate(D, accel=(False, "无加速事件", {"a3": False}))
     assert r["rating"] == "FAVORABLE"
-    assert [n for n, _, _ in r["goods"]] == ["G1 可交易高度扩张", "G2 主线梯队完整",
-                                             "G3 断板负反馈温和", "G4 胜者上方有空间"]
-    assert [n for n, _, _ in r["bads"]] == ["B1 加速事件", "B2 高度靠一字制造",
-                                            "B3 胜出次日核按钮", "B4 无板块支持",
-                                            "B5 高标跨题材"]
+    assert [n for n, _, _ in r["goods"]] == [
+        "G1 可交易高度扩张",
+        "G2 主线梯队完整",
+        "G3 断板负反馈温和",
+        "G4 胜者上方有空间",
+    ]
+    assert [n for n, _, _ in r["bads"]] == [
+        "B1 加速事件",
+        "B2 高度靠一字制造",
+        "B3 胜出次日核按钮",
+        "B4 无板块支持",
+        "B5 高标跨题材",
+    ]
     assert {n: s for n, s, _ in r["bads"]}["B4 无板块支持"] is False
 
 
 def test_rate_calls_accelerate_when_accel_absent(fake, monkeypatch):
     calls: list[date] = []
-    monkeypatch.setattr(accelerate, "detect",
-                        lambda d: (calls.append(d), (True, "命中", {"a3": False}))[1])
+    monkeypatch.setattr(
+        accelerate, "detect", lambda d: (calls.append(d), (True, "命中", {"a3": False}))[1]
+    )
     fake.series = []
     fake.divergence = 0.5
     r = dragon_env.rate(D)
@@ -329,7 +355,8 @@ def test_rate_calls_accelerate_when_accel_absent(fake, monkeypatch):
 def test_ser_none_status_serializes_null():
     assert dragon_env._ser([("G1", None, "证据不足"), ("B1", False, "无")]) == [
         {"cond": "G1", "ok": None, "note": "证据不足"},
-        {"cond": "B1", "ok": False, "note": "无"}]
+        {"cond": "B1", "ok": False, "note": "无"},
+    ]
 
 
 def test_persist_writes_rating_and_condition_payload(monkeypatch):
@@ -339,10 +366,15 @@ def test_persist_writes_rating_and_condition_payload(monkeypatch):
         captured.update(date=d, rating=rating, reasons=reasons, risks=risks)
         return 1
 
-    monkeypatch.setattr(dragon_env, "rate", lambda d, a, m: {
-        "rating": "NEUTRAL",
-        "goods": [("G1 可交易高度扩张", None, "H 序列仅 2 日")],
-        "bads": [("B1 加速事件", False, "无加速事件")]})
+    monkeypatch.setattr(
+        dragon_env,
+        "rate",
+        lambda d, a, m: {
+            "rating": "NEUTRAL",
+            "goods": [("G1 可交易高度扩张", None, "H 序列仅 2 日")],
+            "bads": [("B1 加速事件", False, "无加速事件")],
+        },
+    )
 
     assert dragon_env.persist(D, persist_fn=fake_update) == 1
     assert captured["rating"] == "NEUTRAL"
@@ -378,7 +410,7 @@ def test_run_range_requires_persist_fn(fake):
     """注入是必填的：漏传必须当场 TypeError，而不是悄悄不落库。"""
     fake.days = [date(2026, 9, 23)]
     with pytest.raises(TypeError):
-        dragon_env.run_range(date(2026, 9, 1), D)         # type: ignore[call-arg]
+        dragon_env.run_range(date(2026, 9, 1), D)  # type: ignore[call-arg]
 
 
 def test_run_range_empty_interval_is_zero(fake):
@@ -390,14 +422,18 @@ def test_run_range_empty_interval_is_zero(fake):
 
 
 def test_ladder_health_aggregates_height_groups_and_sole_top(fake):
-    fake.ladder_rows = [("601811", 4, True, True), ("001234", 3, False, False),
-                        ("002614", 3, True, False), ("000850", 2, False, False),
-                        ("002119", 2, True, False)]
+    fake.ladder_rows = [
+        ("601811", 4, True, True),
+        ("001234", 3, False, False),
+        ("002614", 3, True, False),
+        ("000850", 2, False, False),
+        ("002119", 2, True, False),
+    ]
     h = dragon_env.ladder_health(D)
     assert h["rows"] == 5
     assert h["height_nominal"] == 4 and h["height_exchange"] == 4
     assert h["groups"] == {4: 1, 3: 2, 2: 2}
-    assert h["gaps"] == []                      # 4/3/2 层都有换手成员
+    assert h["gaps"] == []  # 4/3/2 层都有换手成员
     assert h["sole_top"] == "601811" and h["top_group"] == ["601811"]
 
 
@@ -418,13 +454,23 @@ def test_ladder_health_without_exchange_members(fake):
 
 def test_ladder_health_empty_day_is_not_legal_zero(fake):
     h = dragon_env.ladder_health(D)
-    assert h == {"date": D, "rows": 0, "height_nominal": None, "height_exchange": None,
-                 "groups": {}, "gaps": [], "sole_top": None, "top_group": []}
+    assert h == {
+        "date": D,
+        "rows": 0,
+        "height_nominal": None,
+        "height_exchange": None,
+        "groups": {},
+        "gaps": [],
+        "sole_top": None,
+        "top_group": [],
+    }
 
 
-PROMO = [("1->2", 35, 9, 0.2571, 0.2286, 0.0285, -2.1969),
-         ("2->3", 7, 3, 0.4286, 0.1429, 0.2857, -8.5351),
-         ("3->4", 2, 1, None, None, None, None)]
+PROMO = [
+    ("1->2", 35, 9, 0.2571, 0.2286, 0.0285, -2.1969),
+    ("2->3", 7, 3, 0.4286, 0.1429, 0.2857, -8.5351),
+    ("3->4", 2, 1, None, None, None, None),
+]
 
 
 def test_promotion_strength_deep_layer_and_none_rates(fake):
@@ -432,7 +478,7 @@ def test_promotion_strength_deep_layer_and_none_rates(fake):
     s = dragon_env.promotion_strength(D)
     assert [r["layer"] for r in s["layers"]] == ["1->2", "2->3", "3->4"]
     assert s["layers"][2]["rate_nominal"] is None and s["layers"][2]["promote_exchange"] == 1
-    assert s["deep_layer"] == "2->3"           # 3->4 晋级率无数据（分母不足），不算「接得上」
+    assert s["deep_layer"] == "2->3"  # 3->4 晋级率无数据（分母不足），不算「接得上」
     assert s["deep_rate_exchange"] == pytest.approx(0.1429)
     assert s["deep_delta_exchange"] is None
 
@@ -440,15 +486,21 @@ def test_promotion_strength_deep_layer_and_none_rates(fake):
 def test_promotion_strength_delta_from_prior_in_memory(fake):
     fake.promo_rows = PROMO
     s = dragon_env.promotion_strength(
-        D, prior=[{"layer": "2->3", "rate_exchange": 0.10},
-                  {"layer": "3->4", "rate_exchange": None}])
+        D,
+        prior=[{"layer": "2->3", "rate_exchange": 0.10}, {"layer": "3->4", "rate_exchange": None}],
+    )
     assert s["deep_delta_exchange"] == pytest.approx(0.0429)
-    assert s["layers"][0]["delta_exchange"] is None      # prior 缺该层 → 不补零
-    assert s["layers"][2]["delta_exchange"] is None      # 当层无值
+    assert s["layers"][0]["delta_exchange"] is None  # prior 缺该层 → 不补零
+    assert s["layers"][2]["delta_exchange"] is None  # 当层无值
 
 
 def test_promotion_strength_empty_day(fake):
     s = dragon_env.promotion_strength(D)
-    assert s == {"date": D, "layers": [], "deep_layer": None,
-                 "deep_rate_nominal": None, "deep_rate_exchange": None,
-                 "deep_delta_exchange": None}
+    assert s == {
+        "date": D,
+        "layers": [],
+        "deep_layer": None,
+        "deep_rate_nominal": None,
+        "deep_rate_exchange": None,
+        "deep_delta_exchange": None,
+    }

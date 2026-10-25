@@ -94,15 +94,11 @@ def summarize(df: pd.DataFrame, window: tuple[date, date]) -> dict[str, Any]:
     slices: dict[str, dict[str, Any]] = {}
     if "phase" in df.columns:
         for phase, sub in df.groupby(df["phase"].fillna("—")):
-            slices[f"phase:{phase}"] = metrics.stats(
-                metrics.per_signal(sub.to_dict("records"))
-            )
+            slices[f"phase:{phase}"] = metrics.stats(metrics.per_signal(sub.to_dict("records")))
     if "d0" in df.columns and len(df):
         years = pd.to_datetime(df["d0"]).dt.year
         for year, sub in df.groupby(years):
-            slices[f"year:{year}"] = metrics.stats(
-                metrics.per_signal(sub.to_dict("records"))
-            )
+            slices[f"year:{year}"] = metrics.stats(metrics.per_signal(sub.to_dict("records")))
     if "cont_days" in df.columns:
         for days, sub in df.groupby(df["cont_days"].fillna(-1)):
             key = f"cont:{int(days) if days >= 0 else '—'}"
@@ -123,8 +119,14 @@ def summarize(df: pd.DataFrame, window: tuple[date, date]) -> dict[str, Any]:
     }
 
 
-def run(start: date, end: date, *, persist: bool = False,
-        action: str = "BUY", variant_id: str = BASELINE_ID) -> dict[str, Any]:
+def run(
+    start: date,
+    end: date,
+    *,
+    persist: bool = False,
+    action: str = "BUY",
+    variant_id: str = BASELINE_ID,
+) -> dict[str, Any]:
     pan = panel.load()
     sigs = labdb.query_df(_SIG_SQL, (start, end, action))
     log.info("信号 %d 条（%s, %s~%s）", len(sigs), action, start, end)
@@ -135,16 +137,32 @@ def run(start: date, end: date, *, persist: bool = False,
         conn = labdb.connect_lab()
         try:
             labdb.execute(
-                conn, _INSERT_VARIANT,
-                (variant_id, json.dumps({"source": "mainline", "action": action}),
-                 "active", "主线现行规则（P1 对照基线）"),
+                conn,
+                _INSERT_VARIANT,
+                (
+                    variant_id,
+                    json.dumps({"source": "mainline", "action": action}),
+                    "active",
+                    "主线现行规则（P1 对照基线）",
+                ),
             )
             labdb.execute(
-                conn, _INSERT_SCORE,
+                conn,
+                _INSERT_SCORE,
                 (
-                    variant_id, out["window_start"], out["window_end"], out["n"],
-                    out["fill_rate"], out["expectancy"], out["median"], out["win_rate"],
-                    out["lcb"], out["worst"], out["sub_worst"], 1, "full",
+                    variant_id,
+                    out["window_start"],
+                    out["window_end"],
+                    out["n"],
+                    out["fill_rate"],
+                    out["expectancy"],
+                    out["median"],
+                    out["win_rate"],
+                    out["lcb"],
+                    out["worst"],
+                    out["sub_worst"],
+                    1,
+                    "full",
                     json.dumps(out["detail"], ensure_ascii=False, default=str),
                 ),
             )
@@ -164,8 +182,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     out = run(
-        date.fromisoformat(args.start), date.fromisoformat(args.end),
-        persist=args.persist, action=args.action,
+        date.fromisoformat(args.start),
+        date.fromisoformat(args.end),
+        persist=args.persist,
+        action=args.action,
     )
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2, default=str))

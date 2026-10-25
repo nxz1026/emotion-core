@@ -2,6 +2,7 @@
 
 职责：调 algorithms.promotion.promotion_matrix → 写 promotion_day。
 """
+
 from __future__ import annotations
 
 import logging

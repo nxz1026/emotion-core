@@ -1,4 +1,5 @@
 """domain/position.py 单元测试：Position 持仓数据类。"""
+
 from __future__ import annotations
 
 from datetime import date

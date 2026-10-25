@@ -14,6 +14,7 @@
 - 并发：线程池（TDX 连接是线程内长连接，每线程独立）
 - 容错：单股失败记日志继续；连接全挂则快速失败并记录
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,9 +31,9 @@ from emotion_core.utils.db import query_df
 log = logging.getLogger("emotion_core.data.backfill_tdx")
 
 START = date(2024, 1, 1)
-END = date(2026, 9, 26)          # 2026-09-27 已有新浪数据，不覆盖
-UNTIL = date(2026, 9, 27)        # _tdx_all_bars 的 until（见模块 docstring）
-BATCH_ROWS = 50000               # 累计多少行触发一次 upsert
+END = date(2026, 9, 26)  # 2026-09-27 已有新浪数据，不覆盖
+UNTIL = date(2026, 9, 27)  # _tdx_all_bars 的 until（见模块 docstring）
+BATCH_ROWS = 50000  # 累计多少行触发一次 upsert
 
 
 def _all_codes() -> list[str]:
@@ -68,14 +69,20 @@ def fetch_code(code: str) -> list[tuple]:
         return []
     rows = []
     for r in raw.itertuples():
-        rows.append((
-            code, r.date,
-            float(r.open), float(r.high), float(r.low), float(r.close),
-            float(r.pre_close) if pd.notna(r.pre_close) else None,
-            float(r.volume) if pd.notna(r.volume) else None,
-            float(r.amount) if pd.notna(r.amount) else None,
-            None,
-        ))
+        rows.append(
+            (
+                code,
+                r.date,
+                float(r.open),
+                float(r.high),
+                float(r.low),
+                float(r.close),
+                float(r.pre_close) if pd.notna(r.pre_close) else None,
+                float(r.volume) if pd.notna(r.volume) else None,
+                float(r.amount) if pd.notna(r.amount) else None,
+                None,
+            )
+        )
     return rows
 
 
@@ -92,8 +99,10 @@ def main() -> int:
         _tdx()
         probe = _tdx_all_bars(1, "600519", UNTIL)
         if not probe:
-            log.error("TDX 连接成功但无数据（僵尸服务器：get_security_bars 空响应），"
-                      "回填中止。探针 600519 返回 0 根")
+            log.error(
+                "TDX 连接成功但无数据（僵尸服务器：get_security_bars 空响应），"
+                "回填中止。探针 600519 返回 0 根"
+            )
             return 2
         log.info("TDX 探针 600519：%d 根（最新 %s）", len(probe), probe[0]["datetime"])
     except Exception as exc:

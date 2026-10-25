@@ -41,8 +41,13 @@ def stats(rets: Sequence[float | None]) -> dict[str, Any]:
     n = len(vals)
     if n == 0:
         return {
-            "n": 0, "mean": None, "median": None, "win_rate": None,
-            "lcb": None, "worst": None, "reliable": False,
+            "n": 0,
+            "mean": None,
+            "median": None,
+            "win_rate": None,
+            "lcb": None,
+            "worst": None,
+            "reliable": False,
         }
     mean = sum(vals) / n
     sd = math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1)) if n > 1 else 0.0
@@ -80,8 +85,7 @@ def caliber_b_ret(
         {entry_px, exit_px, ret_pct, filled, rolled}；未成交 → ret_pct=0.0；
         成交但还不知道卖出价（T+2 尚未发生）→ 全部 None（右截断，不猜）。
     """
-    empty = {"entry_px": None, "exit_px": None, "ret_pct": None,
-             "filled": None, "rolled": None}
+    empty = {"entry_px": None, "exit_px": None, "ret_pct": None, "filled": None, "rolled": None}
     if not base_close or base_close <= 0 or not t1_high:
         return empty
     # 涨停基数是 **T 日收盘**（T+1 的涨停价 = T 收盘 × 板比），不是 T−1 收盘
@@ -90,8 +94,13 @@ def caliber_b_ret(
     # 买限价挂在 T 日收盘之上：只有当日**最高价**够到才成交（不是最低价）
     filled = t1_high >= limit - 1e-9 and (t1_volume or 0) > 0
     if not filled:
-        return {"entry_px": limit, "exit_px": None, "ret_pct": 0.0,
-                "filled": False, "rolled": False}
+        return {
+            "entry_px": limit,
+            "exit_px": None,
+            "ret_pct": 0.0,
+            "filled": False,
+            "rolled": False,
+        }
 
     if not t2_open or t2_open <= 0:
         return {**empty, "filled": True}
@@ -130,9 +139,7 @@ def per_signal(
 def worst_slice(slices: dict[str, dict[str, Any]]) -> float | None:
     """各子样本均值里最差的那个（稳定性指标）。忽略 n<30 的子样本。"""
     vals = [
-        v["mean"]
-        for v in slices.values()
-        if v.get("mean") is not None and (v.get("n") or 0) >= 30
+        v["mean"] for v in slices.values() if v.get("mean") is not None and (v.get("n") or 0) >= 30
     ]
     return round(min(vals), 3) if vals else None
 

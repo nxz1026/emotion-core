@@ -49,8 +49,8 @@ class LabRules:
     ice_zt_max: int = CONFIG.ICE_ZT_MAX
 
     # —— entry 门槛 ——
-    min_leader_days: int = CONFIG.MIN_LEADER_DAYS          # c4 + 唯一高标选择
-    diverge_min_turnover: float = CONFIG.EXCHANGE_TURNOVER_MIN   # c5 换手补偿
+    min_leader_days: int = CONFIG.MIN_LEADER_DAYS  # c4 + 唯一高标选择
+    diverge_min_turnover: float = CONFIG.EXCHANGE_TURNOVER_MIN  # c5 换手补偿
 
     # —— 档位权重倍率（乘在 position_tier 的基准权重上，0.0 = 该档不参与）——
     tier_mult_strict: float = 1.0
@@ -62,8 +62,9 @@ class LabRules:
     def state_rules(self) -> state.StateRules:
         """投影成状态机参数对象（同名字段一一对应）。"""
         names = {f.name for f in fields(state.StateRules)}
-        return state.StateRules(**{f.name: getattr(self, f.name)
-                                   for f in fields(self) if f.name in names})
+        return state.StateRules(
+            **{f.name: getattr(self, f.name) for f in fields(self) if f.name in names}
+        )
 
     def is_open(self, phase: str, diverge: bool, tier: str) -> bool:
         """该 (相位, 分歧降级, 身份档) 是否进观察名单（= 主线 weight × 变体倍率 > 0）。"""
@@ -73,7 +74,7 @@ class LabRules:
     def as_dict(self) -> dict[str, Any]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
-    def replace(self, **kw: Any) -> "LabRules":
+    def replace(self, **kw: Any) -> LabRules:
         return replace(self, **kw)
 
     def key(self) -> tuple[tuple[str, Any], ...]:

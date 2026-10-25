@@ -57,11 +57,10 @@ def _derived(d: date, codes: Iterable[str]) -> dict[str, dict[str, Any]]:
         return {}
     with connect_ro() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT code, is_limit_up, is_bomb FROM derived_bar "
-            "WHERE date = %s AND code = ANY(%s)",
-            (d, codes))
-        return {r[0]: {"is_limit_up": bool(r[1]), "is_bomb": bool(r[2])}
-                for r in cur.fetchall()}
+            "SELECT code, is_limit_up, is_bomb FROM derived_bar WHERE date = %s AND code = ANY(%s)",
+            (d, codes),
+        )
+        return {r[0]: {"is_limit_up": bool(r[1]), "is_bomb": bool(r[2])} for r in cur.fetchall()}
 
 
 def _open_px(d: date, code: str) -> float | None:
@@ -75,9 +74,12 @@ def _open_px(d: date, code: str) -> float | None:
     return px if px > 0 else None
 
 
-def settle_one(trig: dict[str, Any], derived: dict[str, Any] | None,
-               open_t1: float | None, open_t2: float | None
-               ) -> dict[str, Any] | None:
+def settle_one(
+    trig: dict[str, Any],
+    derived: dict[str, Any] | None,
+    open_t1: float | None,
+    open_t2: float | None,
+) -> dict[str, Any] | None:
     """结算单条触发（纯函数，便于单测）。
 
     Args:
@@ -94,21 +96,24 @@ def settle_one(trig: dict[str, Any], derived: dict[str, Any] | None,
     if entry is None or float(entry) <= 0:
         return None
     if derived is None:
-        return None                     # 判据行缺数：封没封住不知道，不结算
+        return None  # 判据行缺数：封没封住不知道，不结算
 
     if open_t1 is not None:
         exit_px, rolled = float(open_t1), False
     elif open_t2 is not None:
         exit_px, rolled = float(open_t2), True
     else:
-        return None                     # T+1 封死、T+2 也没有 → 留 NULL 等下轮
+        return None  # T+1 封死、T+2 也没有 → 留 NULL 等下轮
 
     ret = (exit_px / float(entry) - 1.0) * 100.0 - FEE_PCT
     return {
-        "date": trig["date"], "code": code,
-        "broke": derived["is_bomb"], "broke_ts": None,
+        "date": trig["date"],
+        "code": code,
+        "broke": derived["is_bomb"],
+        "broke_ts": None,
         "closed_sealed": derived["is_limit_up"],
-        "exit_px": round(exit_px, 2), "rolled": rolled,
+        "exit_px": round(exit_px, 2),
+        "rolled": rolled,
         "ret_pct": round(ret, 3),
     }
 
@@ -138,11 +143,20 @@ def settle(d: date, *, dry_run: bool = False) -> dict[str, Any]:
 
     if rows and not dry_run:
         loader.save_settlements(rows)
-    log.info("settle %s：触发 %d 条，结算 %d 条，待定 %d 条",
-             d, len(triggers), len(rows), len(triggers) - len(rows))
-    return {"date": d, "triggers": len(triggers), "settled": len(rows),
-            "pending": len(triggers) - len(rows), "rows": rows}
-
+    log.info(
+        "settle %s：触发 %d 条，结算 %d 条，待定 %d 条",
+        d,
+        len(triggers),
+        len(rows),
+        len(triggers) - len(rows),
+    )
+    return {
+        "date": d,
+        "triggers": len(triggers),
+        "settled": len(rows),
+        "pending": len(triggers) - len(rows),
+        "rows": rows,
+    }
 
 
 def settle_pending(*, as_of: date | None = None, dry_run: bool = False) -> list[dict[str, Any]]:
@@ -158,6 +172,7 @@ def settle_pending(*, as_of: date | None = None, dry_run: bool = False) -> list[
     for d in loader.pending_trigger_dates(today):
         out.append(settle(d, dry_run=dry_run))
     return out
+
 
 #: 北京时区（CPT 的 `at` 是 UTC，交易日/时刻都要先换算再判）
 _BJ = ZoneInfo("Asia/Shanghai")
@@ -209,7 +224,8 @@ def prev_days_of(d: date, codes: Iterable[str]) -> dict[str, int | None]:
     with connect_ro() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT code, cont_days FROM derived_bar WHERE date = %s AND code = ANY(%s)",
-            (prev, codes))
+            (prev, codes),
+        )
         return {r[0]: (int(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
 
 
@@ -224,8 +240,11 @@ def _names(codes: Iterable[str]) -> dict[str, str]:
 
 
 def _hits(
-    records: dict[str, dict[str, Any]], *, now: time,
-    prev_days: dict[str, int | None], names: dict[str, str] | None,
+    records: dict[str, dict[str, Any]],
+    *,
+    now: time,
+    prev_days: dict[str, int | None],
+    names: dict[str, str] | None,
 ) -> dict[str, dict[str, Any]]:
     """这一轮「封住首板」的票：`{code: quote}`（quote 已补 code/name）。"""
     names = names or {}
@@ -291,20 +310,25 @@ def scan_round(
         entry = quote.get("limit_price")
         if entry is None:
             prev_close = quote.get("prev_close")
-            entry = intraday.limit_price(
-                code, float(prev_close), name=quote.get("name")) if prev_close else None
+            entry = (
+                intraday.limit_price(code, float(prev_close), name=quote.get("name"))
+                if prev_close
+                else None
+            )
         if entry is None:
             continue
-        rows.append({
-            "date": d,
-            "code": code,
-            "name": name,
-            "first_seal_ts": now.replace(microsecond=0),
-            "trigger_price": round(float(entry), 2),
-            "seal_bid1_vol": int(round(float(quote["bid1_vol"]))),
-            "prev_days": 0,
-            "entry_px": round(float(entry), 2),
-        })
+        rows.append(
+            {
+                "date": d,
+                "code": code,
+                "name": name,
+                "first_seal_ts": now.replace(microsecond=0),
+                "trigger_price": round(float(entry), 2),
+                "seal_bid1_vol": int(round(float(quote["bid1_vol"]))),
+                "prev_days": 0,
+                "entry_px": round(float(entry), 2),
+            }
+        )
     return rows
 
 
@@ -318,10 +342,7 @@ def run_round(
     """
     ticks = intraday.SEAL_CONFIRM_TICKS if confirm_ticks is None else int(confirm_ticks)
     want = max(2, int(ticks)) if ticks >= 2 else 1
-    rounds = (
-        cpt_intraday.fetch_rounds_from_cpt(want) if want > 1
-        else _single_round()
-    )
+    rounds = cpt_intraday.fetch_rounds_from_cpt(want) if want > 1 else _single_round()
     if rounds is None:
         log.warning("CPT 表不存在或读不到，本轮跳过")
         return {"round_at": None, "records": 0, "triggers": 0, "written": 0, "rows": []}
@@ -338,17 +359,37 @@ def run_round(
         p_bj = p_at.astimezone(_BJ)
         prev_round = (p_bj.time().replace(microsecond=0), p_records)
     codes = list(records)
-    rows = scan_round(records, d=d, now=now, prev_days=prev_days_of(d, codes),
-                      names=_names(codes), prev_round=prev_round,
-                      confirm_ticks=ticks)
+    rows = scan_round(
+        records,
+        d=d,
+        now=now,
+        prev_days=prev_days_of(d, codes),
+        names=_names(codes),
+        prev_round=prev_round,
+        confirm_ticks=ticks,
+    )
     written = 0 if dry_run or not rows else loader.insert_triggers(rows)
     level = logging.DEBUG if quiet and not written else logging.INFO
-    log.log(level, "round %s（北京 %s）：%d 票 → 确认轮数 %d → 触发 %d 条 → 写入 %d 条",
-            round_at.isoformat(), bj.strftime("%H:%M:%S"), len(records),
-            len(rounds), len(rows), written)
-    return {"round_at": round_at, "records": len(records), "triggers": len(rows),
-            "written": written, "rows": rows, "date": d, "now": now,
-            "rounds": len(rounds)}
+    log.log(
+        level,
+        "round %s（北京 %s）：%d 票 → 确认轮数 %d → 触发 %d 条 → 写入 %d 条",
+        round_at.isoformat(),
+        bj.strftime("%H:%M:%S"),
+        len(records),
+        len(rounds),
+        len(rows),
+        written,
+    )
+    return {
+        "round_at": round_at,
+        "records": len(records),
+        "triggers": len(rows),
+        "written": written,
+        "rows": rows,
+        "date": d,
+        "now": now,
+        "rounds": len(rounds),
+    }
 
 
 def _single_round() -> list[tuple[Any, dict[str, dict[str, Any]]]] | None:
@@ -416,30 +457,42 @@ def in_session(at_bj: datetime, *, trading_day: bool | None = None) -> bool:
 
 def _stale_text(res: dict[str, Any], now_bj: datetime, age: float | None) -> str:
     """卡死告警正文：说清「现在几点、数据停在哪、去哪里查」。"""
-    tail = ("查：systemctl status cpt-intraday-collect.timer；"
-            "tail -20 /home/ubuntu/logs/intraday-collect.log")
+    tail = (
+        "查：systemctl status cpt-intraday-collect.timer；"
+        "tail -20 /home/ubuntu/logs/intraday-collect.log"
+    )
     if age is None:
-        return (f"⚠ emotion-core 盘中触发停机\n"
-                f"{now_bj:%Y-%m-%d %H:%M}（北京）读不到 CPT 封板表的最新一轮。\n"
-                f"本进程还在跑，但没有数据就不会产生触发记录。\n{tail}")
+        return (
+            f"⚠ emotion-core 盘中触发停机\n"
+            f"{now_bj:%Y-%m-%d %H:%M}（北京）读不到 CPT 封板表的最新一轮。\n"
+            f"本进程还在跑，但没有数据就不会产生触发记录。\n{tail}"
+        )
     round_at = res.get("round_at")
     at_bj = round_at.astimezone(_BJ) if isinstance(round_at, datetime) else "?"
-    return (f"⚠ emotion-core 盘中触发停机\n"
-            f"{now_bj:%Y-%m-%d %H:%M}（北京）CPT 最新一轮是 "
-            f"{at_bj:%H:%M}，已 {age:.0f} 分钟没有新轮次"
-            f"（阈值 {STALE_MINUTES} 分钟）。\n{tail}")
+    return (
+        f"⚠ emotion-core 盘中触发停机\n"
+        f"{now_bj:%Y-%m-%d %H:%M}（北京）CPT 最新一轮是 "
+        f"{at_bj:%H:%M}，已 {age:.0f} 分钟没有新轮次"
+        f"（阈值 {STALE_MINUTES} 分钟）。\n{tail}"
+    )
 
 
 def _settle_text(res: dict[str, Any]) -> str:
     """收盘结算摘要正文。"""
-    return (f"emotion-core 盘中台账已结算 {res['date']:%Y-%m-%d}\n"
-            f"触发 {res['triggers']} 条 · 结算 {res['settled']} 条 · "
-            f"待定 {res['pending']} 条")
+    return (
+        f"emotion-core 盘中台账已结算 {res['date']:%Y-%m-%d}\n"
+        f"触发 {res['triggers']} 条 · 结算 {res['settled']} 条 · "
+        f"待定 {res['pending']} 条"
+    )
 
 
 def loop(
-    *, dry_run: bool = False, interval: int | None = None,
-    max_rounds: int | None = None, sleep=None, now_fn=None,
+    *,
+    dry_run: bool = False,
+    interval: int | None = None,
+    max_rounds: int | None = None,
+    sleep=None,
+    now_fn=None,
 ) -> int:
     """常驻循环：盘中每 `SCAN_INTERVAL_SEC` 判一轮，非盘中待命。
 
@@ -456,8 +509,11 @@ def loop(
     step = max(5, int(interval if interval is not None else intraday.SCAN_INTERVAL_SEC))
     wait = sleep or time_mod.sleep
     clock = now_fn or (lambda: datetime.now(_BJ))
-    log.info("盘中扫描循环启动：间隔 %ds，场次 %s（北京，午休不扫）",
-             step, " / ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in SESSION_WINDOWS))
+    log.info(
+        "盘中扫描循环启动：间隔 %ds，场次 %s（北京，午休不扫）",
+        step,
+        " / ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in SESSION_WINDOWS),
+    )
     last: bool | None = None
     last_alarm: datetime | None = None
     last_round: Any = None
@@ -467,8 +523,11 @@ def loop(
         now = clock()
         active = in_session(now)
         if active != last:
-            log.info("场次切换：%s（北京 %s）", "进入盘中" if active else "离开盘中",
-                     now.strftime("%Y-%m-%d %H:%M:%S"))
+            log.info(
+                "场次切换：%s（北京 %s）",
+                "进入盘中" if active else "离开盘中",
+                now.strftime("%Y-%m-%d %H:%M:%S"),
+            )
             last = active
         if not active:
             if now.time() >= SETTLE_AFTER and settled != now.date():
@@ -478,11 +537,18 @@ def loop(
                     total = sum(r["triggers"] for r in done_rows)
                     ok_n = sum(r["settled"] for r in done_rows)
                     left = sum(r["pending"] for r in done_rows)
-                    log.info("收盘结算：%d 天欠账，触发 %d 条，结算 %d 条，待定 %d 条",
-                             len(done_rows), total, ok_n, left)
+                    log.info(
+                        "收盘结算：%d 天欠账，触发 %d 条，结算 %d 条，待定 %d 条",
+                        len(done_rows),
+                        total,
+                        ok_n,
+                        left,
+                    )
                     if total:
-                        _alarm(f"[emotion-core] 盘中触发结算：{len(done_rows)} 天 / "
-                               f"触发 {total} 条 · 结算 {ok_n} 条 · 待定 {left} 条")
+                        _alarm(
+                            f"[emotion-core] 盘中触发结算：{len(done_rows)} 天 / "
+                            f"触发 {total} 条 · 结算 {ok_n} 条 · 待定 {left} 条"
+                        )
                 except Exception:  # noqa: BLE001 - 结算失败不该让循环退出
                     log.exception("收盘结算失败，明天再试")
             wait(IDLE_SEC)
@@ -502,9 +568,12 @@ def loop(
                 ok = _alarm(_stale_text(res, now, age))
                 last_alarm = now
                 # 成功也要留痕：告警是异步的，日志没有「已推送」就等于没法回溯
-                log.warning("卡死告警已触发（%s）：最新一轮 %s，距今 %s 分钟",
-                            "已推送" if ok else "推送未配置/失败（不影响扫描）",
-                            res.get("round_at"), "?" if age is None else f"{age:.0f}")
+                log.warning(
+                    "卡死告警已触发（%s）：最新一轮 %s，距今 %s 分钟",
+                    "已推送" if ok else "推送未配置/失败（不影响扫描）",
+                    res.get("round_at"),
+                    "?" if age is None else f"{age:.0f}",
+                )
         wait(step)
         done += 1
     return 0
@@ -516,12 +585,13 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="python -m emotion_core.services.intraday_watch",
-        description="盘中触发台账：判一轮（--round）/ 收盘结算（--settle）（ADR 0003）")
+        description="盘中触发台账：判一轮（--round）/ 收盘结算（--settle）（ADR 0003）",
+    )
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--round", action="store_true",
-                   help="读 CPT 最新一轮并判触发（写 trigger_log）")
-    g.add_argument("--loop", action="store_true",
-                   help="常驻：盘中每 SCAN_INTERVAL_SEC 判一轮（systemd 用）")
+    g.add_argument("--round", action="store_true", help="读 CPT 最新一轮并判触发（写 trigger_log）")
+    g.add_argument(
+        "--loop", action="store_true", help="常驻：盘中每 SCAN_INTERVAL_SEC 判一轮（systemd 用）"
+    )
     g.add_argument("--settle", action="store_true", help="结算指定日期的全部未结算触发")
     ap.add_argument("--date", metavar="YYYY-MM-DD", help="结算日（默认今天）")
     ap.add_argument("--dry-run", action="store_true", help="只算不写")
@@ -540,21 +610,28 @@ def main(argv: list[str] | None = None) -> int:
             print("CPT 表不存在或读不到，本轮跳过")
             return 1
         tag = "（dry-run，未写库）" if ns.dry_run else ""
-        print(f"最新一轮 {out['round_at'].astimezone(_BJ):%Y-%m-%d %H:%M:%S}（北京）· "
-              f"{out['records']} 票 · 触发 {out['triggers']} 条 · 写入 {out['written']} 条{tag}")
+        print(
+            f"最新一轮 {out['round_at'].astimezone(_BJ):%Y-%m-%d %H:%M:%S}（北京）· "
+            f"{out['records']} 票 · 触发 {out['triggers']} 条 · 写入 {out['written']} 条{tag}"
+        )
         for row in out["rows"]:
-            print(f"  {row['code']} {row['name'] or ''} 触发价={row['trigger_price']} "
-                  f"封单={row['seal_bid1_vol']} 股 首封={row['first_seal_ts']}")
+            print(
+                f"  {row['code']} {row['name'] or ''} 触发价={row['trigger_price']} "
+                f"封单={row['seal_bid1_vol']} 股 首封={row['first_seal_ts']}"
+            )
         return 0
 
     d = date.fromisoformat(ns.date) if ns.date else date.today()
     out = settle(d, dry_run=ns.dry_run)
     tag = "（dry-run，未写库）" if ns.dry_run else ""
-    print(f"{d} 触发 {out['triggers']} 条 · 结算 {out['settled']} 条 · "
-          f"待定 {out['pending']} 条{tag}")
+    print(
+        f"{d} 触发 {out['triggers']} 条 · 结算 {out['settled']} 条 · 待定 {out['pending']} 条{tag}"
+    )
     for row in out["rows"]:
-        print(f"  {row['code']} 封住={row['closed_sealed']} 开过板={row['broke']} "
-              f"卖价={row['exit_px']} 顺延={row['rolled']} 收益={row['ret_pct']}%")
+        print(
+            f"  {row['code']} 封住={row['closed_sealed']} 开过板={row['broke']} "
+            f"卖价={row['exit_px']} 顺延={row['rolled']} 收益={row['ret_pct']}%"
+        )
     return 0
 
 

@@ -19,8 +19,12 @@ class TestCaliberB:
     def test_unfilled_contributes_zero(self) -> None:
         # T 收 10.00 → T+1 涨停价 11.00；T+1 最高 10.50 够不到
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=10.50, t1_close=10.40,
-            t1_volume=1000, t2_open=10.30,
+            code="600000",
+            base_close=10.00,
+            t1_high=10.50,
+            t1_close=10.40,
+            t1_volume=1000,
+            t2_open=10.30,
         )
         assert r["filled"] is False
         assert r["ret_pct"] == 0.0
@@ -38,16 +42,24 @@ class TestCaliberB:
         assert "t1_low" not in params
         # T+1 最高 10.90 未够 11.00 的涨停价 → 不成交
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=10.90, t1_close=10.20,
-            t1_volume=1000, t2_open=10.00,
+            code="600000",
+            base_close=10.00,
+            t1_high=10.90,
+            t1_close=10.20,
+            t1_volume=1000,
+            t2_open=10.00,
         )
         assert r["filled"] is False
 
     def test_filled_at_limit_then_sell_t2_open(self) -> None:
         # T 收 10.00 → 买 11.00；T+1 封住；T+2 开 11.50
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=11.00, t1_close=11.00,
-            t1_volume=1000, t2_open=11.50,
+            code="600000",
+            base_close=10.00,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=1000,
+            t2_open=11.50,
         )
         assert r["filled"] is True and r["rolled"] is False
         assert r["entry_px"] == pytest.approx(11.00)
@@ -58,16 +70,26 @@ class TestCaliberB:
     def test_sell_is_t2_open_not_t1(self) -> None:
         """卖掉的是 T+2 开盘；T+1 收盘只是持有中的价。"""
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=11.00, t1_close=11.00,
-            t1_volume=1000, t2_open=9.50,
+            code="600000",
+            base_close=10.00,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=1000,
+            t2_open=9.50,
         )
         assert r["exit_px"] == pytest.approx(9.50)
 
     def test_limit_down_locked_rolls_to_t3(self) -> None:
         # T+1 收 11.00 → T+2 跌停 9.90；T+2 开收都在跌停 → 顺延 T+3 开 9.20
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=11.00, t1_close=11.00,
-            t1_volume=1000, t2_open=9.90, t2_close=9.90, t3_open=9.20,
+            code="600000",
+            base_close=10.00,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=1000,
+            t2_open=9.90,
+            t2_close=9.90,
+            t3_open=9.20,
         )
         assert r["rolled"] is True
         assert r["exit_px"] == pytest.approx(9.20)
@@ -75,16 +97,26 @@ class TestCaliberB:
     def test_open_limit_down_but_close_recovers_still_sells(self) -> None:
         """开盘砸跌停、收盘撬回来 → 卖得掉（只看开盘会误判）。"""
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=11.00, t1_close=11.00,
-            t1_volume=1000, t2_open=9.90, t2_close=10.60, t3_open=10.00,
+            code="600000",
+            base_close=10.00,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=1000,
+            t2_open=9.90,
+            t2_close=10.60,
+            t3_open=10.00,
         )
         assert r["rolled"] is False
         assert r["exit_px"] == pytest.approx(9.90)
 
     def test_censored_when_t2_missing(self) -> None:
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=11.00, t1_close=11.00,
-            t1_volume=1000, t2_open=None,
+            code="600000",
+            base_close=10.00,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=1000,
+            t2_open=None,
         )
         assert r["filled"] is True
         assert r["ret_pct"] is None, "右截断不猜，不能当 0 算"
@@ -92,22 +124,34 @@ class TestCaliberB:
     def test_chinext_20pct_board(self) -> None:
         # 创业板 20%：T 收 10.00 → 买 12.00
         r = metrics.caliber_b_ret(
-            code="300001", base_close=10.00, t1_high=12.00, t1_close=12.00,
-            t1_volume=1000, t2_open=12.00,
+            code="300001",
+            base_close=10.00,
+            t1_high=12.00,
+            t1_close=12.00,
+            t1_volume=1000,
+            t2_open=12.00,
         )
         assert r["entry_px"] == pytest.approx(12.00)
 
     def test_missing_base_close_is_none(self) -> None:
         r = metrics.caliber_b_ret(
-            code="600000", base_close=None, t1_high=11.00, t1_close=11.00,
-            t1_volume=1000, t2_open=11.00,
+            code="600000",
+            base_close=None,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=1000,
+            t2_open=11.00,
         )
         assert r["filled"] is None and r["ret_pct"] is None
 
     def test_zero_volume_bar_cannot_fill(self) -> None:
         r = metrics.caliber_b_ret(
-            code="600000", base_close=10.00, t1_high=11.00, t1_close=11.00,
-            t1_volume=0, t2_open=11.00,
+            code="600000",
+            base_close=10.00,
+            t1_high=11.00,
+            t1_close=11.00,
+            t1_volume=0,
+            t2_open=11.00,
         )
         assert r["filled"] is False
 

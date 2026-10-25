@@ -3,6 +3,7 @@
 设计：填入 prompt，输出信息。不关心 LLM 是什么、怎么调、怎么计费。
 默认关闭：主链不依赖 LLM；LLM 层是可选的。
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

@@ -8,6 +8,7 @@ SQL 取数（query_df / _next_bars / _limit_up_on / _exit_family）留在 Python
 侧，Rust 只算纯行组装逻辑；对账时同输入分别调 Python _outcome_row 与 Rust
 outcome_row，逐字段比对。
 """
+
 from __future__ import annotations
 
 import sys
@@ -35,23 +36,32 @@ def bars(opens, highs=None, lows=None, closes=None, d0: date = D0) -> pd.DataFra
     highs = highs or [o + 1 for o in opens]
     lows = lows or [o - 1 for o in opens]
     closes = closes or list(opens)
-    return pd.DataFrame({
-        "date": [d0 + timedelta(days=i + 1) for i in range(n)],
-        "open": opens, "high": highs, "low": lows, "close": closes})
+    return pd.DataFrame(
+        {
+            "date": [d0 + timedelta(days=i + 1) for i in range(n)],
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+        }
+    )
 
 
 class Harness:
     """桩 outcome 的 SQL 依赖，提供 Python / Rust 双入口同输入对账。"""
 
     def __init__(self, monkeypatch):
-        self.base = None          # None = 信号日无收盘价（缺数）
-        self.nb = None            # None = 前向无 bar（缺数）
-        self.fam = None           # None = 默认出口族；{} = 空族（缺键）
+        self.base = None  # None = 信号日无收盘价（缺数）
+        self.nb = None  # None = 前向无 bar（缺数）
+        self.fam = None  # None = 默认出口族；{} = 空族（缺键）
         self.limit_up_dates: set[date] = set()
 
         def query_df(sql, params=()):
-            return pd.DataFrame({"close": []}) if self.base is None \
+            return (
+                pd.DataFrame({"close": []})
+                if self.base is None
                 else pd.DataFrame({"close": [self.base]})
+            )
 
         def next_bars(code, d0, n=5):
             return pd.DataFrame() if self.nb is None else self.nb
@@ -60,8 +70,7 @@ class Harness:
             return d in self.limit_up_dates
 
         def exit_family(code, d0):
-            return {"A_断板开盘": -2.5, "D_半仓": 1.25} if self.fam is None \
-                else self.fam
+            return {"A_断板开盘": -2.5, "D_半仓": 1.25} if self.fam is None else self.fam
 
         monkeypatch.setattr(outcome, "query_df", query_df)
         monkeypatch.setattr(outcome, "_next_bars", next_bars)
@@ -82,9 +91,18 @@ class Harness:
             nb_lu = [dt in self.limit_up_dates for dt in self.nb["date"]]
         fam = {"A_断板开盘": -2.5, "D_半仓": 1.25} if self.fam is None else self.fam
         return rust.outcome_row(
-            d.isoformat(), code, action, self.base,
-            nb_open, nb_high, nb_low, nb_close, nb_lu,
-            fam.get("A_断板开盘"), fam.get("D_半仓"))
+            d.isoformat(),
+            code,
+            action,
+            self.base,
+            nb_open,
+            nb_high,
+            nb_low,
+            nb_close,
+            nb_lu,
+            fam.get("A_断板开盘"),
+            fam.get("D_半仓"),
+        )
 
 
 def assert_row_matches(py_row: tuple, r) -> None:
@@ -107,34 +125,42 @@ def assert_row_matches(py_row: tuple, r) -> None:
 
 # ────────────────────────── _pct ──────────────────────────
 
-@pytest.mark.parametrize("new,base,expected", [
-    (11.0, 10.0, 10.0),
-    (9.0, 10.0, -10.0),
-    (10.0, 10.0, 0.0),
-    (10.505, 10.0, 5.05),
-    (10.0, 3.0, 233.33),
-    (1.0, 3.0, -66.67),
-    (0.125, 1.0, -87.5),
-    (100.0, 7.0, 1328.57),
-])
+
+@pytest.mark.parametrize(
+    "new,base,expected",
+    [
+        (11.0, 10.0, 10.0),
+        (9.0, 10.0, -10.0),
+        (10.0, 10.0, 0.0),
+        (10.505, 10.0, 5.05),
+        (10.0, 3.0, 233.33),
+        (1.0, 3.0, -66.67),
+        (0.125, 1.0, -87.5),
+        (100.0, 7.0, 1328.57),
+    ],
+)
 def test_pct(new, base, expected):
     assert rust.pct(new, base) == outcome._pct(new, base) == expected
 
 
-@pytest.mark.parametrize("new,base,expected", [
-    (125.125, 100.0, 25.12),    # 精确 25.125，half-even 向下（末位 2 偶）
-    (125.625, 100.0, 25.63),    # 浮点路径 > 25.625 → 向上
-    (126.125, 100.0, 26.12),    # 精确 26.125，half-even 向下
-    (126.625, 100.0, 26.63),    # 浮点路径 > 26.625 → 向上
-    (1001.25, 1000.0, 0.12),    # 精确 0.125，half-even 向下
-    (102.675, 100.0, 2.68),     # 浮点路径 > 2.675 → 向上
-])
+@pytest.mark.parametrize(
+    "new,base,expected",
+    [
+        (125.125, 100.0, 25.12),  # 精确 25.125，half-even 向下（末位 2 偶）
+        (125.625, 100.0, 25.63),  # 浮点路径 > 25.625 → 向上
+        (126.125, 100.0, 26.12),  # 精确 26.125，half-even 向下
+        (126.625, 100.0, 26.63),  # 浮点路径 > 26.625 → 向上
+        (1001.25, 1000.0, 0.12),  # 精确 0.125，half-even 向下
+        (102.675, 100.0, 2.68),  # 浮点路径 > 2.675 → 向上
+    ],
+)
 def test_pct_round_half_even(new, base, expected):
     """Python round 是十进制 half-even，Rust 侧 py_round 同语义。"""
     assert rust.pct(new, base) == outcome._pct(new, base) == expected
 
 
 # ────────────────────────── _outcome_row：缺数短路 ──────────────────────────
+
 
 def test_missing_base_close_returns_none(monkeypatch):
     """信号日无收盘价 → None（缺数不入库，不查前向 bar）。"""
@@ -156,15 +182,18 @@ def test_no_forward_bars_returns_none(monkeypatch):
 
 # ────────────────────────── _outcome_row：窗口完整性 ──────────────────────────
 
+
 @pytest.mark.parametrize("n_bars", [1, 2, 3, 4])
 def test_short_window_incomplete(monkeypatch, n_bars):
     """前向 <5 根：极值列 None、complete=False，其余列照算（右删失不近似）。"""
     h = Harness(monkeypatch)
     h.base = 10.0
-    h.nb = bars([10.0 + i * 0.5 for i in range(n_bars)],
-                highs=[10.5 + i * 0.5 for i in range(n_bars)],
-                lows=[9.5 - i * 0.1 for i in range(n_bars)],
-                closes=[10.2 + i * 0.3 for i in range(n_bars)])
+    h.nb = bars(
+        [10.0 + i * 0.5 for i in range(n_bars)],
+        highs=[10.5 + i * 0.5 for i in range(n_bars)],
+        lows=[9.5 - i * 0.1 for i in range(n_bars)],
+        closes=[10.2 + i * 0.3 for i in range(n_bars)],
+    )
     py_row = h.py_row()
     assert val(py_row, "max_up5") is None
     assert val(py_row, "max_dd5") is None
@@ -177,10 +206,12 @@ def test_full_window_complete(monkeypatch):
     """前向 5 根齐：极值/第 5 日收益按 entry 计，complete=True。"""
     h = Harness(monkeypatch)
     h.base = 9.0
-    h.nb = bars([10.0, 11.0, 12.0, 13.0, 14.0],
-                highs=[10.5, 12.0, 13.0, 15.0, 16.0],
-                lows=[9.0, 10.0, 11.0, 12.0, 12.5],
-                closes=[10.2, 11.5, 12.5, 14.0, 15.0])
+    h.nb = bars(
+        [10.0, 11.0, 12.0, 13.0, 14.0],
+        highs=[10.5, 12.0, 13.0, 15.0, 16.0],
+        lows=[9.0, 10.0, 11.0, 12.0, 12.5],
+        closes=[10.2, 11.5, 12.5, 14.0, 15.0],
+    )
     py_row = h.py_row()
     assert val(py_row, "entry_proxy") == 10.0
     assert val(py_row, "t1_gap") == 11.11
@@ -196,8 +227,12 @@ def test_window_capped_at_first_five_bars(monkeypatch):
     """桩多给 2 根（7 根）：第 6/7 根不得进入极值——窗口恒为前 5 根。"""
     h = Harness(monkeypatch)
     h.base = 10.0
-    h.nb = bars([10.0] * 7, highs=[10.0] * 5 + [99.0, 99.0],
-                lows=[10.0] * 5 + [-99.0, -99.0], closes=[10.0] * 7)
+    h.nb = bars(
+        [10.0] * 7,
+        highs=[10.0] * 5 + [99.0, 99.0],
+        lows=[10.0] * 5 + [-99.0, -99.0],
+        closes=[10.0] * 7,
+    )
     py_row = h.py_row()
     assert val(py_row, "max_up5") == 0.0
     assert val(py_row, "max_dd5") == 0.0
@@ -208,6 +243,7 @@ def test_window_capped_at_first_five_bars(monkeypatch):
 
 # ────────────────────────── _outcome_row：舍入口径 ──────────────────────────
 
+
 def test_entry_proxy_rounds_to_3dp(monkeypatch):
     h = Harness(monkeypatch)
     h.base = 10.0
@@ -217,11 +253,14 @@ def test_entry_proxy_rounds_to_3dp(monkeypatch):
     assert_row_matches(py_row, h.rust_row())
 
 
-@pytest.mark.parametrize("entry,base", [
-    (10.0004, 9.0),     # pct(entry)=11.12 vs pct(round3)=11.11 —— 可区分
-    (10.1234, 9.0),     # 12.48% —— 双重舍入恰好一致，防回归
-    (3.3333, 3.0),      # 11.11% —— 恰好一致，防回归
-])
+@pytest.mark.parametrize(
+    "entry,base",
+    [
+        (10.0004, 9.0),  # pct(entry)=11.12 vs pct(round3)=11.11 —— 可区分
+        (10.1234, 9.0),  # 12.48% —— 双重舍入恰好一致，防回归
+        (3.3333, 3.0),  # 11.11% —— 恰好一致，防回归
+    ],
+)
 def test_returns_use_unrounded_entry(monkeypatch, entry, base):
     """关键口径：t1_gap / t1_close_ret / 极值均相对未舍入 entry 计算，
     只有 entry_proxy 列 round 3 位。"""
@@ -250,6 +289,7 @@ def test_unrounded_entry_can_differ_from_rounded(monkeypatch):
 
 # ────────────────────────── _outcome_row：出口族 ──────────────────────────
 
+
 def test_exit_family_empty_gives_none_legs(monkeypatch):
     """出口族为空（前向仅 1 根 / T+1 非法）→ A、D 记 None，行仍回填。"""
     h = Harness(monkeypatch)
@@ -276,6 +316,7 @@ def test_exit_family_custom_values(monkeypatch):
 
 # ────────────────────────── _outcome_row：涨停止 ──────────────────────────
 
+
 @pytest.mark.parametrize("promote", [True, False])
 def test_t1_promote(monkeypatch, promote):
     h = Harness(monkeypatch)
@@ -289,6 +330,7 @@ def test_t1_promote(monkeypatch, promote):
 
 
 # ────────────────────────── _outcome_row：收益方向 ──────────────────────────
+
 
 def test_negative_returns(monkeypatch):
     h = Harness(monkeypatch)
@@ -311,6 +353,7 @@ def test_zero_return(monkeypatch):
 
 
 # ────────────────────────── _outcome_row：透传字段 ──────────────────────────
+
 
 @pytest.mark.parametrize("action", ["BUY", "SELL", "SECONDARY"])
 def test_action_passthrough(monkeypatch, action):
@@ -344,12 +387,12 @@ def test_code_passthrough(monkeypatch):
 
 # ────────────────────────── _outcome_row：极值取值口径 ──────────────────────────
 
+
 def test_max_dd5_uses_min_low_not_close(monkeypatch):
     """max_dd5 取窗口内最低价（low.min），不是收盘价。"""
     h = Harness(monkeypatch)
     h.base = 10.0
-    h.nb = bars([10.0] * 5, highs=[11.0] * 5,
-                lows=[10.0, 9.0, 10.0, 10.0, 10.0], closes=[10.5] * 5)
+    h.nb = bars([10.0] * 5, highs=[11.0] * 5, lows=[10.0, 9.0, 10.0, 10.0, 10.0], closes=[10.5] * 5)
     py_row = h.py_row()
     assert val(py_row, "max_dd5") == -10.0
     assert val(py_row, "max_up5") == 10.0
@@ -360,8 +403,7 @@ def test_t5_close_ret_uses_fifth_bar_close(monkeypatch):
     """t5_close_ret 取第 5 根 close，不是窗口末 high/low。"""
     h = Harness(monkeypatch)
     h.base = 10.0
-    h.nb = bars([10.0] * 5, highs=[12.0] * 5, lows=[8.0] * 5,
-                closes=[10.0, 10.0, 10.0, 10.0, 13.0])
+    h.nb = bars([10.0] * 5, highs=[12.0] * 5, lows=[8.0] * 5, closes=[10.0, 10.0, 10.0, 10.0, 13.0])
     py_row = h.py_row()
     assert val(py_row, "t5_close_ret") == 30.0
     assert val(py_row, "max_up5") == 20.0
@@ -371,11 +413,12 @@ def test_t5_close_ret_uses_fifth_bar_close(monkeypatch):
 
 # ────────────────────────── OutcomeRow 类 ──────────────────────────
 
+
 def test_outcome_row_class_new_and_accessors():
     """OutcomeRow #[new] 构造 + 字段读写。"""
     r = rust.OutcomeRow(
-        "2026-09-08", "000017", "BUY", 10.0, 0.0, False, 2.0,
-        None, None, None, -2.5, 1.25, False)
+        "2026-09-08", "000017", "BUY", 10.0, 0.0, False, 2.0, None, None, None, -2.5, 1.25, False
+    )
     assert r.confirm_date == "2026-09-08"
     assert r.code == "000017"
     assert r.action == "BUY"
@@ -398,8 +441,8 @@ def test_outcome_row_class_new_and_accessors():
 
 def test_outcome_row_class_clone():
     r = rust.OutcomeRow(
-        "2026-09-08", "000017", "BUY", 10.0, 0.0, False, 2.0,
-        None, None, None, None, None, False)
+        "2026-09-08", "000017", "BUY", 10.0, 0.0, False, 2.0, None, None, None, None, None, False
+    )
     r2 = r.clone()
     assert r2.code == "000017"
     assert r2.complete is False

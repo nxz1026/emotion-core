@@ -35,8 +35,20 @@ AUTO_FILL_EPS = 1e-9
 _TIER_RE = re.compile(r"^身份\s*([^：:]+)[：:]")
 """从 checklist 的 c3 行说明里取身份档（`身份 新插队：…`）。"""
 
-_COLS = ["confirm_date", "code", "name", "phase", "diverge", "tier",
-         "entry_px", "exit_px", "rolled", "filled", "ret_pct", "reason_null"]
+_COLS = [
+    "confirm_date",
+    "code",
+    "name",
+    "phase",
+    "diverge",
+    "tier",
+    "entry_px",
+    "exit_px",
+    "rolled",
+    "filled",
+    "ret_pct",
+    "reason_null",
+]
 
 
 def _tier_of(checklist: object) -> str | None:
@@ -65,28 +77,31 @@ def _tier_of(checklist: object) -> str | None:
 
 def _signals(days: int | None) -> pd.DataFrame:
     """BUY 观察记录（含相位与分歧标记）。顺序按确认日升序。"""
-    sql = ("SELECT s.confirm_date, s.code, s.checklist, m.phase, m.diverge,"
-           "       b.name"
-           "  FROM signal s"
-           "  LEFT JOIN market_stat m ON m.date = s.confirm_date"
-           "  LEFT JOIN stock_basic b ON b.code = s.code"
-           " WHERE s.action = 'BUY'")
+    sql = (
+        "SELECT s.confirm_date, s.code, s.checklist, m.phase, m.diverge,"
+        "       b.name"
+        "  FROM signal s"
+        "  LEFT JOIN market_stat m ON m.date = s.confirm_date"
+        "  LEFT JOIN stock_basic b ON b.code = s.code"
+        " WHERE s.action = 'BUY'"
+    )
     if days:
         # days = 最近 N 条观察记录（不是最近 N 个自然日——信号本身很稀）
-        df = query_df(sql + " ORDER BY s.confirm_date DESC, s.code LIMIT %s",
-                      (int(days),))
+        df = query_df(sql + " ORDER BY s.confirm_date DESC, s.code LIMIT %s", (int(days),))
     else:
         df = query_df(sql + " ORDER BY s.confirm_date DESC, s.code")
     if df.empty:
         return df
-    out = pd.DataFrame({
-        "confirm_date": pd.to_datetime(df["confirm_date"]).dt.date,
-        "code": df["code"].astype(str).str.zfill(6),
-        "name": df["name"],
-        "phase": df["phase"],
-        "diverge": df["diverge"].fillna(False).astype(bool),
-        "tier": [_tier_of(c) for c in df["checklist"]],
-    })
+    out = pd.DataFrame(
+        {
+            "confirm_date": pd.to_datetime(df["confirm_date"]).dt.date,
+            "code": df["code"].astype(str).str.zfill(6),
+            "name": df["name"],
+            "phase": df["phase"],
+            "diverge": df["diverge"].fillna(False).astype(bool),
+            "tier": [_tier_of(c) for c in df["checklist"]],
+        }
+    )
     return out
 
 
@@ -98,7 +113,9 @@ def _bars(codes: list[str], lo: date, hi: date) -> pd.DataFrame:
         "  FROM daily_bar b"
         "  LEFT JOIN derived_bar d ON d.code = b.code AND d.date = b.date"
         " WHERE b.code = ANY(%s) AND b.date BETWEEN %s AND %s"
-        " ORDER BY b.code, b.date", (codes, lo, hi))
+        " ORDER BY b.code, b.date",
+        (codes, lo, hi),
+    )
     if df.empty:
         return df
     df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -139,18 +156,25 @@ def _one(sig: pd.Series, bars: dict[str, pd.DataFrame]) -> dict | None:
         return None
     entry = limit_up_price_cents(int(round(base * 100)), code) / 100
     t1_high = _num(n1["high"])
-    filled = (t1_high is not None and t1_high >= entry - AUTO_FILL_EPS
-              and (_num(n1["volume"]) or 0) > 0)
+    filled = (
+        t1_high is not None and t1_high >= entry - AUTO_FILL_EPS and (_num(n1["volume"]) or 0) > 0
+    )
 
-    row = {"entry_px": round(entry, 2), "exit_px": None, "rolled": False,
-           "filled": bool(filled), "ret_pct": None, "reason_null": None}
+    row = {
+        "entry_px": round(entry, 2),
+        "exit_px": None,
+        "rolled": False,
+        "filled": bool(filled),
+        "ret_pct": None,
+        "reason_null": None,
+    }
     if not filled:
-        row["ret_pct"] = 0.0      # 未成交按 0 计（同时单列成交率）
+        row["ret_pct"] = 0.0  # 未成交按 0 计（同时单列成交率）
         row["reason_null"] = "未触及涨停价"
         return row
 
     if i + 2 >= len(dates):
-        row["filled"] = None      # 右截断：不计入任何口径
+        row["filled"] = None  # 右截断：不计入任何口径
         row["ret_pct"] = None
         row["reason_null"] = "T+2 缺失（样本右截断）"
         return row
@@ -191,8 +215,7 @@ def evaluate(days: int | None = 30) -> pd.DataFrame:
     bars = _bars(codes, min(sigs["confirm_date"]), max(sigs["confirm_date"]))
     if bars.empty:
         return pd.DataFrame(columns=_COLS)
-    by_code = {code: g.set_index("date") for code, g in bars.groupby("code",
-                                                                    sort=False)}
+    by_code = {code: g.set_index("date") for code, g in bars.groupby("code", sort=False)}
     rows = []
     for _, sig in sigs.iterrows():
         got = _one(sig, by_code)
@@ -209,10 +232,12 @@ def _stats(rets: pd.Series) -> dict:
     n = int(len(rets))
     if n == 0:
         return {"n": 0, "mean": None, "median": None, "win_rate": None}
-    return {"n": n,
-            "mean": round(float(rets.mean()), 3),
-            "median": round(float(rets.median()), 3),
-            "win_rate": round(float((rets > 0).mean()) * 100, 1)}
+    return {
+        "n": n,
+        "mean": round(float(rets.mean()), 3),
+        "median": round(float(rets.median()), 3),
+        "win_rate": round(float((rets > 0).mean()) * 100, 1),
+    }
 
 
 def summarize(df: pd.DataFrame) -> dict:
@@ -236,14 +261,20 @@ def summarize(df: pd.DataFrame) -> dict:
         fs = _stats(filled)
         if st["n"] == 0:
             return
-        groups.append({
-            "group": name, "n": st["n"],
-            "fill_rate": round(len(filled) / st["n"] * 100, 1),
-            "mean": st["mean"], "median": st["median"],
-            "win_rate": st["win_rate"],
-            "n_filled": fs["n"], "mean_filled": fs["mean"],
-            "median_filled": fs["median"], "win_rate_filled": fs["win_rate"],
-        })
+        groups.append(
+            {
+                "group": name,
+                "n": st["n"],
+                "fill_rate": round(len(filled) / st["n"] * 100, 1),
+                "mean": st["mean"],
+                "median": st["median"],
+                "win_rate": st["win_rate"],
+                "n_filled": fs["n"],
+                "mean_filled": fs["mean"],
+                "median_filled": fs["median"],
+                "win_rate_filled": fs["win_rate"],
+            }
+        )
 
     add("全部", ok)
     for phase, sub in ok.groupby("phase", dropna=False):
@@ -251,6 +282,6 @@ def summarize(df: pd.DataFrame) -> dict:
     for tier, sub in ok.groupby("tier", dropna=False):
         add(f"{tier}" if tier else "身份缺失", sub)
     for (phase, tier), sub in ok.groupby(["phase", "tier"], dropna=False):
-        if sub.shape[0] >= 10:      # 样本太少的组合不单列，避免误读
+        if sub.shape[0] >= 10:  # 样本太少的组合不单列，避免误读
             add(f"{phase}×{tier}" if tier else f"{phase}×身份缺失", sub)
     return {"n": int(ok.shape[0]), "groups": groups}

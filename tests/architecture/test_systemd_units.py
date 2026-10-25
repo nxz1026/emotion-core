@@ -55,6 +55,7 @@ def _emotion_cpt_unit_dir() -> Path:
         ) from exc
     return Path(emotion_cpt.deploy.__file__).resolve().parent / "systemd"
 
+
 import re
 from pathlib import Path
 

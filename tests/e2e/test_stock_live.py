@@ -8,6 +8,7 @@
 跑法：
     EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
 """
+
 from __future__ import annotations
 
 import os
@@ -16,12 +17,14 @@ import pytest
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("EC_LIVE_DB") != "1",
-    reason="真库校准：设 EC_LIVE_DB=1 才跑（默认 DB-free 基线不受影响）")
+    reason="真库校准：设 EC_LIVE_DB=1 才跑（默认 DB-free 基线不受影响）",
+)
 
 
 @pytest.fixture(scope="module")
 def live():
     from emotion_core.data import stock_query as q
+
     d = q.latest_trade_date()
     if d is None:
         pytest.skip("库内无日线数据")
@@ -32,6 +35,7 @@ def test_promotion_caliber_matches_algo_layer_single_day(live):
     """单日口径必须与 promotion.promotion_matrix 完全一致。"""
     q, d = live
     from emotion_core.algorithms import promotion
+
     mine = {r["layer"]: r for r in q.promotion_table(d, pair_date=d)}
     for row in promotion.promotion_matrix(d):
         got = mine[row["layer"]]
@@ -48,8 +52,7 @@ def test_analyze_is_readonly_and_grounded(live, monkeypatch):
 
     writes: list[str] = []
     for name in ("execute", "insert", "upsert", "delete"):
-        monkeypatch.setattr(q, name, lambda *a, _n=name, **k: writes.append(_n),
-                            raising=False)
+        monkeypatch.setattr(q, name, lambda *a, _n=name, **k: writes.append(_n), raising=False)
     svc.clear_cache()
     out = svc.analyze("601811", d)
     assert out["ok"], out.get("error")
@@ -58,6 +61,6 @@ def test_analyze_is_readonly_and_grounded(live, monkeypatch):
     assert v["reasons"] and v["disclaimer"]
     if v["stats"]["layer"]:
         promo = {r["layer"]: r for r in out["promotion_table"]}[v["stats"]["layer"]]
-        assert v["stats"]["rate"] == promo["rate"]     # 结论引用的就是该层统计
+        assert v["stats"]["rate"] == promo["rate"]  # 结论引用的就是该层统计
         assert v["stats"]["promote_from"] == promo["total"]
     assert out["trend"]["price"] is not None

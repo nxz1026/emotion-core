@@ -7,6 +7,7 @@
 IO 全部桩掉（基准日收盘价、前向 bar、涨停止、出口族、待办信号集、写连接），
 真实库对账另跑（见交付记录：同信号集与 lkl.services.outcome 逐字段一致）。
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -33,9 +34,15 @@ def bars(opens, highs=None, lows=None, closes=None, d0: date = D0) -> pd.DataFra
     highs = highs or [o + 1 for o in opens]
     lows = lows or [o - 1 for o in opens]
     closes = closes or list(opens)
-    return pd.DataFrame({
-        "date": [d0 + timedelta(days=i + 1) for i in range(n)],
-        "open": opens, "high": highs, "low": lows, "close": closes})
+    return pd.DataFrame(
+        {
+            "date": [d0 + timedelta(days=i + 1) for i in range(n)],
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+        }
+    )
 
 
 class FakeCursor:
@@ -69,12 +76,12 @@ class FakeConn:
 @pytest.fixture
 def writer(monkeypatch):
     conn = FakeConn()
-    monkeypatch.setattr(outcome, "transaction",
-                        lambda: contextlib.nullcontext(conn))
+    monkeypatch.setattr(outcome, "transaction", lambda: contextlib.nullcontext(conn))
     return conn
 
 
 # ────────────────────────── _pct ──────────────────────────
+
 
 class TestPct:
     def test_up_and_down(self):
@@ -88,6 +95,7 @@ class TestPct:
 
 # ────────────────────────── _outcome_row ──────────────────────────
 
+
 class TestOutcomeRow:
     def stub(self, monkeypatch, base, nb, fam=None, nb_dates=None):
         """桩：基准日收盘价 / 前向 bar / 出口族 / 涨停止；返回调用记录。"""
@@ -95,8 +103,7 @@ class TestOutcomeRow:
 
         def query_df(sql, params=()):
             seen["base_q"].append((sql, params))
-            return pd.DataFrame({"close": []}) if base is None \
-                else pd.DataFrame({"close": [base]})
+            return pd.DataFrame({"close": []}) if base is None else pd.DataFrame({"close": [base]})
 
         def next_bars(code, d0, n=5):
             seen["nb"].append((code, d0, n))
@@ -119,7 +126,7 @@ class TestOutcomeRow:
     def test_missing_base_close_is_none(self, monkeypatch):
         seen = self.stub(monkeypatch, None, bars([10.0]))
         assert outcome._outcome_row(D0, "000017", "BUY") is None
-        assert seen["nb"] == []          # 缺基准价即短路，不查前向 bar
+        assert seen["nb"] == []  # 缺基准价即短路，不查前向 bar
 
     def test_no_forward_bars_is_none(self, monkeypatch):
         self.stub(monkeypatch, 10.0, None)
@@ -127,8 +134,12 @@ class TestOutcomeRow:
 
     def test_short_window_incomplete(self, monkeypatch):
         """前向 3 根 <5：极值列 None、complete=False，其余列照算（右删失不近似）。"""
-        nb = bars([10.0, 10.5, 11.0], highs=[10.5, 11.0, 11.5],
-                  lows=[9.5, 10.0, 10.2], closes=[10.2, 10.8, 10.9])
+        nb = bars(
+            [10.0, 10.5, 11.0],
+            highs=[10.5, 11.0, 11.5],
+            lows=[9.5, 10.0, 10.2],
+            closes=[10.2, 10.8, 10.9],
+        )
         self.stub(monkeypatch, 10.0, nb, nb_dates=[nb["date"].iloc[0]])
         row = outcome._outcome_row(D0, "000017", "BUY")
         assert len(row) == len(COLS)
@@ -136,9 +147,9 @@ class TestOutcomeRow:
         assert val(row, "code") == "000017"
         assert val(row, "action") == "BUY"
         assert val(row, "entry_proxy") == 10.0
-        assert val(row, "t1_gap") == 0.0                     # 开盘 10.0 / 昨收 10.0
-        assert val(row, "t1_promote") is True                # 次日涨停（桩）
-        assert val(row, "t1_close_ret") == 2.0               # 10.2 / 10.0
+        assert val(row, "t1_gap") == 0.0  # 开盘 10.0 / 昨收 10.0
+        assert val(row, "t1_promote") is True  # 次日涨停（桩）
+        assert val(row, "t1_close_ret") == 2.0  # 10.2 / 10.0
         assert val(row, "max_up5") is None
         assert val(row, "max_dd5") is None
         assert val(row, "t5_close_ret") is None
@@ -148,25 +159,31 @@ class TestOutcomeRow:
 
     def test_full_window_complete(self, monkeypatch):
         """前向 5 根齐：极值/第 5 日收益按 entry_proxy 计，complete=True。"""
-        nb = bars([10.0, 11.0, 12.0, 13.0, 14.0],
-                  highs=[10.5, 12.0, 13.0, 15.0, 16.0],
-                  lows=[9.0, 10.0, 11.0, 12.0, 12.5],
-                  closes=[10.2, 11.5, 12.5, 14.0, 15.0])
+        nb = bars(
+            [10.0, 11.0, 12.0, 13.0, 14.0],
+            highs=[10.5, 12.0, 13.0, 15.0, 16.0],
+            lows=[9.0, 10.0, 11.0, 12.0, 12.5],
+            closes=[10.2, 11.5, 12.5, 14.0, 15.0],
+        )
         self.stub(monkeypatch, 9.0, nb)
         row = outcome._outcome_row(D0, "000017", "BUY")
         assert val(row, "entry_proxy") == 10.0
-        assert val(row, "t1_gap") == 11.11               # 10.0 / 9.0
-        assert val(row, "t1_promote") is False           # 无涨停日（桩）
+        assert val(row, "t1_gap") == 11.11  # 10.0 / 9.0
+        assert val(row, "t1_promote") is False  # 无涨停日（桩）
         assert val(row, "t1_close_ret") == 2.0
-        assert val(row, "max_up5") == 60.0               # 16.0 / 10.0
-        assert val(row, "max_dd5") == -10.0              # 9.0 / 10.0
-        assert val(row, "t5_close_ret") == 50.0          # 15.0 / 10.0
+        assert val(row, "max_up5") == 60.0  # 16.0 / 10.0
+        assert val(row, "max_dd5") == -10.0  # 9.0 / 10.0
+        assert val(row, "t5_close_ret") == 50.0  # 15.0 / 10.0
         assert val(row, "complete") is True
 
     def test_window_capped_at_first_five_bars(self, monkeypatch):
         """桩多给 2 根（7 根）：第 6/7 根不得进入极值——窗口恒为前 5 根。"""
-        nb = bars([10.0] * 7, highs=[10.0] * 5 + [99.0, 99.0],
-                  lows=[10.0] * 5 + [-99.0, -99.0], closes=[10.0] * 7)
+        nb = bars(
+            [10.0] * 7,
+            highs=[10.0] * 5 + [99.0, 99.0],
+            lows=[10.0] * 5 + [-99.0, -99.0],
+            closes=[10.0] * 7,
+        )
         self.stub(monkeypatch, 10.0, nb)
         row = outcome._outcome_row(D0, "000017", "BUY")
         assert val(row, "max_up5") == 0.0
@@ -196,6 +213,7 @@ class TestOutcomeRow:
 
 # ────────────────────────── pending_signals ──────────────────────────
 
+
 class TestPendingSignals:
     def stub(self, monkeypatch, df):
         seen = {}
@@ -208,42 +226,55 @@ class TestPendingSignals:
         return seen
 
     def test_incremental_filters_incomplete(self, monkeypatch):
-        df = pd.DataFrame({"confirm_date": [D0], "code": ["000017"],
-                           "action": ["BUY"]})
+        df = pd.DataFrame({"confirm_date": [D0], "code": ["000017"], "action": ["BUY"]})
         seen = self.stub(monkeypatch, df)
         assert outcome.pending_signals() == [(D0, "000017", "BUY")]
         assert "WHERE o.confirm_date IS NULL OR NOT o.complete" in seen["sql"]
-        assert "LEFT JOIN signal_outcome o USING (confirm_date, code, action)" \
-            in seen["sql"]
+        assert "LEFT JOIN signal_outcome o USING (confirm_date, code, action)" in seen["sql"]
 
     def test_force_scans_all_signals(self, monkeypatch):
-        seen = self.stub(monkeypatch, pd.DataFrame(
-            {"confirm_date": [], "code": [], "action": []}))
+        seen = self.stub(monkeypatch, pd.DataFrame({"confirm_date": [], "code": [], "action": []}))
         assert outcome.pending_signals(force=True) == []
         assert "WHERE" not in seen["sql"]
 
     def test_empty_result_is_empty_list(self, monkeypatch):
-        self.stub(monkeypatch, pd.DataFrame(
-            {"confirm_date": [], "code": [], "action": []}))
+        self.stub(monkeypatch, pd.DataFrame({"confirm_date": [], "code": [], "action": []}))
         assert outcome.pending_signals() == []
 
     def test_rows_preserve_query_order(self, monkeypatch):
-        df = pd.DataFrame({"confirm_date": [D0, D0 + timedelta(days=2)],
-                           "code": ["000017", "600371"],
-                           "action": ["BUY", "SELL"]})
+        df = pd.DataFrame(
+            {
+                "confirm_date": [D0, D0 + timedelta(days=2)],
+                "code": ["000017", "600371"],
+                "action": ["BUY", "SELL"],
+            }
+        )
         self.stub(monkeypatch, df)
         assert outcome.pending_signals(force=True) == [
-            (D0, "000017", "BUY"), (D0 + timedelta(days=2), "600371", "SELL")]
+            (D0, "000017", "BUY"),
+            (D0 + timedelta(days=2), "600371", "SELL"),
+        ]
 
 
 # ────────────────────────── _upsert_rows ──────────────────────────
 
+
 def row(**over) -> tuple:
-    base = {"confirm_date": D0, "code": "000017", "action": "BUY",
-            "entry_proxy": 10.0, "t1_gap": 0.0, "t1_promote": True,
-            "t1_close_ret": 2.0, "max_up5": 1.0, "max_dd5": -1.0,
-            "t5_close_ret": 3.0, "rule_ret_a": None, "rule_ret_d": None,
-            "complete": False}
+    base = {
+        "confirm_date": D0,
+        "code": "000017",
+        "action": "BUY",
+        "entry_proxy": 10.0,
+        "t1_gap": 0.0,
+        "t1_promote": True,
+        "t1_close_ret": 2.0,
+        "max_up5": 1.0,
+        "max_dd5": -1.0,
+        "t5_close_ret": 3.0,
+        "rule_ret_a": None,
+        "rule_ret_d": None,
+        "complete": False,
+    }
     base.update(over)
     return tuple(base[c] for c in COLS)
 
@@ -268,14 +299,15 @@ class TestUpsertRows:
             assert f"{col}=EXCLUDED.{col}" not in outcome._UPSERT_SQL
 
     def test_nan_and_inf_sanitized_to_null(self, writer):
-        outcome._upsert_rows([row(max_up5=float("nan"), max_dd5=float("inf"),
-                                  t5_close_ret=float("-inf"))])
+        outcome._upsert_rows(
+            [row(max_up5=float("nan"), max_dd5=float("inf"), t5_close_ret=float("-inf"))]
+        )
         out = writer.rows[0]
         assert val(out, "max_up5") is None
         assert val(out, "max_dd5") is None
         assert val(out, "t5_close_ret") is None
-        assert val(out, "t1_close_ret") == 2.0          # 有限值不被动
-        assert val(out, "complete") is False            # 非 float 不被动
+        assert val(out, "t1_close_ret") == 2.0  # 有限值不被动
+        assert val(out, "complete") is False  # 非 float 不被动
         assert val(out, "confirm_date") == D0
 
     def test_returns_written_row_count(self, writer):
@@ -286,11 +318,17 @@ class TestUpsertRows:
         monkeypatch.setattr(outcome, "CONFIG", SimpleNamespace(UPSERT_BATCH=2))
         outcome._upsert_rows([row(code=f"00000{i}") for i in range(5)])
         assert [len(batch) for _, batch in writer.calls] == [2, 2, 1]
-        assert [val(r, "code") for r in writer.rows] == \
-            ["000000", "000001", "000002", "000003", "000004"]
+        assert [val(r, "code") for r in writer.rows] == [
+            "000000",
+            "000001",
+            "000002",
+            "000003",
+            "000004",
+        ]
 
 
 # ────────────────────────── backfill ──────────────────────────
+
 
 class TestBackfill:
     def test_skips_missing_rows_and_counts_written(self, monkeypatch, writer):
@@ -299,12 +337,12 @@ class TestBackfill:
 
         def query_df(sql, params=()):
             code, d = params
-            return pd.DataFrame({"close": [9.0]}) if code == "000017" \
-                else pd.DataFrame({"close": []})
+            return (
+                pd.DataFrame({"close": [9.0]}) if code == "000017" else pd.DataFrame({"close": []})
+            )
 
         monkeypatch.setattr(outcome, "query_df", query_df)
-        monkeypatch.setattr(outcome, "_next_bars",
-                            lambda code, d0, n=5: bars([10.0]))
+        monkeypatch.setattr(outcome, "_next_bars", lambda code, d0, n=5: bars([10.0]))
         monkeypatch.setattr(outcome, "_limit_up_on", lambda code, d: False)
         monkeypatch.setattr(outcome, "_exit_family", lambda code, d0: {})
         monkeypatch.setattr(outcome, "pending_signals", lambda force=False: pending)
@@ -321,7 +359,7 @@ class TestBackfill:
         monkeypatch.setattr(outcome, "pending_signals", pending)
         assert outcome.backfill(force=True) == 0
         assert seen["force"] is True
-        assert writer.calls == []                        # 无候选即不写
+        assert writer.calls == []  # 无候选即不写
 
     def test_second_run_is_noop_after_complete(self, monkeypatch, writer):
         """幂等：第二轮 pending 为空 → 0 写入、不开事务。"""
@@ -332,10 +370,10 @@ class TestBackfill:
             return [(D0, "000017", "BUY")] if state["n"] == 1 else []
 
         monkeypatch.setattr(outcome, "pending_signals", pending)
-        monkeypatch.setattr(outcome, "query_df",
-                            lambda sql, params=(): pd.DataFrame({"close": [9.0]}))
-        monkeypatch.setattr(outcome, "_next_bars",
-                            lambda code, d0, n=5: bars([10.0]))
+        monkeypatch.setattr(
+            outcome, "query_df", lambda sql, params=(): pd.DataFrame({"close": [9.0]})
+        )
+        monkeypatch.setattr(outcome, "_next_bars", lambda code, d0, n=5: bars([10.0]))
         monkeypatch.setattr(outcome, "_limit_up_on", lambda code, d: False)
         monkeypatch.setattr(outcome, "_exit_family", lambda code, d0: {})
         assert outcome.backfill() == 1
@@ -343,16 +381,15 @@ class TestBackfill:
         assert len(writer.rows) == 1
 
     def test_upsert_receives_full_width_rows(self, monkeypatch, writer):
-        monkeypatch.setattr(outcome, "pending_signals",
-                            lambda force=False: [(D0, "000017", "BUY")])
-        monkeypatch.setattr(outcome, "query_df",
-                            lambda sql, params=(): pd.DataFrame({"close": [9.0]}))
-        monkeypatch.setattr(outcome, "_next_bars",
-                            lambda code, d0, n=5: bars([10.0] * 5))
+        monkeypatch.setattr(outcome, "pending_signals", lambda force=False: [(D0, "000017", "BUY")])
+        monkeypatch.setattr(
+            outcome, "query_df", lambda sql, params=(): pd.DataFrame({"close": [9.0]})
+        )
+        monkeypatch.setattr(outcome, "_next_bars", lambda code, d0, n=5: bars([10.0] * 5))
         monkeypatch.setattr(outcome, "_limit_up_on", lambda code, d: False)
-        monkeypatch.setattr(outcome, "_exit_family",
-                            lambda code, d0: {"A_断板开盘": -1.0, "D_半仓": 0.5})
+        monkeypatch.setattr(
+            outcome, "_exit_family", lambda code, d0: {"A_断板开盘": -1.0, "D_半仓": 0.5}
+        )
         outcome.backfill(force=True)
         assert [len(r) for r in writer.rows] == [len(COLS)]
-        assert "ON CONFLICT (confirm_date, code, action) DO UPDATE SET" \
-            in writer.calls[0][0]
+        assert "ON CONFLICT (confirm_date, code, action) DO UPDATE SET" in writer.calls[0][0]

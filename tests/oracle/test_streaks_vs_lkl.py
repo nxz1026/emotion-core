@@ -3,6 +3,7 @@
 验证 compute_derived() 的输出与 lkl 的 derived_bar 表逐行一致。
 这是阶段 2a 的核心验收标准。
 """
+
 from __future__ import annotations
 
 import json
@@ -29,17 +30,19 @@ def test_streaks_vs_lkl():
     # 转换为 domain.Bar（daily_bar_sample 价格已是分）
     bars = []
     for r in bars_raw:
-        bars.append(Bar(
-            code=r["code"],
-            date=date.fromisoformat(r["date"]),
-            open_cents=int(r["open"]),
-            high_cents=int(r["high"]),
-            low_cents=int(r["low"]),
-            close_cents=int(r["close"]),
-            pre_close_cents=int(r["pre_close"]),
-            volume=int(r["volume"]),
-            turnover_rate=0.0,
-        ))
+        bars.append(
+            Bar(
+                code=r["code"],
+                date=date.fromisoformat(r["date"]),
+                open_cents=int(r["open"]),
+                high_cents=int(r["high"]),
+                low_cents=int(r["low"]),
+                close_cents=int(r["close"]),
+                pre_close_cents=int(r["pre_close"]),
+                volume=int(r["volume"]),
+                turnover_rate=0.0,
+            )
+        )
 
     # 运行 Python 参考实现
     result = compute_derived(bars)
@@ -54,16 +57,31 @@ def test_streaks_vs_lkl():
         if key not in result_map:
             continue
         r = result_map[key]
-        for field in ("is_limit_up", "is_limit_down", "is_one_word", "is_exchange",
-                       "is_bomb", "touched_limit", "cont_days"):
+        for field in (
+            "is_limit_up",
+            "is_limit_down",
+            "is_one_word",
+            "is_exchange",
+            "is_bomb",
+            "touched_limit",
+            "cont_days",
+        ):
             if getattr(r, field) != d[field]:
-                mismatches.append({
-                    "code": d["code"], "date": d["date"], "field": field,
-                    "python": getattr(r, field), "lkl": d[field],
-                })
+                mismatches.append(
+                    {
+                        "code": d["code"],
+                        "date": d["date"],
+                        "field": field,
+                        "python": getattr(r, field),
+                        "lkl": d[field],
+                    }
+                )
 
     if mismatches:
-        pytest.fail(f"对账失败 {len(mismatches)} 处:\n" + "\n".join(
-            f"  {m['code']} {m['date']} {m['field']}: python={m['python']} lkl={m['lkl']}"
-            for m in mismatches[:20]
-        ))
+        pytest.fail(
+            f"对账失败 {len(mismatches)} 处:\n"
+            + "\n".join(
+                f"  {m['code']} {m['date']} {m['field']}: python={m['python']} lkl={m['lkl']}"
+                for m in mismatches[:20]
+            )
+        )

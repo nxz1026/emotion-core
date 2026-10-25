@@ -1,4 +1,5 @@
 """网络请求工具函数（utils.fetch）：fetch_json / fetch_json_list / is_positive / retry_fetch。"""
+
 from __future__ import annotations
 
 from emotion_core.utils import errors, fetch
@@ -35,8 +36,7 @@ class TestFetchJson:
             def json(self):
                 return {"key": "value"}
 
-        monkeypatch.setattr(fetch, "_do_request",
-                            lambda url, **kw: FakeResp())
+        monkeypatch.setattr(fetch, "_do_request", lambda url, **kw: FakeResp())
         result = fetch.fetch_json("http://example.com", {"a": 1})
         assert result == {"key": "value"}
 
@@ -64,8 +64,7 @@ class TestFetchJson:
             def json(self):
                 raise ValueError("not json")
 
-        monkeypatch.setattr(fetch, "_do_request",
-                            lambda url, **kw: FakeResp())
+        monkeypatch.setattr(fetch, "_do_request", lambda url, **kw: FakeResp())
         try:
             fetch.fetch_json("http://example.com", {})
         except errors.DataError as e:
@@ -83,8 +82,7 @@ class TestFetchJson:
             def json(self):
                 return [1, 2, 3]
 
-        monkeypatch.setattr(fetch, "_do_request",
-                            lambda url, **kw: FakeResp())
+        monkeypatch.setattr(fetch, "_do_request", lambda url, **kw: FakeResp())
         try:
             fetch.fetch_json("http://example.com", {})
         except errors.DataError as e:

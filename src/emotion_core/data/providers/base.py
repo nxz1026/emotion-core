@@ -2,6 +2,7 @@
 
 从 lkl/providers/base.py 移植，去掉 lkl 依赖。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -11,8 +12,18 @@ import pandas as pd
 
 from emotion_core.utils.errors import DataError, FetchError, ProviderError
 
-BAR_COLS = ["code", "date", "open", "high", "low", "close",
-            "pre_close", "volume", "amount", "turnover_rate"]
+BAR_COLS = [
+    "code",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "volume",
+    "amount",
+    "turnover_rate",
+]
 
 __all__ = [
     "BAR_COLS",

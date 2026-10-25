@@ -36,6 +36,7 @@ fail-fast：任何一步抛异常即刻返回 1，后面的步骤根本不执行
     python -m emotion_core.orchestration.watchdog --ack 1,2,3  # 确认并出队
     python -m emotion_core.orchestration.watchdog --date 2026-09-28
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,20 +52,18 @@ log = logging.getLogger("emotion_core.watchdog")
 def _fmt(items: list[dict]) -> str:
     if not items:
         return "（无未确认告警）"
-    return "\n".join(f"[{a['id']}] {a['level']}/{a['source']}: {a['detail']}"
-                     for a in items)
+    return "\n".join(f"[{a['id']}] {a['level']}/{a['source']}: {a['detail']}" for a in items)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="emotion-core 链路看门狗")
-    parser.add_argument("--date", type=date.fromisoformat, default=None,
-                        help="交易日 YYYY-MM-DD，默认今天")
+    parser.add_argument(
+        "--date", type=date.fromisoformat, default=None, help="交易日 YYYY-MM-DD，默认今天"
+    )
     parser.add_argument("--list", action="store_true", help="只列未确认告警")
-    parser.add_argument("--ack", type=str, default=None,
-                        help="确认并出队的告警 id，逗号分隔")
+    parser.add_argument("--ack", type=str, default=None, help="确认并出队的告警 id，逗号分隔")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
     if args.ack:
         ids = [int(x) for x in args.ack.split(",") if x.strip()]
@@ -82,13 +81,15 @@ def main() -> None:
     pending = alerts.pending(200)
     gaps = [a for a in pending if a["source"] == "health"]
     if gaps:
-        log.error("watchdog 检出 %d 条未确认断档（本轮新入队 %d 条）；"
-                  "修好后用 --ack <id> 出队才会转绿", len(gaps), n)
+        log.error(
+            "watchdog 检出 %d 条未确认断档（本轮新入队 %d 条）；修好后用 --ack <id> 出队才会转绿",
+            len(gaps),
+            n,
+        )
         for a in gaps[:5]:
             log.error("  [%s] %s", a["id"], a["detail"])
         sys.exit(1)
-    log.info("watchdog 全部检查通过（本轮新入队 %d 条，其他来源未确认告警 %d 条）",
-             n, len(pending))
+    log.info("watchdog 全部检查通过（本轮新入队 %d 条，其他来源未确认告警 %d 条）", n, len(pending))
 
 
 if __name__ == "__main__":

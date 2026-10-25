@@ -46,14 +46,12 @@ class TestSeries:
 class TestPersistence:
     def test_rate_uses_same_phase_and_same_streak(self, monkeypatch):
         # 「退潮第 2 天」共出现 3 次（第 1、4、8 天）：只有第 4 天次日仍退潮
-        phases = ["退潮", "退潮", "高潮",
-                  "退潮", "退潮", "退潮",
-                  "冰点", "退潮", "退潮", "高潮"]
+        phases = ["退潮", "退潮", "高潮", "退潮", "退潮", "退潮", "冰点", "退潮", "退潮", "高潮"]
         dates = _mock(monkeypatch, phases)
-        got = pp.persistence(dates[4])          # 退潮第 2 天
+        got = pp.persistence(dates[4])  # 退潮第 2 天
         assert got["phase"] == "退潮"
         assert got["streak"] == 2
-        assert got["n"] == 3                     # 三个「退潮第 2 天」样本
+        assert got["n"] == 3  # 三个「退潮第 2 天」样本
         assert got["same_next_n"] == 1
         assert got["rate"] == pytest.approx(33, abs=0.6)
 
@@ -63,7 +61,7 @@ class TestPersistence:
 
     def test_no_history_for_streak_gives_zero_n(self, monkeypatch):
         _mock(monkeypatch, ["退潮", "退潮", "退潮", "退潮", "退潮", "退潮", "退潮"])
-        got = pp.persistence(date(2026, 9, 7))   # 第 7 天，历史上没有第 7 天的样本
+        got = pp.persistence(date(2026, 9, 7))  # 第 7 天，历史上没有第 7 天的样本
         assert got["streak"] == 7
         assert got["n"] == 0
         assert got["rate"] is None
@@ -71,15 +69,13 @@ class TestPersistence:
 
 class TestLine:
     def test_returns_readable_sentence(self):
-        text = pp.line({"phase": "退潮", "streak": 3, "n": 20,
-                        "rate": 65.0, "same_next_n": 13})
+        text = pp.line({"phase": "退潮", "streak": 3, "n": 20, "rate": 65.0, "same_next_n": 13})
         assert "退潮已连续 3 天" in text
         assert "13/20" in text
         assert "65%" in text
 
     def test_no_sample_says_so(self):
-        text = pp.line({"phase": "发酵", "streak": 9, "n": 0, "rate": None,
-                        "same_next_n": 0})
+        text = pp.line({"phase": "发酵", "streak": 9, "n": 0, "rate": None, "same_next_n": 0})
         assert "没有" in text and "延续率" in text
 
     def test_empty_dict_gives_empty_string(self):

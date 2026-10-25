@@ -5,6 +5,7 @@
 
 依赖方向：algorithms → services → data → domain
 """
+
 from __future__ import annotations
 
 from datetime import date

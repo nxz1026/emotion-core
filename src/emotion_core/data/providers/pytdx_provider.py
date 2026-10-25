@@ -9,6 +9,7 @@
 - `from lkl.providers.base import ...` → `from emotion_core.data.providers.base import ...`
 - `config.FETCH_RETRY`/`config.TIME_SLEEP` → 模块级常量（值同 lkl config.py）
 """
+
 from __future__ import annotations
 
 # TDX 服务器列表（可通过环境变量 TDX_HOSTS 覆盖，格式 "host:port,host:port"）
@@ -29,16 +30,25 @@ from emotion_core.utils.fetch import retry_fetch
 def _parse_tdx_hosts() -> list:
     env_raw = _os.environ.get("TDX_HOSTS", "").strip()
     if not env_raw:
-        return [("180.153.18.170", 7709), ("119.147.212.81", 7709),
-                ("124.160.88.183", 7709), ("218.85.139.19", 7727),
-                ("115.238.90.165", 7709)]
+        return [
+            ("180.153.18.170", 7709),
+            ("119.147.212.81", 7709),
+            ("124.160.88.183", 7709),
+            ("218.85.139.19", 7727),
+            ("115.238.90.165", 7709),
+        ]
     try:
         pairs = [p.strip() for p in env_raw.split(",") if p.strip()]
         return [(h, int(p)) for h, p in (pair.rsplit(":", 1) for pair in pairs)]
     except (ValueError, IndexError):
-        return [("180.153.18.170", 7709), ("119.147.212.81", 7709),
-                ("124.160.88.183", 7709), ("218.85.139.19", 7727),
-                ("115.238.90.165", 7709)]
+        return [
+            ("180.153.18.170", 7709),
+            ("119.147.212.81", 7709),
+            ("124.160.88.183", 7709),
+            ("218.85.139.19", 7727),
+            ("115.238.90.165", 7709),
+        ]
+
 
 _TDX_HOSTS = _parse_tdx_hosts()
 
@@ -51,6 +61,7 @@ def _tdx():
     if api is not None:
         return api
     from pytdx.hq import TdxHq_API
+
     api = TdxHq_API()
     for host, port in _TDX_HOSTS:
         try:

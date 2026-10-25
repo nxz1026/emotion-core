@@ -7,6 +7,7 @@
 `status=OK` 只证明「没抛异常」，摘要才让「写了 0 行」与「正常产出」可区分，
 见 _run_step 与 _signal_detail。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -80,7 +81,9 @@ def _trading_day_guard(trade_date: date) -> bool:
     return True
 
 
-def run_daily(trade_date: date | None = None, *, from_step: str | None = None, dry_run: bool = False) -> int:
+def run_daily(
+    trade_date: date | None = None, *, from_step: str | None = None, dry_run: bool = False
+) -> int:
     """执行每日全流程。
 
     Args:
@@ -152,15 +155,18 @@ def _signal_detail(trade_date: date, sig: object | None) -> str:
     """
     try:
         from emotion_core.algorithms import entry
+
         window = entry.current_window(trade_date)
-    except Exception as exc:                      # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         # 打点是旁路：读窗口失败不得把 signal 步变成 FAILED（信号本身可能已落库）
         log.warning("signal 明细降级：buy_window 读取失败 %s", exc)
         window = "unknown"
     if sig is None:
         return f"signals=0 buy_window={window}"
-    return (f"signals=1 code={sig.code} action={sig.action.value}"
-            f" buy_window={window} source={sig.source.value}")
+    return (
+        f"signals=1 code={sig.code} action={sig.action.value}"
+        f" buy_window={window} source={sig.source.value}"
+    )
 
 
 #: basic 步里巨潮行业回填的单次上限。正常日 only_missing 只有当日新股（个位数），
@@ -192,8 +198,9 @@ def _basic_detail() -> str:
 
     try:
         from emotion_core.data import fill_stock_basic
+
         parts.append(f"spot={fill_stock_basic.backfill()}")
-    except Exception as exc:                      # noqa: BLE001 —— 源异常类型不定
+    except Exception as exc:  # noqa: BLE001 —— 源异常类型不定
         log.warning("basic: 全市场快照刷新失败（保留旧值）：%s", exc)
         parts.append(f"spot=FAILED({_brief(exc)})")
 
@@ -201,16 +208,20 @@ def _basic_detail() -> str:
     # 下面两步的 only_missing 才把它们算进目标集合。
     try:
         from emotion_core.data import fill_list_date
+
         parts.append(f"list_date={fill_list_date.backfill(only_missing=True)}")
-    except Exception as exc:                      # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.warning("basic: 上市日期回填失败（保留旧值）：%s", exc)
         parts.append(f"list_date=FAILED({_brief(exc)})")
 
     try:
         from emotion_core.data import fill_industry
-        parts.append("industry=" + str(fill_industry.backfill(
-            "cninfo", only_missing=True, limit=_INDUSTRY_LIMIT)))
-    except Exception as exc:                      # noqa: BLE001
+
+        parts.append(
+            "industry="
+            + str(fill_industry.backfill("cninfo", only_missing=True, limit=_INDUSTRY_LIMIT))
+        )
+    except Exception as exc:  # noqa: BLE001
         log.warning("basic: 行业回填失败（保留旧值）：%s", exc)
         parts.append(f"industry=FAILED({_brief(exc)})")
 
@@ -229,6 +240,7 @@ def _run_step(step: str, trade_date: date) -> str:
     """
     if step == "sync":
         from emotion_core.services.ingest import snapshot_daily
+
         snapshot_daily(trade_date)
     elif step == "hot":
         # 东财人气榜 top100。``fetch_hot_snapshot`` 自带守卫：当前榜只对应最新
@@ -239,11 +251,13 @@ def _run_step(step: str, trade_date: date) -> str:
         # 整条 daily 返回 1，「人气榜不能回补」是**不适用**，不是**失败**。
         # 口径与 ``_trading_day_guard`` 一致：非交易日直接返回 0，不算失败。
         from emotion_core.data.providers.eastmoney import em_data_date
+
         current = em_data_date()
         if current != trade_date:
             log.info("hot: 跳过 %s（人气榜只对应 %s，不回补历史）", trade_date, current)
             return ""
         from emotion_core.services.ingest import fetch_hot_snapshot
+
         fetch_hot_snapshot(trade_date)
     elif step == "basic":
         # 快照类刷新：stock_basic 的那几列没有日期维度（是「最新值」），
@@ -255,25 +269,32 @@ def _run_step(step: str, trade_date: date) -> str:
         return _basic_detail()
     elif step == "coverage":
         from emotion_core.services.coverage import gate
-        gate(trade_date)          # 不足 0.90 抛 CoverageBlocked → 退出码 76
+
+        gate(trade_date)  # 不足 0.90 抛 CoverageBlocked → 退出码 76
     elif step == "derive":
         from emotion_core.services.derive_service import run as derive_run
+
         derive_run(trade_date)
     elif step == "market":
         from emotion_core.services.market_service import run as market_run
+
         market_run(trade_date)
     elif step == "ladder":
         from emotion_core.algorithms import ladder
+
         # 现成返回值即当日梯队行数（= 候选数），不改算法层、不新增查询
         return f"候选={ladder.persist(trade_date)}"
     elif step == "signal":
         from emotion_core.services.signal_service import run as signal_run
+
         return _signal_detail(trade_date, signal_run(trade_date))
     elif step == "promotion":
         from emotion_core.services.promotion_service import run as promotion_run
+
         promotion_run(trade_date)
     elif step == "theme":
         from emotion_core.services.theme_service import run as theme_run
+
         # 现成返回值即当日题材组数（同 ladder 步：口径只在业务层一处，编排层不新增查询）。
         # 2026-10-14 实测缺口：本步此前丢弃返回值 ⇒ detail 恒为 ''，而这一次题材源刚
         # 从 NullProvider 换成新浪概念，「题材源挂了(0 组)」与「正常产出(24 组)」在
@@ -281,19 +302,23 @@ def _run_step(step: str, trade_date: date) -> str:
         return f"题材组={theme_run(trade_date)}"
     elif step == "ecosystem":
         from emotion_core.services.ecosystem_service import run as ecosystem_run
+
         ecosystem_run(trade_date)
     elif step == "strategy":
         from emotion_core.services.strategy import run_for_date as strategy_run
+
         strategy_run(trade_date)
     elif step == "outcome":
         # 回填 signal_outcome（L3 结果），不是回填 signal——replay_service 是
         # 「历史 signal 回填」另一件事，此前接错（审核文档 §9 第 12 条）。
         from emotion_core.algorithms import outcome
+
         outcome.backfill()
     elif step == "health":
         # 三条断档检查（报告/数据链/信号回填）→ 去重入 alert 队列 → 推 webhook。
         # health.push 内部对 webhook 失败降级为 warning，不抛（不拦主链）。
         from emotion_core.algorithms import health
+
         health.push(trade_date)
     else:
         raise ValueError(f"未知步骤: {step}")
@@ -310,8 +335,7 @@ def main() -> None:
     # 必须显式配置：没有 handler 时只有 WARNING+ 会被 logging.lastResort 打到 stderr，
     # 于是 systemd journal 里看不到步骤进度与「非交易日跳过」，只有告警——
     # 运维无法判断跑过哪些步骤（实测 09-27 那次补跑日志只剩一行 sync 失败）。
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     sys.exit(run_daily(args.date, from_step=args.from_step, dry_run=args.dry_run))
 
 

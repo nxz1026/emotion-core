@@ -7,6 +7,7 @@ dragon_env / dragon_env_reasons / dragon_env_risks 三列。
 
 依赖方向：algorithms → services → data → domain
 """
+
 from __future__ import annotations
 
 import argparse
@@ -71,14 +72,12 @@ def run_range(start: date, end: date) -> int:
     回填 ROI 就是本地查询时间（669 日量级约数分钟）。这也是它和行业回填
     （巨潮逐股）在额度上的根本差别。
     """
-    return dragon_env.run_range(start, end,
-                                persist_fn=update_market_stat_ecosystem)
+    return dragon_env.run_range(start, end, persist_fn=update_market_stat_ecosystem)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI：``python -m emotion_core.services.ecosystem_service --start ... --end ...``。"""
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="emotion-core 生态评级回填")
     parser.add_argument("--start", type=date.fromisoformat, required=True, help="起始日 YYYY-MM-DD")
     parser.add_argument("--end", type=date.fromisoformat, required=True, help="结束日 YYYY-MM-DD")
@@ -88,5 +87,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":        # 少了这段 `python -m ...` 只会 import 一把、
-    sys.exit(main())              # 静默 exit 0 —— 第一次实跑就是这么空转的
+if __name__ == "__main__":  # 少了这段 `python -m ...` 只会 import 一把、
+    sys.exit(main())  # 静默 exit 0 —— 第一次实跑就是这么空转的

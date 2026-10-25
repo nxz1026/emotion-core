@@ -1,10 +1,10 @@
 """测试 ref_limit_rule 种子数据与查询（DB mock 版）。"""
+
 from __future__ import annotations
 
 from datetime import date
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from emotion_core.services import ref_limit_rule as mod
 

@@ -15,6 +15,7 @@ emotion-core 的契约已漂移」：
 
 本文件锁这四处的语义，纯函数 + IO 桩，不连库。
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -28,11 +29,12 @@ from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Checklist
 from emotion_core.orchestration import report as report_cli
 
-D = date(2026, 9, 8)        # 评估日
-P = date(2026, 9, 7)       # 前一交易日
+D = date(2026, 9, 8)  # 评估日
+P = date(2026, 9, 7)  # 前一交易日
 
 
 # ────────────────────── 断点 2：ladder.y_competition ──────────────────────
+
 
 class TestYCompetition:
     """R2 淘汰赛况 (g, s) = (昨日最高换手组只数, 今日幸存只数)。"""
@@ -41,18 +43,19 @@ class TestYCompetition:
     def stub(self, monkeypatch):
         def _apply(prev_rows, today_exchange, prev_of=lambda d: P):
             by_date = {P: prev_rows, D: [("600001", 4, True)]}
-            monkeypatch.setattr(ladder, "load_ladder_candidates",
-                                lambda d: by_date.get(d, []))
-            monkeypatch.setattr(ladder, "load_exchange_codes",
-                                lambda d: set(today_exchange if d == D else
-                                              [c for c, _, _ in prev_rows]))
+            monkeypatch.setattr(ladder, "load_ladder_candidates", lambda d: by_date.get(d, []))
+            monkeypatch.setattr(
+                ladder,
+                "load_exchange_codes",
+                lambda d: set(today_exchange if d == D else [c for c, _, _ in prev_rows]),
+            )
             monkeypatch.setattr(ladder, "prev_trading_day", prev_of)
+
         return _apply
 
     def test_counts_group_and_survivors(self, stub):
         # 昨日 3 板组 2 只（600001/600002），今日只有 600001 仍换手 → (2, 1)
-        stub([("600001", 3, True), ("600002", 3, True), ("000003", 2, True)],
-             ["600001"])
+        stub([("600001", 3, True), ("600002", 3, True), ("000003", 2, True)], ["600001"])
         assert ladder.y_competition(D) == (2, 1)
 
     def test_two_survivors_not_sole(self, stub):
@@ -70,6 +73,7 @@ class TestYCompetition:
 
 
 # ────────────────── 断点 1/3：LadderRow 质量列补齐 ──────────────────
+
 
 class _Cur:
     def __init__(self, rows):
@@ -90,16 +94,25 @@ class _Conn:
 
 def _stub_ro(monkeypatch, rows, sink=None):
     """connect_ro 桩：真实实现是上下文管理器，桩必须照同样的协议给。"""
+
     @contextlib.contextmanager
     def _cm():
         yield _Conn(rows, sink if sink is not None else [])
+
     monkeypatch.setattr(review_mod, "connect_ro", _cm)
 
 
 def _base_row(code="600001", cont=4, ex=True):
-    return LadderDay(date=D, code=code, cont_days=cont, is_exchange=ex,
-                      is_top=True, is_sole_top=True, y_top_group_count=2,
-                      y_top_survivor_count=1)
+    return LadderDay(
+        date=D,
+        code=code,
+        cont_days=cont,
+        is_exchange=ex,
+        is_top=True,
+        is_sole_top=True,
+        y_top_group_count=2,
+        y_top_survivor_count=1,
+    )
 
 
 class TestLadderView:
@@ -129,11 +142,12 @@ class TestLadderView:
         r = review_mod.ladder_view(D, [_base_row()])[0]
         assert r.bomb_times is None and r.turnover_rate is None
         assert r.is_one_word is None
-        assert r.name == ""            # stock_basic 无此票时不编造名称
+        assert r.name == ""  # stock_basic 无此票时不编造名称
 
     def test_empty_rows_skips_query(self, monkeypatch):
         def boom():
             raise AssertionError("空梯队不该打库")
+
         monkeypatch.setattr(review_mod, "connect_ro", boom)
         assert review_mod.ladder_view(D, []) == []
 
@@ -141,8 +155,15 @@ class TestLadderView:
         """JSON 出口走 dataclasses.asdict：若改成包装+透传会只剩包装层字段。"""
         _stub_ro(monkeypatch, [("600001", "测试龙", 12.5, 3, True)])
         import json
-        d = {"date": D, "ladder_rows": review_mod.ladder_view(D, [_base_row()]),
-             "stat": None, "sole": None, "elimination": [], "quality": {}}
+
+        d = {
+            "date": D,
+            "ladder_rows": review_mod.ladder_view(D, [_base_row()]),
+            "stat": None,
+            "sole": None,
+            "elimination": [],
+            "quality": {},
+        }
         js = json.loads(review_mod.render_json(d))
         row = js["ladder_rows"][0]
         assert row["code"] == "600001" and row["cont_days"] == 4
@@ -151,29 +172,44 @@ class TestLadderView:
 
 # ────────────── R67-1：速览最高板数字后缀票名 ──────────────
 
+
 def _note_row(code, name, cont, *, ex=True, one=False, susp=False):
     """梯队行桩：`_top_boards_note` 只读这几个属性。"""
     return review_mod.LadderRow(
-        date=D, code=code, cont_days=cont, is_exchange=ex, is_top=True,
-        is_sole_top=False, y_top_group_count=1, y_top_survivor_count=1,
-        name=name, turnover_rate=None, bomb_times=None,
-        is_one_word=one, is_suspended=susp)
+        date=D,
+        code=code,
+        cont_days=cont,
+        is_exchange=ex,
+        is_top=True,
+        is_sole_top=False,
+        y_top_group_count=1,
+        y_top_survivor_count=1,
+        name=name,
+        turnover_rate=None,
+        bomb_times=None,
+        is_one_word=one,
+        is_suspended=susp,
+    )
 
 
 def _stub_review_query(monkeypatch, *, health=P, note=None, sink=None):
     """query_df 路由桩：`_health_of` 走 review_report/daily_bar，兜底票名走 derived_bar。"""
+
     def q(sql, params=()):
         if sink is not None:
             sink.append((sql, params))
         if "review_report" in sql:
             import pandas as pd
+
             return pd.DataFrame({"d": [health]})
         if "derived_bar" in sql:
             return note
         if "SELECT DISTINCT date FROM daily_bar" in sql:
             import pandas as pd
+
             return pd.DataFrame({"date": [P]})
         raise AssertionError(f"意外的查询：{sql}")
+
     monkeypatch.setattr(review_mod, "query_df", q)
 
 
@@ -183,24 +219,29 @@ class TestTopBoardsNote:
     def test_uses_ladder_rows_without_touching_db(self, monkeypatch):
         def boom(sql, params=()):
             raise AssertionError("梯队行已够，不该兜底打库")
+
         monkeypatch.setattr(review_mod, "query_df", boom)
-        d = {"stat": {"max_limit_days": 10},
-             "ladder_rows": [_note_row("600825", "新华传媒", 10, one=True)]}
+        d = {
+            "stat": {"max_limit_days": 10},
+            "ladder_rows": [_note_row("600825", "新华传媒", 10, one=True)],
+        }
         assert review_mod._top_boards_note(d, "max_limit_days") == "（新华传媒 600825 一字）"
 
     def test_single_name_has_no_count_suffix(self, monkeypatch):
         """1 只票不加「等 N 只」——速览要短。"""
         monkeypatch.setattr(review_mod, "query_df", lambda *a, **k: None)
-        d = {"stat": {"max_limit_days": 5},
-             "ladder_rows": [_note_row("000530", "冰山冷热", 5)]}
+        d = {"stat": {"max_limit_days": 5}, "ladder_rows": [_note_row("000530", "冰山冷热", 5)]}
         assert review_mod._top_boards_note(d, "max_limit_days") == "（冰山冷热 000530）"
 
     def test_tradable_key_requires_exchange(self, monkeypatch):
         """可交易最高板只认换手板：非换手同高行进不了后缀。"""
         seen = []
         _stub_review_query(monkeypatch, note=None, sink=seen)
-        d = {"date": D, "stat": {"tradable_max_days": 5},
-             "ladder_rows": [_note_row("600001", "一字龙", 5, one=True, ex=False)]}
+        d = {
+            "date": D,
+            "stat": {"tradable_max_days": 5},
+            "ladder_rows": [_note_row("600001", "一字龙", 5, one=True, ex=False)],
+        }
         # 无换手同高行 → 走兜底（兜底 SQL 必须带 is_exchange 过滤）
         assert review_mod._top_boards_note(d, "tradable_max_days") == ""
         sql = seen[-1][0]
@@ -217,23 +258,33 @@ class TestTopBoardsNote:
         """停牌身位不计入最高板（owner 拍板）——停牌行不得出现在后缀里。"""
         seen = []
         _stub_review_query(monkeypatch, note=None, sink=seen)
-        d = {"date": D, "stat": {"max_limit_days": 10},
-             "ladder_rows": [_note_row("600825", "新华传媒", 10, susp=True)]}
+        d = {
+            "date": D,
+            "stat": {"max_limit_days": 10},
+            "ladder_rows": [_note_row("600825", "新华传媒", 10, susp=True)],
+        }
         assert review_mod._top_boards_note(d, "max_limit_days") == ""
-        assert "derived_bar" in seen[-1][0]     # 被排除后只能兜底
+        assert "derived_bar" in seen[-1][0]  # 被排除后只能兜底
 
     def test_fallback_reads_derived_bar(self, monkeypatch):
         import pandas as pd
-        _stub_review_query(monkeypatch, note=pd.DataFrame(
-            {"code": ["600825"], "name": ["新华传媒"], "is_one_word": [True]}))
+
+        _stub_review_query(
+            monkeypatch,
+            note=pd.DataFrame({"code": ["600825"], "name": ["新华传媒"], "is_one_word": [True]}),
+        )
         d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
         assert review_mod._top_boards_note(d, "max_limit_days") == "（新华传媒 600825 一字）"
 
     def test_fallback_limit_is_three(self, monkeypatch):
         seen = []
         import pandas as pd
-        _stub_review_query(monkeypatch, note=pd.DataFrame(
-            {"code": ["a"], "name": ["A"], "is_one_word": [False]}), sink=seen)
+
+        _stub_review_query(
+            monkeypatch,
+            note=pd.DataFrame({"code": ["a"], "name": ["A"], "is_one_word": [False]}),
+            sink=seen,
+        )
         d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
         review_mod._top_boards_note(d, "max_limit_days")
         assert seen[-1][1][-1] == review_mod._MAX_NOTE_NAMES == 3
@@ -253,14 +304,17 @@ class TestTopBoardsNote:
 
     def test_empty_df_returns_empty(self, monkeypatch):
         import pandas as pd
+
         _stub_review_query(monkeypatch, note=pd.DataFrame(columns=["code", "name", "is_one_word"]))
         d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
         assert review_mod._top_boards_note(d, "max_limit_days") == ""
 
     def test_exception_is_swallowed(self, monkeypatch):
         """速览不能因补票名失败而整篇渲染不出来。"""
+
         def boom(sql, params=()):
             raise RuntimeError("库炸了")
+
         monkeypatch.setattr(review_mod, "query_df", boom)
         d = {"date": D, "stat": {"max_limit_days": 10}, "ladder_rows": []}
         assert review_mod._top_boards_note(d, "max_limit_days") == ""
@@ -270,18 +324,27 @@ class TestTopBoardsNote:
         _stub_review_query(monkeypatch)
         d = {
             "date": D,
-            "stat": {"limit_up_count": 61, "max_limit_days": 10,
-                     "tradable_max_days": 4, "phase": "主升"},
-            "prev_stat": {"limit_up_count": 36, "max_limit_days": 5,
-                          "tradable_max_days": 4, "phase": "主升"},
-            "ladder_rows": [_note_row("600825", "新华传媒", 10, one=True),
-                            _note_row("000530", "冰山冷热", 4)],
+            "stat": {
+                "limit_up_count": 61,
+                "max_limit_days": 10,
+                "tradable_max_days": 4,
+                "phase": "主升",
+            },
+            "prev_stat": {
+                "limit_up_count": 36,
+                "max_limit_days": 5,
+                "tradable_max_days": 4,
+                "phase": "主升",
+            },
+            "ladder_rows": [
+                _note_row("600825", "新华传媒", 10, one=True),
+                _note_row("000530", "冰山冷热", 4),
+            ],
             "quality": {"diff": None, "warns": []},
         }
         out = review_mod._sec_overview(d)
         # suffix 在四分支里都拼（含「持平」）——两端都带票名，与 lkl 口径一致
-        assert ("- 名义最高板：5（新华传媒 600825 一字） → "
-                "10（新华传媒 600825 一字）") in out
+        assert ("- 名义最高板：5（新华传媒 600825 一字） → 10（新华传媒 600825 一字）") in out
         assert "- 可交易最高板：4（冰山冷热 000530）（持平）" in out
         assert "- 涨停家数：36 → 61" in out
         assert "涨停家数：36（" not in out
@@ -289,29 +352,50 @@ class TestTopBoardsNote:
 
 # ────────────── R67-2：②段停牌身位单独展示 ──────────────
 
+
 class TestSecLadderSuspended:
     """`_sec_ladder`：停牌行不并进板数分组，只在末尾单独一行「N板（停牌）」。"""
 
     @staticmethod
     def _row(code, name, cont, *, ex=True, susp=False, bomb=None):
         return review_mod.LadderRow(
-            date=D, code=code, cont_days=cont, is_exchange=ex, is_top=False,
-            is_sole_top=False, y_top_group_count=1, y_top_survivor_count=1,
-            name=name, turnover_rate=None, bomb_times=bomb,
-            is_one_word=not ex, is_suspended=susp)
+            date=D,
+            code=code,
+            cont_days=cont,
+            is_exchange=ex,
+            is_top=False,
+            is_sole_top=False,
+            y_top_group_count=1,
+            y_top_survivor_count=1,
+            name=name,
+            turnover_rate=None,
+            bomb_times=bomb,
+            is_one_word=not ex,
+            is_suspended=susp,
+        )
 
     def test_suspended_line_is_rendered_last(self):
-        d = {"ladder_rows": [self._row("002952", "捷荣技术", 4),
-                             self._row("600825", "新华传媒", 10, susp=True)]}
+        d = {
+            "ladder_rows": [
+                self._row("002952", "捷荣技术", 4),
+                self._row("600825", "新华传媒", 10, susp=True),
+            ]
+        }
         out = review_mod._sec_ladder(d)
         lines = [ln for ln in out.splitlines() if ln.startswith("- **")]
-        assert lines == ["- **4板** [1只] 捷荣技术(002952)",
-                         "- **10板（停牌）** [1只] 新华传媒(600825)"]
+        assert lines == [
+            "- **4板** [1只] 捷荣技术(002952)",
+            "- **10板（停牌）** [1只] 新华传媒(600825)",
+        ]
 
     def test_suspended_not_merged_into_same_height_group(self):
         """同板数时停牌行不得混进正常分组（否则数字被污染）。"""
-        d = {"ladder_rows": [self._row("002952", "捷荣技术", 4),
-                             self._row("600825", "新华传媒", 4, susp=True)]}
+        d = {
+            "ladder_rows": [
+                self._row("002952", "捷荣技术", 4),
+                self._row("600825", "新华传媒", 4, susp=True),
+            ]
+        }
         out = review_mod._sec_ladder(d)
         assert "- **4板** [1只] 捷荣技术(002952)" in out
         assert "- **4板（停牌）** [1只] 新华传媒(600825)" in out
@@ -321,13 +405,11 @@ class TestSecLadderSuspended:
 
         注意尾部固有一行「开板计数为东财 zbc 字段…」说明，故只断言停牌行本身。
         """
-        d = {"ladder_rows": [self._row("600825", "新华传媒", 10, ex=False,
-                                       susp=True, bomb=7)]}
+        d = {"ladder_rows": [self._row("600825", "新华传媒", 10, ex=False, susp=True, bomb=7)]}
         out = review_mod._sec_ladder(d)
         line = next(ln for ln in out.splitlines() if ln.startswith("- **"))
         assert line == "- **10板（停牌）** [1只] 新华传媒(600825)"
-        assert next(ln for ln in out.splitlines()
-                    if ln.startswith("> ")).startswith("> 开板计数")
+        assert next(ln for ln in out.splitlines() if ln.startswith("> ")).startswith("> 开板计数")
 
     def test_only_suspended_rows_has_no_heading_hole(self):
         d = {"ladder_rows": [self._row("600825", "新华传媒", 10, susp=True)]}
@@ -337,40 +419,54 @@ class TestSecLadderSuspended:
 
     def test_all_empty_keeps_original_placeholder(self):
         assert review_mod._sec_ladder({"ladder_rows": []}) == (
-            "## ② 梯队全景\n\n无连板梯队（当日无 ≥2 板）\n")
+            "## ② 梯队全景\n\n无连板梯队（当日无 ≥2 板）\n"
+        )
 
     def test_suspended_rows_excluded_from_seal_notes(self):
         """停牌行已被摘出，`_seal_notes` 不该为它出开板回封附注。"""
-        d = {"ladder_rows": [self._row("600825", "新华传媒", 10, susp=True, bomb=7)],
-             "seal_map": {"600825": ("09:31", "14:20")}}
+        d = {
+            "ladder_rows": [self._row("600825", "新华传媒", 10, susp=True, bomb=7)],
+            "seal_map": {"600825": ("09:31", "14:20")},
+        }
         out = review_mod._sec_ladder(d)
         assert "首封" not in out
 
     def test_normal_rows_keep_seal_notes(self):
-        d = {"ladder_rows": [self._row("002952", "捷荣技术", 4, bomb=2)],
-             "seal_map": {"002952": ("09:31", "14:20")}}
+        d = {
+            "ladder_rows": [self._row("002952", "捷荣技术", 4, bomb=2)],
+            "seal_map": {"002952": ("09:31", "14:20")},
+        }
         out = review_mod._sec_ladder(d)
         assert "> 捷荣技术：首封09:31 末次回封14:20（东财 zbc=2）" in out
 
     def test_heights_sorted_descending_with_suspended_tail(self):
-        d = {"ladder_rows": [self._row("600001", "甲", 3),
-                             self._row("600002", "乙", 6),
-                             self._row("600825", "新华传媒", 10, susp=True),
-                             self._row("600003", "丙", 2, susp=True)]}
+        d = {
+            "ladder_rows": [
+                self._row("600001", "甲", 3),
+                self._row("600002", "乙", 6),
+                self._row("600825", "新华传媒", 10, susp=True),
+                self._row("600003", "丙", 2, susp=True),
+            ]
+        }
         out = review_mod._sec_ladder(d)
         lines = [ln for ln in out.splitlines() if ln.startswith("- **")]
-        assert lines == ["- **6板** [1只] 乙(600002)",
-                         "- **3板** [1只] 甲(600001)",
-                         "- **10板（停牌）** [1只] 新华传媒(600825)",
-                         "- **2板（停牌）** [1只] 丙(600003)"]
+        assert lines == [
+            "- **6板** [1只] 乙(600002)",
+            "- **3板** [1只] 甲(600001)",
+            "- **10板（停牌）** [1只] 新华传媒(600825)",
+            "- **2板（停牌）** [1只] 丙(600003)",
+        ]
 
 
 # ────────────── 断点 3：entry.split_checklist API 漂移后的行拆分 ──────────────
 
+
 class TestSplitRows:
-    ROWS = [("c1 唯一换手高标", True, "唯一换手高标: 600001 4板"),
-            ("c3 淘汰赛身份", False, "昨日最高板组2只→今日幸存1只"),
-            ("W1 同身位扎堆", True, "⚠ 绝对最高4板2只同身位")]
+    ROWS = [
+        ("c1 唯一换手高标", True, "唯一换手高标: 600001 4板"),
+        ("c3 淘汰赛身份", False, "昨日最高板组2只→今日幸存1只"),
+        ("W1 同身位扎堆", True, "⚠ 绝对最高4板2只同身位"),
+    ]
 
     def test_split_by_label_prefix(self):
         conds, warns = review_mod._split_rows(self.ROWS)
@@ -389,51 +485,73 @@ class TestSplitRows:
         rows[1] = ("c2 x", False, "")
         assert review_mod._passed_of_rows(rows) is False
 
-    @pytest.mark.parametrize("ok_vals,expect", [
-        ((True, True, True, True, True), True),
-        ((True, True, False, True, True), False),
-        ((True, None, True, True, True), True),
-        ((True, None, False, True, None), False),
-    ])
+    @pytest.mark.parametrize(
+        "ok_vals,expect",
+        [
+            ((True, True, True, True, True), True),
+            ((True, True, False, True, True), False),
+            ((True, None, True, True, True), True),
+            ((True, None, False, True, None), False),
+        ],
+    )
     def test_parity_with_checklist_passed(self, ok_vals, expect):
         """与契约层 Checklist.passed 对拍——报告不得另立通过规则。"""
-        rows = [(f"c{i+1} x", v, "") for i, v in enumerate(ok_vals)]
-        cl = Checklist(c1_uniqueness=ok_vals[0], c2_exchange=ok_vals[1],
-                       c3_elimination=ok_vals[2], c4_min_days=ok_vals[3],
-                       c5_strength_diverge=ok_vals[4], w1_crowding=True)
+        rows = [(f"c{i + 1} x", v, "") for i, v in enumerate(ok_vals)]
+        cl = Checklist(
+            c1_uniqueness=ok_vals[0],
+            c2_exchange=ok_vals[1],
+            c3_elimination=ok_vals[2],
+            c4_min_days=ok_vals[3],
+            c5_strength_diverge=ok_vals[4],
+            w1_crowding=True,
+        )
         assert cl.passed is expect
         assert review_mod._passed_of_rows(rows) is expect
 
 
 # ────────────── 断点 4：entry.rows() 暴露带说明的行 ──────────────
 
+
 class TestEntryRows:
     @pytest.fixture
     def stub(self, monkeypatch):
         """桩掉 _ctx（含 _candidate_view 的 IO），只测 rows 的编排与行序。"""
+
         def _apply(window="STANDARD", **extra):
-            base = {"sole": _base_row(), "window": window,
-                    "min_days": entry.MIN_LEADER_DAYS,
-                    "diverge_min": entry.DIVERGE_MIN_TURNOVER,
-                    "y_comp": (2, 1), "y_surv": ({"600001"}, {"600001"}),
-                    "rows": [_base_row()], "c5_verifiable": True,
-                    "name": "测试龙", "turnover_rate": 12.5, "bomb_times": 0}
+            base = {
+                "sole": _base_row(),
+                "window": window,
+                "min_days": entry.MIN_LEADER_DAYS,
+                "diverge_min": entry.DIVERGE_MIN_TURNOVER,
+                "y_comp": (2, 1),
+                "y_surv": ({"600001"}, {"600001"}),
+                "rows": [_base_row()],
+                "c5_verifiable": True,
+                "name": "测试龙",
+                "turnover_rate": 12.5,
+                "bomb_times": 0,
+            }
             # y_peer 由真实 _ctx 在 include_peer=True 时补入；桩掉 _ctx 后要自带，
             # 否则次级 c3（_c3_secondary）读 ctx["y_peer"] 会 KeyError。
             base.setdefault("y_peer", 2)
             base.update(extra)
             monkeypatch.setattr(entry, "_ctx", lambda *a, **k: base)
+
         return _apply
 
     def test_rows_carry_notes_for_all_conditions(self, stub):
         """报告 §⑦ 靠 note 逐条讲「卡在哪一档」——布尔投影写不出这句话。"""
         stub()
         rows = entry.rows(_base_row(), "STANDARD")
-        assert len(rows) == 6, rows            # 5 条件 + 1 警告
+        assert len(rows) == 6, rows  # 5 条件 + 1 警告
         assert all(note for _, _, note in rows), rows
         assert [r[0] for r in rows[:5]] == [
-            "c1 唯一换手高标", "c2 换手板非一字", "c3 身份档（不否决）",
-            "c4 最低板数门槛", "c5 强度与分歧补偿"]
+            "c1 唯一换手高标",
+            "c2 换手板非一字",
+            "c3 身份档（不否决）",
+            "c4 最低板数门槛",
+            "c5 强度与分歧补偿",
+        ]
         conds, warns = review_mod._split_rows(rows)
         assert len(conds) == 5 and len(warns) == 1
 
@@ -443,18 +561,27 @@ class TestEntryRows:
         rows = entry.rows(_base_row(), "STANDARD")
         cl = entry.checklist(_base_row(), "STANDARD")
         conds, _ = review_mod._split_rows(rows)
-        for (_, ok, _), field in zip(conds, (
-                "c1_uniqueness", "c2_exchange", "c3_elimination",
-                "c4_min_days", "c5_strength_diverge")):
+        for (_, ok, _), field in zip(
+            conds,
+            (
+                "c1_uniqueness",
+                "c2_exchange",
+                "c3_elimination",
+                "c4_min_days",
+                "c5_strength_diverge",
+            ),
+        ):
             assert ok == getattr(cl, field), field
 
     def test_secondary_uses_relaxed_threshold(self, stub, monkeypatch):
         """secondary=True 走次级阈值（c4 门槛 3 板 + 次级 c3）。"""
         seen = {}
         real = entry._evaluate
+
         def spy(cand_, win, **kw):
             seen.update(kw)
             return real(cand_, win, **kw)
+
         stub()
         monkeypatch.setattr(entry, "_evaluate", spy)
         low = _base_row(cont=3)
@@ -465,6 +592,7 @@ class TestEntryRows:
 
 
 # ────────────────────────── 报告 CLI ──────────────────────────
+
 
 def _stub_query_df(monkeypatch, sqls, dates):
     """query_df 桩：记录 SQL，并返回可 itertuples 的最小 DataFrame 替身。"""

@@ -6,6 +6,7 @@
   emotion-core CONFIG（仅 LLM_PROFILE），经 `_cfg(name, default)` 取 lkl config.py
   原值，与 notify.py / doctor.py 同先例。
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,33 +19,46 @@ from emotion_core.utils.config import CONFIG
 _LOG = logging.getLogger(__name__)
 
 # lkl config.py LLM 层原值（emotion-core CONFIG 尚未收录，就地定义作 fallback）。
-LLM_CHAIN: list[str] = [name.strip() for name in os.environ.get(
-    "LKL_LLM_CHAIN", "").split(",") if name.strip()]
+LLM_CHAIN: list[str] = [
+    name.strip() for name in os.environ.get("LKL_LLM_CHAIN", "").split(",") if name.strip()
+]
 LLM_PROFILES: dict[str, dict] = {
     "default": {
         "base_url": "https://token.sensenova.cn/v1",
         "model": "glm-5.2",
-        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
-        "timeout": 120, "max_retry": 2,
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "top_p": 1.0,
+        "timeout": 120,
+        "max_retry": 2,
     },
     "fast": {
         "base_url": "https://token.sensenova.cn/v1",
         "model": "deepseek-v4-flash",
-        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
-        "timeout": 30, "max_retry": 2,
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "top_p": 1.0,
+        "timeout": 30,
+        "max_retry": 2,
     },
     "smart": {
         "base_url": "https://token.sensenova.cn/v1",
         "model": "sensenova-6.8-flash-lite",
-        "temperature": 0.3, "max_tokens": 4096, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "top_p": 1.0,
+        "timeout": 180,
+        "max_retry": 2,
     },
     # DSA 策略观察首选，密钥 LKL_LLM_API_KEY_AGNES。
     "agnes": {
         "base_url": "https://apihub.agnes-ai.com/v1",
         "model": "agnes-3.0-flash",
-        "temperature": 0.2, "max_tokens": 8192, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "top_p": 1.0,
+        "timeout": 180,
+        "max_retry": 2,
     },
 }
 LLM_KEY_ENV = "LKL_LLM_API_KEY"
@@ -161,7 +175,8 @@ def resolve_key(profile: str) -> str:
         f"未找到密钥：设 {_cfg('LLM_KEY_ENV', LLM_KEY_ENV)} 或 "
         f"{_cfg('LLM_PROFILE_KEY_ENV', LLM_PROFILE_KEY_ENV).get(profile, '')}"
         f"（可放 {_cfg('LLM_ENV_FILES', LLM_ENV_FILES)}）或放置密钥文件 "
-        f"{_cfg('LLM_KEY_FILES', LLM_KEY_FILES)}")
+        f"{_cfg('LLM_KEY_FILES', LLM_KEY_FILES)}"
+    )
 
 
 def fallback_error(exc: Exception) -> bool:
@@ -172,8 +187,9 @@ def fallback_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, httpx.HTTPStatusError):
         response = exc.response
-        return bool(response and (response.status_code in (401, 403, 429)
-                                  or response.status_code >= 500))
+        return bool(
+            response and (response.status_code in (401, 403, 429) or response.status_code >= 500)
+        )
     return False
 
 
@@ -197,10 +213,12 @@ from emotion_core.utils.config import CONFIG
 
 class LLMReply:
     """LLM 回复包装。"""
+
     __slots__ = ("text", "prompt_tokens", "completion_tokens", "latency_ms", "model")
 
-    def __init__(self, text: str, prompt_tokens: int, completion_tokens: int,
-                 latency_ms: int, model: str):
+    def __init__(
+        self, text: str, prompt_tokens: int, completion_tokens: int, latency_ms: int, model: str
+    ):
         self.text = text
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
@@ -219,8 +237,9 @@ class LLMClient:
         self.api_key = resolve_key(profile)
         self._request_profile = profile
 
-    def chat(self, messages: list[dict], purpose: str = "chat",
-             json_mode: bool = False) -> LLMReply:
+    def chat(
+        self, messages: list[dict], purpose: str = "chat", json_mode: bool = False
+    ) -> LLMReply:
         with self._lock:
             original = (self.profile, self.params, self.api_key)
             try:
@@ -228,8 +247,7 @@ class LLMClient:
             finally:
                 self.profile, self.params, self.api_key = original
 
-    def _chat_locked(self, messages: list[dict], purpose: str,
-                     json_mode: bool) -> LLMReply:
+    def _chat_locked(self, messages: list[dict], purpose: str, json_mode: bool) -> LLMReply:
         chain = resolve_chain(self.profile)
         failures: list[str] = []
         for backend in chain:
@@ -251,17 +269,20 @@ class LLMClient:
 
     def _payload(self, messages: list[dict], json_mode: bool) -> dict:
         p = self.params
-        payload = {"model": p["model"], "messages": messages,
-                   "temperature": p["temperature"], "max_tokens": p["max_tokens"],
-                   "top_p": p["top_p"]}
+        payload = {
+            "model": p["model"],
+            "messages": messages,
+            "temperature": p["temperature"],
+            "max_tokens": p["max_tokens"],
+            "top_p": p["top_p"],
+        }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
 
     def _select_backend(self, profile: str, is_request: bool = True) -> None:
         self.profile = profile
-        self.params = _resolve_params(profile,
-                                      self._overrides if is_request else {})
+        self.params = _resolve_params(profile, self._overrides if is_request else {})
         self.api_key = resolve_key(profile)
 
     def _reply(self, data: dict, t0: float) -> LLMReply:
@@ -273,9 +294,13 @@ class LLMClient:
         m = _FENCE.match(text)
         if m:
             text = m.group(1)
-        return LLMReply(text, int(usage.get("prompt_tokens", 0)),
-                        int(usage.get("completion_tokens", 0)), latency,
-                        data.get("model", self.params["model"]))
+        return LLMReply(
+            text,
+            int(usage.get("prompt_tokens", 0)),
+            int(usage.get("completion_tokens", 0)),
+            latency,
+            data.get("model", self.params["model"]),
+        )
 
     def _post(self, payload: dict, allow_status_retry: bool = True) -> dict:
         url = self.params["base_url"].rstrip("/") + "/chat/completions"
@@ -283,8 +308,9 @@ class LLMClient:
         last: Exception = RuntimeError("unreachable")
         for attempt in range(self.params.get("max_retry", 2) + 1):
             try:
-                resp = _httpx.post(url, json=payload, headers=headers,
-                                   timeout=self.params["timeout"])
+                resp = _httpx.post(
+                    url, json=payload, headers=headers, timeout=self.params["timeout"]
+                )
                 resp.raise_for_status()
                 return resp.json()
             except _httpx.HTTPStatusError as exc:
@@ -294,7 +320,7 @@ class LLMClient:
             except (_httpx.TimeoutException, _httpx.TransportError) as exc:
                 last = exc
             if attempt < self.params.get("max_retry", 2):
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         raise last
 
 
@@ -304,37 +330,56 @@ _DEFAULT_PROFILES: dict[str, dict] = {
     "default": {
         "base_url": "https://token.sensenova.cn/v1",
         "model": "glm-5.2",
-        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
-        "timeout": 120, "max_retry": 2,
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "top_p": 1.0,
+        "timeout": 120,
+        "max_retry": 2,
     },
     "fast": {
         "base_url": "https://token.sensenova.cn/v1",
         "model": "deepseek-v4-flash",
-        "temperature": 0.3, "max_tokens": 2048, "top_p": 1.0,
-        "timeout": 30, "max_retry": 2,
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "top_p": 1.0,
+        "timeout": 30,
+        "max_retry": 2,
     },
     "smart": {
         "base_url": "https://token.sensenova.cn/v1",
         "model": "sensenova-6.8-flash-lite",
-        "temperature": 0.3, "max_tokens": 4096, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "top_p": 1.0,
+        "timeout": 180,
+        "max_retry": 2,
     },
     "agnes": {
         "base_url": "https://apihub.agnes-ai.com/v1",
         "model": "agnes-3.0-flash",
-        "temperature": 0.2, "max_tokens": 8192, "top_p": 1.0,
-        "timeout": 180, "max_retry": 2,
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "top_p": 1.0,
+        "timeout": 180,
+        "max_retry": 2,
     },
 }
 
-_ENV_MAP = {"EC_LLM_MODEL": "model", "EC_LLM_TEMPERATURE": "temperature",
-            "EC_LLM_MAX_TOKENS": "max_tokens", "EC_LLM_TOP_P": "top_p",
-            "EC_LLM_TIMEOUT": "timeout", "EC_LLM_BASE_URL": "base_url"}
+_ENV_MAP = {
+    "EC_LLM_MODEL": "model",
+    "EC_LLM_TEMPERATURE": "temperature",
+    "EC_LLM_MAX_TOKENS": "max_tokens",
+    "EC_LLM_TOP_P": "top_p",
+    "EC_LLM_TIMEOUT": "timeout",
+    "EC_LLM_BASE_URL": "base_url",
+}
 
 
 def _resolve_params(profile: str, overrides: dict | None = None) -> dict:
     """三级参数合并：profile ← env ← kwargs。"""
-    base = dict(LLM_PROFILES.get(profile, _DEFAULT_PROFILES.get(profile, _DEFAULT_PROFILES["default"])))
+    base = dict(
+        LLM_PROFILES.get(profile, _DEFAULT_PROFILES.get(profile, _DEFAULT_PROFILES["default"]))
+    )
     for env, key in _ENV_MAP.items():
         raw = os.environ.get(env)
         if raw is not None and key in base:

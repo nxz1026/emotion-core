@@ -16,6 +16,7 @@ Rust 若哪天同步了口径B，该测试会失败并提醒删除本条豁免�
 Python 参考：emotion_core/algorithms/exit.py 的 _sell_signal / _sell（判定见
 tests/unit/test_exit.py，逐分支覆盖口径B）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,12 +27,11 @@ from typing import Any
 import pytest
 
 sys.path.insert(0, "src")
-from emotion_core.algorithms import exit  # noqa: E402
-from emotion_core.algorithms.exit import Holding, _sell, _sell_signal  # noqa: E402
+from emotion_core.algorithms.exit import Holding, _sell_signal  # noqa: E402
 from emotion_core.domain.bar import DerivedBar  # noqa: E402
 from emotion_core.core import emotion_core_rust as rust  # noqa: E402
 
-D = date(2026, 9, 4)          # 建议日
+D = date(2026, 9, 4)  # 建议日
 BAR_DATE = date(2026, 8, 28)  # 判据行日期
 POS_DATE = date(2026, 8, 20)  # 开仓日
 
@@ -43,11 +43,21 @@ def pos(code: str = "000017", entry: date = POS_DATE) -> Holding:
     return Holding(code=code, entry_date=entry)
 
 
-def day(up: bool = True, one_word: bool = False, cont: int = 6,
-        code: str = "000017", d: date = BAR_DATE) -> DerivedBar:
-    return DerivedBar(code=code, date=d, is_limit_up=up, is_limit_down=False,
-                      is_one_word=one_word, is_exchange=up and not one_word,
-                      is_bomb=False, touched_limit=up, cont_days=cont, amplitude=3.2)
+def day(
+    up: bool = True, one_word: bool = False, cont: int = 6, code: str = "000017", d: date = BAR_DATE
+) -> DerivedBar:
+    return DerivedBar(
+        code=code,
+        date=d,
+        is_limit_up=up,
+        is_limit_down=False,
+        is_one_word=one_word,
+        is_exchange=up and not one_word,
+        is_bomb=False,
+        touched_limit=up,
+        cont_days=cont,
+        amplitude=3.2,
+    )
 
 
 def rust_stat(force: bool) -> rust.MarketStat:
@@ -90,19 +100,29 @@ def assert_same_signal(rust_sig, py_sig) -> None:
     r, p = sig_dict(rust_sig), sig_dict(py_sig)
     assert r == p, f"rust={r}\npy  ={p}"
     cl = py_sig.checklist
-    assert [cl.c1_uniqueness, cl.c2_exchange, cl.c3_elimination,
-            cl.c4_min_days, cl.c5_strength_diverge, cl.w1_crowding] == [None] * 6
+    assert [
+        cl.c1_uniqueness,
+        cl.c2_exchange,
+        cl.c3_elimination,
+        cl.c4_min_days,
+        cl.c5_strength_diverge,
+        cl.w1_crowding,
+    ] == [None] * 6
     assert cl.passed is True  # 六项 UNKNOWN：无否决条件（空真）
 
 
 # ────────────────────────── sell_signal ──────────────────────────
 
-@pytest.mark.parametrize("code,when,reason,buy_window", [
-    ("000017", POS_DATE, "退潮期清仓建议", "NONE"),
-    ("601988", BAR_DATE, "断板建议（原6连板今日未封）", ""),
-    ("000001", D, "断板建议（原连板今日未封）", ""),
-    ("688432", D, "自定义理由", "STANDARD"),
-])
+
+@pytest.mark.parametrize(
+    "code,when,reason,buy_window",
+    [
+        ("000017", POS_DATE, "退潮期清仓建议", "NONE"),
+        ("601988", BAR_DATE, "断板建议（原6连板今日未封）", ""),
+        ("000001", D, "断板建议（原连板今日未封）", ""),
+        ("688432", D, "自定义理由", "STANDARD"),
+    ],
+)
 def test_sell_signal(code, when, reason, buy_window):
     py_sig = _sell_signal(code, when, reason, buy_window)
     rust_sig = rust.sell_signal(code, str(when), reason, buy_window)
@@ -114,6 +134,7 @@ def test_sell_signal(code, when, reason, buy_window):
 
 # ────────────────────── 有意分叉：Rust 停在被废止的规则上 ──────────────────────
 
+
 def test_rust_exit_frozen_at_repealed_rule():
     """Rust exit.rs 仍是旧规则（退潮清仓/断板卖出），W3′ 未同步——有意为之。
 
@@ -121,17 +142,19 @@ def test_rust_exit_frozen_at_repealed_rule():
     交易日历入参），届时删除本条并恢复 sell/suggestions 对账。
     """
     from pathlib import Path
+
     src = Path("src/emotion_core/core/src/exit.rs").read_text(encoding="utf-8")
-    assert "force_liquidate" in src           # 旧退潮清仓分支仍在
-    assert "断板建议" in src                   # 旧断板分支仍在
-    assert "held_days" not in src             # 口径B 的持有天数未进 Rust
-    assert "T+2" not in src                   # 口径B 的卖点文案未进 Rust
+    assert "force_liquidate" in src  # 旧退潮清仓分支仍在
+    assert "断板建议" in src  # 旧断板分支仍在
+    assert "held_days" not in src  # 口径B 的持有天数未进 Rust
+    assert "T+2" not in src  # 口径B 的卖点文案未进 Rust
 
 
 def test_python_exit_rule_is_caliber_b():
     """Python 侧已切到口径B：源码里能查到卖点与强制了结两个分支。"""
     from pathlib import Path
+
     src = Path("src/emotion_core/algorithms/exit.py").read_text(encoding="utf-8")
     assert "SELL_AFTER_DAYS = 1" in src and "FORCE_AFTER_DAYS = 2" in src
     assert "T+2 {hit}" in src and "强制了结" in src
-    assert "force_liquidate" not in src        # 相位清仓已彻底移除
+    assert "force_liquidate" not in src  # 相位清仓已彻底移除

@@ -3,6 +3,7 @@
 抽取 services/ingest.py、data/providers/eastmoney.py、data/providers/pytdx_provider.py
 中重复的 _retry / _get_json / _get_json_list / _positive，统一维护。
 """
+
 from __future__ import annotations
 
 import time
@@ -116,5 +117,5 @@ def retry_fetch(
             last = exc
             if "只能获取最近" in str(exc):
                 raise
-            time.sleep(2 ** i + time_sleep)
+            time.sleep(2**i + time_sleep)
     raise last  # type: ignore[misc]
