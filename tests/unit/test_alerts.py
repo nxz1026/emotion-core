@@ -12,7 +12,7 @@ id DESC 排序、ANY(%s) 批量）；真实库对账另跑（见交付记录：�
 from __future__ import annotations
 
 import sys
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest

@@ -6,7 +6,6 @@ from datetime import date
 
 from emotion_core.domain.ladder import LadderDay, LeaderIdentity
 
-
 D = date(2024, 1, 2)
 
 

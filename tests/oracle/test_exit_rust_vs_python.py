@@ -28,8 +28,8 @@ import pytest
 
 sys.path.insert(0, "src")
 from emotion_core.algorithms.exit import Holding, _sell_signal  # noqa: E402
-from emotion_core.domain.bar import DerivedBar  # noqa: E402
 from emotion_core.core import emotion_core_rust as rust  # noqa: E402
+from emotion_core.domain.bar import DerivedBar  # noqa: E402
 
 D = date(2026, 9, 4)  # 建议日
 BAR_DATE = date(2026, 8, 28)  # 判据行日期

@@ -26,7 +26,6 @@ import pytest
 sys.path.insert(0, "src")
 from emotion_core.core import emotion_core_rust as rust  # noqa: E402
 
-
 # ── g1_height_expanding ─────────────────────────────────────────────────────
 
 

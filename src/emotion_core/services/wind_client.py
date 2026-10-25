@@ -14,10 +14,11 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone  # noqa: F401 — kept for future timestamp needs, timezone
 from pathlib import Path
-from typing import Any, Callable, Final, Mapping, Sequence
+from typing import Any, Final
 
 DEFAULT_CLI_SCRIPT: Final[Path] = Path("/home/ubuntu/.agents/skills/wind-mcp-skill/scripts/cli.mjs")
 DEFAULT_CONFIG_PATH: Final[Path] = Path("~/.wind-aifinmarket/config").expanduser()

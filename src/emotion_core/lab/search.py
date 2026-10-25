@@ -56,6 +56,20 @@ ON CONFLICT (variant_id) DO UPDATE SET
     params = EXCLUDED.params, status = EXCLUDED.status, note = EXCLUDED.note
 """
 
+_INSERT_OUTCOME = """
+INSERT INTO lab.lab_outcome (variant_id, confirm_date, code, entry_px, exit_px,
+                             ret_pct, filled, sealed, broke, rolled)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (variant_id, confirm_date, code) DO UPDATE SET
+    entry_px = EXCLUDED.entry_px,
+    exit_px = EXCLUDED.exit_px,
+    ret_pct = EXCLUDED.ret_pct,
+    filled = EXCLUDED.filled,
+    sealed = EXCLUDED.sealed,
+    broke = EXCLUDED.broke,
+    rolled = EXCLUDED.rolled
+"""
+
 _INSERT_SCORE = """
 INSERT INTO lab.lab_score (
     variant_id, window_start, window_end, n, fill_rate, expectancy, median,
@@ -144,8 +158,13 @@ def evaluate(
     as_of: date,
     sel_days: list[date],
     hold_days: list[date],
+    store_outcomes: bool = False,
 ) -> dict[str, Any]:
-    """回放一个变体 → 选参/验证两段统计。"""
+    """回放一个变体 → 选参/验证两段统计。
+
+    store_outcomes=True 时额外返回 ``per`` DataFrame（写 lab_outcome 用）；
+    邻域评测不要存（省内存）。
+    """
     sig = replay.signals(prep, rules, as_of=as_of, start=sel_days[0], end=hold_days[-1])
     per = score.score_signals(sig, pan)
     if per.empty:
@@ -153,7 +172,7 @@ def evaluate(
         hold = Window("hold", hold_days[0], hold_days[-1], [])
     else:
         sel, hold = _split(per, sel_days, hold_days)
-    return {
+    ret = {
         "variant_id": variant_id(rules),
         "rules": rules,
         "signals": len(sig),
@@ -161,6 +180,9 @@ def evaluate(
         "hold": hold,
         "hold_t": _t(hold.rets),
     }
+    if store_outcomes:
+        ret["_outcomes"] = per
+    return ret
 
 
 def _gates(
@@ -222,7 +244,8 @@ def run(
     )
 
     evs = [
-        evaluate(prep, pan, r, as_of=as_of, sel_days=sel_days, hold_days=hold_days_list)
+        evaluate(prep, pan, r, as_of=as_of, sel_days=sel_days,
+                 hold_days=hold_days_list, store_outcomes=True)
         for r in cands
     ]
     base = next(e for e in evs if e["variant_id"] == variant_id(BASELINE))
@@ -263,7 +286,10 @@ def run(
             proposals.append(row)
 
     if persist:
-        _persist(results, proposals, base, (sel_days, hold_days_list), trials=len(evs))
+        # 收集每个变体的逐条收益（写 lab_outcome）
+        outcomes_map = {e["variant_id"]: e["_outcomes"] for e in evs if "_outcomes" in e}
+        _persist(results, proposals, base, (sel_days, hold_days_list),
+                 trials=len(evs), outcomes_map=outcomes_map)
     return {
         "baseline": {
             "variant_id": base["variant_id"],
@@ -284,8 +310,9 @@ def _persist(
     windows: tuple[list[date], list[date]],
     *,
     trials: int,
+    outcomes_map: dict[str, "pd.DataFrame"] | None = None,
 ) -> None:
-    """只写 lab schema：变体登记 + 两段评分 + 待批提案。"""
+    """写 lab schema：变体登记 + 两段评分 + 待批提案 + 逐条收益（lab_outcome）。"""
     sel_days, hold_days = windows
     base_lcb = base["hold"].stats["lcb"]
     conn = labdb.connect_lab()
@@ -357,10 +384,45 @@ def _persist(
                     ),
                 ),
             )
+        # ★修复 alarm：此前 lab_outcome 从未写入
+        if outcomes_map:
+            _write_outcomes(conn, outcomes_map)
         conn.commit()
         log.info("已写入 lab：变体 %d、提案 %d", len(results), len(proposals))
     finally:
         conn.close()
+
+
+def _write_outcomes(
+    conn,
+    outcomes_map: dict[str, "pd.DataFrame"],
+) -> int:
+    """把每个变体的逐条收益写进 lab.lab_outcome。返回写入行数。"""
+    total = 0
+    for variant_id, df in outcomes_map.items():
+        if df is None or df.empty:
+            continue
+        for r in df.to_dict("records"):
+            labdb.execute(
+                conn,
+                _INSERT_OUTCOME,
+                (
+                    variant_id,
+                    r.get("d0"),
+                    r.get("code"),
+                    r.get("entry_px"),
+                    r.get("exit_px"),
+                    r.get("ret_pct"),
+                    r.get("filled"),
+                    r.get("is_limit_up"),
+                    r.get("is_bomb"),
+                    r.get("rolled"),
+                ),
+            )
+            total += 1
+    if total:
+        log.info("已写入 lab.lab_outcome（%d 个变体, %d 条）", len(outcomes_map), total)
+    return total
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -11,7 +11,6 @@ from emotion_core.domain.snapshot import (
     StockSnapshot,
 )
 
-
 D = date(2024, 1, 2)
 
 

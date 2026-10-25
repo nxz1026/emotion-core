@@ -48,6 +48,20 @@ VALUES (%s, %s::jsonb, %s, %s)
 ON CONFLICT (variant_id) DO UPDATE SET params = EXCLUDED.params, note = EXCLUDED.note
 """
 
+_INSERT_OUTCOME = """
+INSERT INTO lab.lab_outcome (variant_id, confirm_date, code, entry_px, exit_px,
+                             ret_pct, filled, sealed, broke, rolled)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (variant_id, confirm_date, code) DO UPDATE SET
+    entry_px = EXCLUDED.entry_px,
+    exit_px = EXCLUDED.exit_px,
+    ret_pct = EXCLUDED.ret_pct,
+    filled = EXCLUDED.filled,
+    sealed = EXCLUDED.sealed,
+    broke = EXCLUDED.broke,
+    rolled = EXCLUDED.rolled
+"""
+
 
 def score_signals(sigs: pd.DataFrame, pan: pd.DataFrame) -> pd.DataFrame:
     """信号 × 面板 → 逐条口径B 结果。"""
@@ -77,6 +91,8 @@ def score_signals(sigs: pd.DataFrame, pan: pd.DataFrame) -> pd.DataFrame:
                 "phase": getattr(r, "phase", None),
                 "buy_window": getattr(r, "buy_window", None),
                 "cont_days": getattr(r, "cont_days", None),
+                "is_limit_up": getattr(r, "is_limit_up", None),
+                "is_bomb": getattr(r, "is_bomb", None),
                 **res,
             }
         )
@@ -168,6 +184,27 @@ def run(
             )
             conn.commit()
             log.info("已写入 lab.lab_score（%s）", variant_id)
+            # 写每条信号的事后收益（lab_outcome），供页面逐条查看
+            rows = scored.to_dict("records")
+            for r in rows:
+                labdb.execute(
+                    conn,
+                    _INSERT_OUTCOME,
+                    (
+                        variant_id,
+                        r.get("d0"),
+                        r.get("code"),
+                        r.get("entry_px"),
+                        r.get("exit_px"),
+                        r.get("ret_pct"),
+                        r.get("filled"),
+                        r.get("is_limit_up"),
+                        r.get("is_bomb"),
+                        r.get("rolled"),
+                    ),
+                )
+            conn.commit()
+            log.info("已写入 lab.lab_outcome（%s, %d 条）", variant_id, len(rows))
         finally:
             conn.close()
     return out

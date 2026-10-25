@@ -6,7 +6,6 @@ from datetime import date
 
 from emotion_core.domain.market import BuyWindow, MarketStat, Phase
 
-
 D = date(2024, 1, 2)
 
 

@@ -3,8 +3,7 @@
 import httpx
 import pytest
 
-from emotion_core.services import llm
-from emotion_core.services import llm_backend
+from emotion_core.services import llm, llm_backend
 
 
 class FakeResp:

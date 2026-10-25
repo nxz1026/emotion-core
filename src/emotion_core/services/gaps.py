@@ -225,7 +225,7 @@ def _check_config_duplicates() -> dict | None:
                                 "item": f"CONFIG 内有重复字段 {name}",
                                 "detail": f"<code>{name}</code> 在 Config 中声明两次，"
                                 "dataclass 取后者；不影响运行但属冗余。",
-                                "impl": f"utils/config.py",
+                                "impl": "utils/config.py",
                             }
                         fields.add(name)
     return None

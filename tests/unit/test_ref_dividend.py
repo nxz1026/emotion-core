@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-
 from emotion_core.services import ref_dividend
 
 

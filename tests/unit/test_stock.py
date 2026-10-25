@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 from datetime import date
+
 from emotion_core.algorithms.stock import (
-    STANCE_BUY,
     STANCE_AVOID,
-    STANCE_WATCH,
+    STANCE_BUY,
     STANCE_LOW_ABSORB,
-    _pct,
+    STANCE_WATCH,
     _ok,
-    layer_label,
-    mean,
-    ma,
-    trend_metrics,
-    attach_volume_ratio,
-    is_st_name,
-    is_st,
-    is_new_issuer,
-    risk_tags,
-    verdict,
     _one_liner,
+    _pct,
+    attach_volume_ratio,
+    is_new_issuer,
+    is_st,
+    is_st_name,
+    layer_label,
+    ma,
+    mean,
+    risk_tags,
+    trend_metrics,
+    verdict,
 )
 
 

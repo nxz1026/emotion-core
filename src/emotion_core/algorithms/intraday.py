@@ -39,11 +39,11 @@ from dataclasses import dataclass, field
 from datetime import time
 from typing import Any, Final
 
-from emotion_core.utils import price as price_util
-
 # ★ 2026-10-24：口径唯一实现已收敛到 Emotion-CPT。
 # emotion_core.utils.price 现在是转发层；板制与 ST 判定的真源在那边。
 from emotion_cpt.structure import price as _price
+
+from emotion_core.utils import price as price_util
 
 __all__ = [
     "CHG_PCT_MIN",

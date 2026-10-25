@@ -12,7 +12,8 @@ P2（docs/20 §7）把状态机参数化，唯一允许的改动是「新增可�
 
 from __future__ import annotations
 
-from dataclasses import fields, replace as dc_replace
+from dataclasses import fields
+from dataclasses import replace as dc_replace
 from datetime import date, timedelta
 
 from emotion_core.algorithms import state

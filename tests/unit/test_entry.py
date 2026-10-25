@@ -12,15 +12,13 @@ IO 全部桩掉（ladder.build/y_survivors/market_stat/候选质量/事务），
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Iterator
+from typing import Any
 
 from emotion_core.algorithms import entry
-from emotion_core.domain.ladder import LadderDay
-from emotion_core.domain.signal import Action, Checklist, SignalSource
-from emotion_core.utils.config import config_hash
 from emotion_core.algorithms.entry import (
     check_secondary_signal,
     check_signal,
@@ -30,6 +28,9 @@ from emotion_core.algorithms.entry import (
     passed_of,
     split_checklist,
 )
+from emotion_core.domain.ladder import LadderDay
+from emotion_core.domain.signal import Action, Checklist, SignalSource
+from emotion_core.utils.config import config_hash
 
 D = date(2026, 9, 8)  # 评估日
 PREV = date(2026, 9, 7)  # 前一交易日

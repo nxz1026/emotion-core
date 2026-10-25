@@ -25,20 +25,20 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-from emotion_core.domain.holding import Levels
-
 # ── 结构位常数与算式本体：单一真源在 Emotion-CPT（2026-10-23）──────────────
 # 此前这里是**手抄** CPT track_points.py 的副本（连行号引用都已差 1 行），
 # 改一边不传播、且没有任何测试会红。现改为 import 共享契约。
 from emotion_cpt.contracts.pricing import (
-    BI_LOOKBACK,
+    BI_LOOKBACK,  # noqa: F401 — re-export：holding_service 从这里取（勿删）
     BUY_BUFFER,
     PRICE_ROUND_DIGITS,
     SELL_BUFFER,
     STOP_LOSS_RATIO,
-    ZHONGSHU_LOOKBACK,
+    ZHONGSHU_LOOKBACK,  # noqa: F401 — re-export：同上
 )
 from emotion_cpt.snapshot.points import structure_picks
+
+from emotion_core.domain.holding import Levels
 
 # ── 百分比兜底（只在结构位不可用时启用，决策 D3） ────────────────────────────
 FALLBACK_BUY_PCT: Final[float] = 0.03

@@ -43,7 +43,8 @@ import logging
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Final, Sequence
+from collections.abc import Sequence
+from typing import Any, Final
 
 from emotion_core.utils.errors import ProviderError
 

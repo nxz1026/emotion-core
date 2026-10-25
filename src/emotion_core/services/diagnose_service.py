@@ -22,14 +22,16 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import date
-from typing import Any, Callable
+from typing import Any
 
-from emotion_core.algorithms import entry, stock as stock_algo
+from emotion_core.algorithms import entry
+from emotion_core.algorithms import stock as stock_algo
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Checklist
-from emotion_core.utils.db import query_df
 from emotion_core.utils.dates import prev_trading_day
+from emotion_core.utils.db import query_df
 
 log = logging.getLogger("emotion_core.diagnose_service")
 

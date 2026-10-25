@@ -19,11 +19,11 @@ import httpx
 
 from emotion_core.services.llm_backend import (
     LLM_PROFILES,
-    LLMNotConfigured,
     LLMChainExhausted,
+    LLMNotConfigured,
+    fallback_error,
     resolve_chain,
     resolve_key,
-    fallback_error,
     short_error,
 )
 from emotion_core.utils.config import CONFIG
@@ -263,8 +263,9 @@ def comment(trade_date) -> str:
     """V9 异步点评：读已落盘报告 → 脱敏 → LLM 点评 → 追加写回文件。"""
     if not LLM_ENABLED:
         return ""
-    from emotion_core.algorithms.review.utils import _atomic_write, _strip_position_block
     from pathlib import Path
+
+    from emotion_core.algorithms.review.utils import _atomic_write, _strip_position_block
 
     out = Path("reports") / f"{trade_date}.md"
     if not out.exists():

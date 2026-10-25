@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from datetime import date
-from typing import Optional
 
 from emotion_core.utils.config import CONFIG
 
@@ -67,11 +66,11 @@ class StateRules:
 DEFAULT_RULES = StateRules()
 
 
-def _lt(a: Optional[float], b: float) -> bool:
+def _lt(a: float | None, b: float) -> bool:
     return a is not None and a < b
 
 
-def _gt(a: Optional[float], b: float) -> bool:
+def _gt(a: float | None, b: float) -> bool:
     return a is not None and a > b
 
 
@@ -81,16 +80,16 @@ class DayMetrics:
 
     date: date
     limit_up_count: int
-    bomb_rate: Optional[float]
-    zt_performance: Optional[float]
+    bomb_rate: float | None
+    zt_performance: float | None
     max_limit_days: int
     limit_down_count: int
-    top_amplitude: Optional[float]
-    top_broke: Optional[bool]
+    top_amplitude: float | None
+    top_broke: bool | None
     bomb_threshold: float
     has_candidate: bool
     tradable_max_days: int
-    oneword_ratio: Optional[float]
+    oneword_ratio: float | None
 
 
 @dataclass
@@ -105,7 +104,7 @@ class EmotionState:
 
 
 def _rule_ebb(
-    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+    t: DayMetrics, y: DayMetrics | None, b: DayMetrics | None, r: StateRules = DEFAULT_RULES
 ) -> bool:
     """退潮：断板 + 跌停潮，或涨停表现转负，或跌停倍增。
 
@@ -139,7 +138,7 @@ def _rule_ebb(
 
 
 def _rule_climax(
-    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+    t: DayMetrics, y: DayMetrics | None, b: DayMetrics | None, r: StateRules = DEFAULT_RULES
 ) -> bool:
     """高潮：涨停家数 / 炸板率越阈 / 最高板振幅越阈。
 
@@ -156,7 +155,7 @@ def _rule_climax(
 
 
 def _rule_ferment(
-    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+    t: DayMetrics, y: DayMetrics | None, b: DayMetrics | None, r: StateRules = DEFAULT_RULES
 ) -> bool:
     return (
         t.max_limit_days >= r.ferment_min_days
@@ -169,7 +168,7 @@ def _rule_ferment(
 
 
 def _rule_ice(
-    t: DayMetrics, y: Optional[DayMetrics], b: Optional[DayMetrics], r: StateRules = DEFAULT_RULES
+    t: DayMetrics, y: DayMetrics | None, b: DayMetrics | None, r: StateRules = DEFAULT_RULES
 ) -> bool:
     base = t.max_limit_days <= r.ice_max_days and t.limit_up_count < r.ice_zt_max
     rev = y is not None and _lt(y.zt_performance, 0) and _gt(t.zt_performance, 0)

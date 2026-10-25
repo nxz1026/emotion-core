@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 from emotion_core.services.wind_manifest import _hash_params, record_call
 
 

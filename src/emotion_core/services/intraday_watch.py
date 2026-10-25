@@ -33,16 +33,17 @@ from __future__ import annotations
 
 import logging
 import time as time_mod
+from collections.abc import Iterable
 from datetime import date, datetime, time
-from typing import Any, Final, Iterable
+from typing import Any, Final
 from zoneinfo import ZoneInfo
 
 from emotion_core.algorithms import exit as exit_svc
 from emotion_core.algorithms import intraday
 from emotion_core.data import loader
 from emotion_core.data.providers import cpt_intraday
-from emotion_core.utils.db import connect_ro
 from emotion_core.utils.dates import next_trading_day, prev_trading_day
+from emotion_core.utils.db import connect_ro
 
 log = logging.getLogger("emotion_core.intraday_watch")
 

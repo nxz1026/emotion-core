@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date
 
-
 from emotion_core.algorithms.state import (
     DayMetrics,
     _rule_climax,

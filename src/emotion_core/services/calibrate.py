@@ -28,8 +28,8 @@ import pandas as pd
 
 from emotion_core.algorithms import evaluate
 from emotion_core.utils.config import CONFIG, config_hash
-from emotion_core.utils.db import query_df, transaction
 from emotion_core.utils.dates import trading_days
+from emotion_core.utils.db import query_df, transaction
 
 log = logging.getLogger("emotion_core.calibrate")
 

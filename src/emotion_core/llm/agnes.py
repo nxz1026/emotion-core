@@ -31,7 +31,6 @@ import httpx
 
 from emotion_core.llm.base import LLMNotEnabledError
 
-
 # ── lkl 原值（emotion-core CONFIG 尚未收录，就地定义作 fallback）─────────────
 
 LLM_PROFILES: dict[str, dict] = {

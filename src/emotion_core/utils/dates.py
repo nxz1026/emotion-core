@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import date, UTC
+from datetime import UTC, date
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 def today_sh() -> date:
     """今天（Asia/Shanghai）。"""
-    from datetime import datetime, timedelta as td
+    from datetime import datetime
+    from datetime import timedelta as td
 
     return (datetime.now(UTC) + td(hours=8)).date()
 

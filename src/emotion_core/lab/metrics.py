@@ -13,7 +13,8 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from emotion_core.utils.price import limit_down_price_cents, limit_up_price_cents
 

@@ -22,11 +22,10 @@ from emotion_core.algorithms.accelerate import (  # noqa: E402
     ACCEL_HEIGHT_GAP,
     ACCEL_ONEWORD_DAYS,
     ACCEL_ONEWORD_RATIO,
-    _hit,
     _baseline_ratio,
+    _hit,
 )
 from emotion_core.core import emotion_core_rust as rust  # noqa: E402
-
 
 # ---------- hit ----------
 

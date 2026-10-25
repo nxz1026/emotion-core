@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import patch
 
-
 from emotion_core.algorithms import derive
 from emotion_core.utils.config import CONFIG
 

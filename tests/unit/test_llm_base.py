@@ -79,7 +79,7 @@ class TestLLMClientProtocol:
     def test_has_complete_method(self):
         """协议要求 complete 方法。"""
         assert hasattr(LLMClient, "complete")
-        assert callable(getattr(LLMClient, "complete"))
+        assert callable(LLMClient.complete)
 
     def test_null_client_satisfies_protocol(self):
         client = NullClient()

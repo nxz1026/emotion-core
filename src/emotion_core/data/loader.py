@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Optional
 
 from emotion_core.domain.bar import DerivedBar
-from emotion_core.domain.market import MarketStat, Phase
 from emotion_core.domain.ladder import LadderDay
+from emotion_core.domain.market import MarketStat, Phase
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
 from emotion_core.utils.config import CONFIG, config_hash
 from emotion_core.utils.db import connect, transaction
@@ -54,7 +53,7 @@ def load_stock_basic() -> dict[str, dict]:
         return {r[0]: {"name": r[1], "is_st": bool(r[2]), "first_bar_date": r[3]} for r in rows}
 
 
-def load_market_stat(d: date) -> Optional[MarketStat]:
+def load_market_stat(d: date) -> MarketStat | None:
     """当日 market_stat 行（不含 ecosystem，由 ecosystem 模块更新）。"""
     with connect() as conn:
         r = conn.execute(

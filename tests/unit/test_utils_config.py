@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from emotion_core.utils.config import Config, CONFIG, config_hash
+from emotion_core.utils.config import CONFIG, Config, config_hash
 
 
 class TestConfigDefaults:

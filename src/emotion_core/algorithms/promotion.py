@@ -29,8 +29,9 @@ daily_bar 价格连接。本实现按 docs/07 §2.5「逐字搬」补齐，语�
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import date
-from typing import Any, Sequence
+from typing import Any
 
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import connect

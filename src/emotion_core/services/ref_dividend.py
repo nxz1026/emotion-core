@@ -18,7 +18,6 @@ import logging
 import time
 from datetime import date
 
-from emotion_core.utils.db import connect as db_connect
 from emotion_core.services.wind_client import (
     WindClient,
     WindQuotaError,
@@ -26,6 +25,7 @@ from emotion_core.services.wind_client import (
     WindUnavailableError,
 )
 from emotion_core.services.wind_manifest import record_call
+from emotion_core.utils.db import connect as db_connect
 
 logger = logging.getLogger(__name__)
 

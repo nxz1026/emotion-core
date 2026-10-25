@@ -16,12 +16,10 @@ from contextlib import contextmanager
 from datetime import date
 from unittest.mock import patch
 
-
 from emotion_core.data import loader
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.market import MarketStat, Phase
 from emotion_core.domain.signal import Action, Checklist, Signal, SignalSource
-
 
 # ── helpers ───────────────────────────────────────────────────────────
 

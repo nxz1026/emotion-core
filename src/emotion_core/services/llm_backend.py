@@ -206,9 +206,8 @@ def short_error(exc: Exception, secrets: tuple[str, ...] = ()) -> str:
 
 import threading
 import time
-import httpx as _httpx
 
-from emotion_core.utils.config import CONFIG
+import httpx as _httpx
 
 
 class LLMReply:

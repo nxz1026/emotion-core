@@ -8,10 +8,9 @@ Part 3（渲染与发布）：JSON/Markdown 渲染与四出口发布。
 
 from __future__ import annotations
 
-import re
-
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -21,15 +20,18 @@ import pandas as pd
 from emotion_core.algorithms import (
     caliber_b,
     entry,
-    exit as exit_svc,
     health,
     ladder,
     phase_persistence,
     reconcile,
 )
+from emotion_core.algorithms import (
+    exit as exit_svc,
+)
 from emotion_core.algorithms import theme as theme_svc
 from emotion_core.algorithms.review.utils import (
     _CHECKS,
+    _ENV_MEANING,
     _MARK,
     _atomic_write,
     _counter_items,
@@ -44,10 +46,9 @@ from emotion_core.algorithms.review.utils import (
     _ladder_tag,
     _pct,
     _pctv,
-    _ENV_MEANING,
     _seal_notes,
-    _usability,
     _strip_position_block,
+    _usability,
 )
 from emotion_core.algorithms.review.wording import translate_phase, translate_window
 from emotion_core.services import notify, position

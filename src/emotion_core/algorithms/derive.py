@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import execute
 

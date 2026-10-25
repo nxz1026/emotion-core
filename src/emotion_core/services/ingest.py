@@ -27,7 +27,6 @@ import logging
 import math
 import time
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 
 import akshare as ak
@@ -232,67 +231,6 @@ def _upsert_rows(
         with transaction() as c:
             _write(c)
     return len(clean)
-
-
-def _backfill_one(code: str, ext_start: date, end: date) -> tuple[str, int, str]:
-    """单股回填线程任务：拉取→upsert→断点标记。返回 (code, 行数, 错误)。
-
-    退市/长期停牌 → NoDataError 显式捕获，永久跳过、标记完成。
-    V1（二轮审计）：覆盖校验——原始首根 > ext_start 且该股上市早于窗口
-    （stock_basic 有 first_bar 且更早）= 800 根够不到，不标完成留待重试；
-    upsert 并入 try（单票连接抖动不再崩整个回填任务）。
-    """
-    try:
-        rows, earliest = _hist_rows(code, ext_start, end)
-        if earliest is not None and earliest > ext_start:
-            fb = query_df("SELECT first_bar_date fb FROM stock_basic WHERE code = %s", (code,))[
-                "fb"
-            ]
-            listed_before = not fb.empty and pd.notna(fb.iloc[0]) and fb.iloc[0] < ext_start
-            if listed_before:
-                return code, 0, f"partial:{earliest.isoformat()}"
-        n = _upsert_rows("daily_bar", BAR_COLS, rows, ["code", "date"])
-    except NoDataError:
-        _mark_done("backfill_daily", code)  # 明确无数据：永久跳过
-        return code, 0, "nodata"
-    except Exception as exc:  # noqa: BLE001
-        return code, 0, str(exc)[:80]  # 其余一律可重试
-    _mark_done("backfill_daily", code)
-    return code, n, ""
-
-
-def backfill_daily_bars(start: date, end: date, workers: int = 4) -> int:
-    """多线程逐股全量回填（断点续传：ingest_progress 标记，重跑跳过已完成）。"""
-    ext_start = start - timedelta(days=40)  # 前置窗口供首日 pre_close
-    pending = _pending_codes("backfill_daily")
-    log.info("回填待拉 %d 只（%s~%s, workers=%d）", len(pending), start, end, workers)
-    total, failed, nodata = 0, [], 0
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = [pool.submit(_backfill_one, c, ext_start, end) for c in pending]
-        for i, fut in enumerate(as_completed(futs), 1):
-            code, n, err = fut.result()
-            total += n
-            if err == "nodata":
-                nodata += 1
-            elif err:
-                failed.append(code)
-                log.warning("拉取失败 %s: %s", code, err)
-            if i % 200 == 0:
-                log.info(
-                    "进度 %d/%d 行数=%d 失败=%d 无数据=%d",
-                    i,
-                    len(pending),
-                    total,
-                    len(failed),
-                    nodata,
-                )
-    log.info("回填完成：行数=%d 失败=%d 无数据=%d %s", total, len(failed), nodata, failed[:20])
-    # V1（二轮审计）+ P1-6（三轮修正条件反转）：全部待拉都异常
-    # （failed==pending）且零行入库 = TDX 全挂 → 必须中断；
-    # 全部明确无数据（nodata==pending）是正常退出，不抛。
-    if pending and total == 0 and len(failed) == len(pending):
-        raise RuntimeError(f"回填全军覆没：{len(pending)} 只待拉全部异常 0 行入库（疑似 TDX 全挂）")
-    return total
 
 
 def snapshot_daily(trade_date: date) -> int:

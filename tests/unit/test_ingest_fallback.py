@@ -19,15 +19,14 @@ import pandas as pd
 import pytest
 import requests
 
+from emotion_core.data.providers import eastmoney as em_provider
 from emotion_core.data.providers.base import (
     DataError,
     FetchError,
     ProviderError,
 )
-from emotion_core.data.providers import eastmoney as em_provider
 from emotion_core.services import ingest
 from emotion_core.utils.fetch import fetch_json, retry_fetch
-
 
 # ── helpers ───────────────────────────────────────────────────────────
 

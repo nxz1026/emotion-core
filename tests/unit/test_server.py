@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from emotion_core.presentation import server
 
 

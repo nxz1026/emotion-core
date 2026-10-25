@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from emotion_core.presentation.translate import (
     translate_phase,
-    translate_window,
     translate_rating,
+    translate_window,
 )
 
 

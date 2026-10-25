@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from emotion_core.presentation.views import intuitive, logic, algorithm
+from emotion_core.presentation.views import algorithm, intuitive, logic
 
 
 class TestIntuitiveRender:

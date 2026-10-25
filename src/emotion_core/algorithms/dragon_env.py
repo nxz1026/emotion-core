@@ -76,16 +76,16 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
 
 from emotion_core.algorithms import accelerate
-from typing import Callable
+from emotion_core.core import emotion_core_rust as _rust
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
-from emotion_core.core import emotion_core_rust as _rust
 
 log = logging.getLogger(__name__)
 

@@ -28,10 +28,10 @@ from __future__ import annotations
 
 import importlib
 import logging
+from datetime import UTC
 from typing import Any
 
 from emotion_core.utils.db import execute, query_df
-from datetime import UTC
 
 log = logging.getLogger("emotion_core.alerts")
 

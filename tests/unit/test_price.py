@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-
 from emotion_core.utils.price import (
     board_pct_milli,
     is_limit_up,

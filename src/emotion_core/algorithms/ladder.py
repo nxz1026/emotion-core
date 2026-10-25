@@ -31,6 +31,7 @@ import logging
 from dataclasses import replace
 from datetime import date
 
+from emotion_core.domain.ladder import LadderDay
 from emotion_core.services.ladder_service import (
     count_derived_rows,
     load_exchange_codes,
@@ -38,7 +39,6 @@ from emotion_core.services.ladder_service import (
     load_suspended_candidates,
     replace_ladder_day,
 )
-from emotion_core.domain.ladder import LadderDay
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import prev_trading_day
 
