@@ -125,7 +125,7 @@ class PytdxProvider:
             raw["volume"] = pd.to_numeric(raw["volume"], errors="coerce")
             # shift 在**区间过滤之前**做：`_tdx_all_bars(market, code, start)` 已经
             # 翻到 start 之前，用那几根给区间首行播种 pre_close，否则区间第一天恒为
-            # NaN。参照 backfill_sina.FETCH_START 的同一手法。
+            # NaN。参照同一手法。
             raw["pre_close"] = raw["close"].astype(float).shift(1)
             raw["turnover_rate"] = None
             raw = raw[(raw["date"] >= start) & (raw["date"] <= end)]

@@ -50,7 +50,8 @@ from emotion_core.algorithms.review.utils import (
     _usability,
 )
 from emotion_core.algorithms.review.wording import translate_phase, translate_window
-from emotion_core.services import notify, position
+from emotion_core.domain.position import Position
+from emotion_core.services import notify
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import prev_trading_day
 from emotion_core.utils.db import connect_ro, execute, query_df
@@ -283,6 +284,26 @@ def _pool_missing(trade_date: date) -> list[str]:
     return out
 
 
+def _open_positions() -> list[Position]:
+    """读 OPEN 持仓（替代已删除的 services.position.current）。"""
+    df = query_df(
+        "SELECT id, code, entry_date, entry_price, shares, status,"
+        " note FROM position WHERE status='OPEN' ORDER BY entry_date"
+    )
+    return [
+        Position(
+            code=r.code,
+            entry_date=r.entry_date,
+            entry_price=float(r.entry_price),
+            shares=int(r.shares),
+            status=r.status,
+            note=r.note or "",
+            id=int(r.id),
+        )
+        for r in df.itertuples()
+    ]
+
+
 def _quality(trade_date: date) -> dict:
     """数据质检：对账差异 + 缺数警示。A7：空池≠无差异，真缺失须显式报。"""
     warns = []
@@ -334,7 +355,7 @@ def collect(trade_date: date) -> dict:
         "signal": _signal_of_day(trade_date),
         "secondary_signal": _signal_of_day_secondary(trade_date),
         "sells": exit_svc.suggestions(trade_date),
-        "positions": position.current(),
+        "positions": _open_positions(),
         "hot_rank": _hot_rank_of(trade_date),
         "quality": _quality(trade_date),
         "caliber": _caliber(trade_date),
@@ -460,15 +481,6 @@ def _top_boards_note(d: dict, key: str) -> str:
     except Exception as exc:  # noqa: BLE001 —— 速览不能因补票名而失败
         log.warning("速览最高板票名补全失败（%s，忽略）：%s", key, exc)
         return ""
-
-
-def _close_of(trade_date: date, code: str) -> float | None:
-    """当日收盘价（口径B 买点 = 收盘 × 板比的涨停价）；缺数 None，不猜。"""
-    df = query_df("SELECT close FROM daily_bar WHERE date = %s AND code = %s", (trade_date, code))
-    if df is None or df.empty:
-        return None
-    v = df["close"].iloc[0]
-    return None if v is None or pd.isna(v) else float(v)
 
 
 def _name_of(d: dict, code: str) -> str:

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 import math
-import time
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 
@@ -467,44 +466,6 @@ def verify_pre_close(trade_date: date) -> pd.DataFrame:
     )
 
 
-def refresh_first_bar() -> int:
-    """首条日线日期入 stock_basic（次新代理，情绪层过滤用，回填后跑一次）。"""
-    return execute(
-        "UPDATE stock_basic s SET first_bar_date = f.mn FROM"
-        " (SELECT code, min(date) mn FROM daily_bar GROUP BY code) f"
-        " WHERE f.code = s.code"
-    )
-
-
-def sync_range(start: date, end: date) -> list[date]:
-    """池同步：EM 三池仅最近 POOL_RECENT_DAYS 交易日可拉（实测），自动钳制。
-
-    返回**同步失败的交易日**列表（空 = 全部成功）。
-
-    ★2026-09-29：逐日 try 续跑，不因单日失败中断整段。A7 的 RuntimeError 是
-    「**这一天**的池不可信，别拿它出报告」，而多日回补里超出东财窗口的那几天
-    并不影响其余天——早先 `fetch_limit_pool` 直接透传异常，会让 19 天回补死在
-    第 1 天（09-01 超窗口）而后 16 天全白跑。失败日必须**记账并上报**：
-    CLI 据此返回非 0，避免「静默地把空池当成功」。
-    """
-    from emotion_core.utils.dates import trading_days
-
-    days = trading_days(start, end)[-_POOL_RECENT_DAYS:]
-    log.info("池同步 %d 天（EM 池历史上限 %d 日）", len(days), _POOL_RECENT_DAYS)
-    failed: list[date] = []
-    for d in days:
-        try:
-            n = fetch_limit_pool(d)
-        except RuntimeError as exc:
-            log.warning("%s 池同步失败，跳过：%s", d, exc)
-            failed.append(d)
-            continue
-        bad = verify_pre_close(d)
-        log.info("%s 三池=%d pre_close异常=%d", d, n, len(bad))
-    return failed
-
-
-# ---------- T12 人气榜（东财，热度信号影子验证；2026-09 实测海外IP可用） ----------
 _HOT_COLS = ["date", "code", "rank"]
 # akshare 封装在拉完排名后还要合并行情字段（本 IP 下返回非 JSON 崩），自建单请求绕开。
 _EM_RANK_URL = "https://emappdata.eastmoney.com/stockrank/getAllCurrentList"
@@ -579,31 +540,3 @@ def fetch_hot_history(code: str) -> int:
             rows.append((pd.to_datetime(calc_time).date(), code, rk))
     return _upsert_rows("hot_rank", _HOT_COLS, rows, ["date", "code"])
 
-
-def hot_universe(lookback_start: date) -> list[str]:
-    """回填票池：lookback 起有连板史 ∪ 出过信号的票（影子验证样本域）。"""
-    df = query_df(
-        "SELECT DISTINCT code FROM derived_bar"
-        " WHERE cont_days >= 2 AND date >= %s"
-        " UNION SELECT DISTINCT code FROM signal ORDER BY 1",
-        (lookback_start,),
-    )
-    return list(df["code"])
-
-
-def backfill_hot_rank(codes: list[str], sleep: float = 0.3) -> int:
-    """批量回填排名史；单票失败记录不中断（网络源抖动容忍）。"""
-    total, fails = 0, []
-    for i, code in enumerate(codes):
-        try:
-            total += fetch_hot_history(code)
-        except Exception as exc:  # noqa: BLE001 —— 逐票容错
-            fails.append(code)
-            log.warning("hot %s fail: %s", code, str(exc)[:60])
-        if i % 50 == 0:
-            log.info("hot 回填 %d/%d 行数=%d 失败=%d", i, len(codes), total, len(fails))
-        time.sleep(sleep)
-    log.info(
-        "hot_rank 回填完成：%d 票 %d 行，失败 %d: %s", len(codes), total, len(fails), fails[:20]
-    )
-    return total

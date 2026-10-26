@@ -110,11 +110,6 @@ def refresh(conn: Any | None = None) -> dict[str, Any]:
     return info
 
 
-def cached_range() -> tuple[date | None, date | None]:
-    """缓存区间（表为空 → (None, None)）。"""
-    with connect_ro() as conn:
-        r = conn.execute("SELECT min(date), max(date) FROM trade_calendar").fetchone()
-    return (r[0], r[1]) if r and r[0] else (None, None)
 
 
 def lookup(d: date) -> bool | None:

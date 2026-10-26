@@ -138,7 +138,7 @@ def _open_locked_limit_down(trade_date: date, code: str) -> bool:
 
 
 def _open_positions() -> list[Holding]:
-    """OPEN 持仓（lkl position.current() 的等价语句：同 WHERE / ORDER BY）。"""
+    """OPEN 持仓（position 表 status='OPEN' 的等价语句：同 WHERE / ORDER BY）。"""
     with connect_ro() as conn:
         rows = conn.execute(_POSITION_SQL).fetchall()
     return [Holding(code=r[0], entry_date=r[1]) for r in rows]

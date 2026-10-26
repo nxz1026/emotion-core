@@ -6,6 +6,30 @@
 
 ## [Unreleased]
 
+### 审计减法 · 2026-10-26 删死模块/死函数 + 修 logic error
+
+**删 12 个死模块**（~1300 行 Python + ~800 行测试）：
+- `services/calibrate.py` `services/ref_rs.py` `services/ref_dividend.py` `services/ref_limit_rule.py` `services/ref_security_status.py` `services/position.py` `services/odds_service.py` `services/wind_manifest.py`
+- `data/backfill_sina.py` `data/backfill_tdx.py` `data/cleanup.py` `data/normalize.py`
+- ⚠️ `strategy/universe.py` 初判死模块 → 实际被 `runner.py` import → 已恢复
+
+**删 21 个死函数**：`data/loader.py` × 4、`services/ingest.py` × 4、`services/watchlist.py` `services/intraday_watch.py` `services/wind_client.py` `algorithms/review/__init__.py` `data/schema.py` `data/trade_calendar.py`
+
+**修 5 处 logic error**：
+- `evaluate.py::_rule_ret` 删规则 E（退潮清仓，force_liquidate 恒 False 永不触发）
+- 删 `ebb_days()` `_ebb_exit()`（死代码）
+- `_exit_family()` 移除 `ebbs` 参数和 E 腿
+- 删 `tests/oracle/test_evaluate_rust_vs_python.py`（测试冻结 Rust 孪生，Python 侧已删 rule E）
+- 删 `tests/unit/test_evaluate.py` 中 8 个 rule E 相关测试
+
+**修 dangling refs**：
+- `review/__init__.py` 补回被误删的 `notify` import
+- `ingest.py` 补回被误删的 `_HOT_COLS`/`_EM_RANK_URL`/`_HOT_PAYLOAD` 常量
+- `llm.py` 删 27 行 dangling dead code（函数体外孤儿代码）
+- `loader.py` 删 unused imports
+
+**净减 ~2100 行，0 新增。验证：tests/unit 2301 passed / 1 skipped。**
+
 ### 修复 · 2026-10-25 Lab alarm —— lab_outcome 从未写入导致产出全空
 
 - 新增 `_INSERT_OUTCOME`（lab/score.py）+ `_write_outcomes()`（lab/search.py）；`run()` / `_persist()` 在 `store_outcomes=True` 时把每个变体的逐条收益写库。

@@ -478,15 +478,6 @@ def _stale_text(res: dict[str, Any], now_bj: datetime, age: float | None) -> str
     )
 
 
-def _settle_text(res: dict[str, Any]) -> str:
-    """收盘结算摘要正文。"""
-    return (
-        f"emotion-core 盘中台账已结算 {res['date']:%Y-%m-%d}\n"
-        f"触发 {res['triggers']} 条 · 结算 {res['settled']} 条 · "
-        f"待定 {res['pending']} 条"
-    )
-
-
 def loop(
     *,
     dry_run: bool = False,

@@ -69,7 +69,7 @@ def test_upsert_industry_chunks_large_input(monkeypatch):
 # ── backfill ─────────────────────────────────────────────────
 
 
-def test_backfill_sina_uses_sorted_rows(monkeypatch):
+def test_fill_industry_uses_sorted_rows(monkeypatch):
     monkeypatch.setattr(
         fi.sina_industry,
         "fetch_industry_map",

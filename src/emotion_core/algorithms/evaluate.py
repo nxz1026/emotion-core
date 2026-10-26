@@ -1,7 +1,7 @@
 """T9 信号质量评估（§1.7，E3）：无买入时点假设，统计信号前瞻表现。
 
-语义逐字照搬 lkl/services/evaluate.py 的 replay / forward_stats / ebb_days
-三函数及其私有辅助（_next_bars / _limit_up_on / _ebb_exit / _exit_family /
+语义逐字照搬 lkl/services/evaluate.py 的 replay / forward_stats
+三函数及其私有辅助（_next_bars / _limit_up_on / _exit_family /
 _rule_ret / _pit_drift），判定与口径零改动。
 本次迁移范围为上述三函数：lkl 同文件的报告组装（report / *_report /
 distribution_stats / hypothesis_test / walk_forward / adoption_summary 等）
@@ -126,19 +126,15 @@ def _limit_up_on(code: str, d: date) -> bool:
 
 
 def _rule_ret(code: str, d0: date, ebbs: list[date] | None = None) -> float | None:
-    """正式口径（P2 修复：退潮优先合成）= E 退潮清仓 ?? A 断板开盘卖。
-
-    与实盘 exit.suggestions 同一优先级（退潮清仓 > 断板卖出）——
-    此前正式口径只取 A，退潮日的收益被错记为持有。E=None（无退潮/
-    清仓日在窗外）时回落 A；影子口径 D/E 明细见 _exit_family。"""
-    fam = _exit_family(code, d0, ebbs)
-    return fam.get("E_退潮清仓") if fam.get("E_退潮清仓") is not None else fam.get("A_断板开盘")
+    """正式口径 = A 断板开盘卖（★2026-10-26 审计：E 退潮清仓已废止，
+    force_liquidate 恒 False，规则 E 永不触发，故移除）。"""
+    fam = _exit_family(code, d0)
+    return fam.get("A_断板开盘")
 
 
 def forward_stats(sigs: pd.DataFrame) -> pd.DataFrame:
     """每信号前瞻：T+1高开% / T+1晋级 / T+3、T+5 最大涨幅与最大回撤 / 规则化收益。"""
     rows = []
-    ebbs = ebb_days(sigs["date"].min() if not sigs.empty else date(2020, 1, 1))
     for s in sigs.itertuples():
         bdf = query_df("SELECT close FROM daily_bar WHERE code=%s AND date=%s", (s.code, s.date))
         if bdf.empty:  # V4：基准价缺失保护（此前中断整个 replay）
@@ -159,7 +155,7 @@ def forward_stats(sigs: pd.DataFrame) -> pd.DataFrame:
             full = len(w) == h
             r[f"max_up{h}"] = round(float(w["high"].max() / base - 1) * 100, 2) if full else None
             r[f"max_dd{h}"] = round(float(w["low"].min() / base - 1) * 100, 2) if full else None
-        r["rule_ret"] = _rule_ret(s.code, s.date, ebbs)
+        r["rule_ret"] = _rule_ret(s.code, s.date)
         rows.append(r)
     return pd.DataFrame(rows)
 
@@ -178,38 +174,13 @@ def _pit_drift(code: str, d: date) -> bool:
     return st_now or (fb is not None and not pd.isna(fb) and fb > d)
 
 
-def ebb_days(start: date) -> list[date]:
-    """P3-5：退潮日全序列（自 start 起）——一次性预取注入，替代
-    _ebb_exit 内部逐信号查库（此前纯 mock 测试也连真库）。"""
-    df = query_df(
-        "SELECT date FROM market_stat WHERE date >= %s AND force_liquidate ORDER BY date", (start,)
-    )
-    return list(df["date"])
-
-
-def _ebb_exit(nb: pd.DataFrame, d0: date, ret, ebbs: list[date] | None = None) -> float | None:
-    """V4：信号后首个强制清仓日收盘强平；清仓日在前向窗外 → None(pending)。
-
-    ebbs：调用方注入的退潮日序列（replay/report 预取一次）；
-    None 时兜底自查（独立调用兼容）。"""
-    days = ebbs if ebbs is not None else ebb_days(d0)
-    ed = next((d for d in days if d > d0), None)
-    if ed is None:
-        return None
-    idx = nb.index[nb["date"] == ed]
-    if len(idx):
-        return ret(float(nb["close"].iloc[idx[0]]))
-    # P3（三轮审计）：窗外 pending / 清仓日无行情均为不可结算
-    return None
-
-
-def _exit_family(code: str, d0: date, ebbs: list[date] | None = None) -> dict:
+def _exit_family(code: str, d0: date) -> dict:
     """出口规则族（同一 T+1 开盘买入前提，费后%，T+1 制度合法——最早 T+2 卖）：
     A 断板开盘=正式口径（首个前日未涨停日的开盘）；B 断板收盘（断板判定当日
     收盘，T+1 断板则顺延 T+2 收盘）；C 固定 T+2 收盘（最短合法持有）；
-    D 半仓 = 50%×C + 50%×B；E 退潮清仓（正式口径优先项，P2 三轮）。
+    D 半仓 = 50%×C + 50%×B。
 
-    正式口径 = E??A（退潮优先合成，见 _rule_ret）。
+    ★2026-10-26 审计：E 退潮清仓已废止（force_liquidate 恒 False），移除。
     V4（二轮审计）：① 右删失——前向窗口 <5 日且窗外仍涨停 → 各规则记
     None（pending），不再「按窗口末收盘近似」混入统计污染中位数；② T+1
     合法性——窗口仅 1 根 bar 时全部 None（当日买当日卖违反 T+1）。
@@ -237,13 +208,9 @@ def _exit_family(code: str, d0: date, ebbs: list[date] | None = None) -> dict:
     si = 1 if brk == 0 else brk
     b = ret(float(nb["close"].iloc[si])) if si is not None else None
     c = ret(float(nb["close"].iloc[1]))  # n>=2 保证 T+2 合法
-    # V4（二轮审计）：E 退潮清仓腿——对齐实盘 exit.suggestions 优先级
-    # （退潮清仓 > 断板卖出）；回测缺此腿导致强制清仓日的收益被错记为持有。
-    e = _ebb_exit(nb, d0, ret, ebbs)
     return {
         "A_断板开盘": a,
         "B_断板收盘": b,
         "C_两日收盘": c,
         "D_半仓": round(0.5 * c + 0.5 * b, 2) if b is not None else None,
-        "E_退潮清仓": e,
     }

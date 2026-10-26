@@ -554,10 +554,3 @@ def create_all(conn) -> int:
             cur.execute(stmt)
     return len(DDL)
 
-
-def init_db(conn) -> int:
-    """建表并回显清单。"""
-    n = create_all(conn)
-    tables = sorted(DDL)
-    print(f"OK: {n} 张表就绪 -> {', '.join(tables)}")
-    return n

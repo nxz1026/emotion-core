@@ -259,35 +259,3 @@ def get_client(profile: str = "default", **overrides) -> LLMClient:
     return _CACHE[key]
 
 
-def comment(trade_date) -> str:
-    """V9 异步点评：读已落盘报告 → 脱敏 → LLM 点评 → 追加写回文件。"""
-    if not LLM_ENABLED:
-        return ""
-    from pathlib import Path
-
-    from emotion_core.algorithms.review.utils import _atomic_write, _strip_position_block
-
-    out = Path("reports") / f"{trade_date}.md"
-    if not out.exists():
-        return ""
-    md = out.read_text(encoding="utf-8")
-    if "⑪ LLM 点评" in md:
-        return ""
-    try:
-        sanitized = _strip_position_block(md)
-        reply = get_client("default").chat(
-            [
-                {
-                    "role": "system",
-                    "content": "你是A股龙空龙策略复盘助手，"
-                    "对复盘报告给≤120字要点点评，不构成投资建议。",
-                },
-                {"role": "user", "content": sanitized},
-            ],
-            purpose="llm-comment",
-        )
-        section = f"\n## ⑪ LLM 点评（{reply.model}，仅供参考）\n\n{reply.text}\n"
-        _atomic_write(out, md + section)
-        return section
-    except Exception as exc:  # noqa: BLE001
-        return f"\n> ⚠ LLM 点评失败（{exc}），报告主体不受影响\n"

@@ -1,7 +1,7 @@
 """P3-3 自选股（watchlist）：add/rm/list + 当日状态摘要。
 
 ⚠️  R4 关注列表真源已迁 CPT `cpt_track`（see `services/watchlist_service.py`）。
-    本模块仍维护本地 `watchlist` 表，供 review / strategy universe 等既有调用方使用；
+    本模块仍维护本地 `watchlist` 表，供 review 等既有调用方使用；
     新增的「追踪」/「关注列表」语义请走 `watchlist_service`（CPT 侧是真源）。
 
 watchlist 表 = 用户自选清单（code PK, name 冗余快照, note）。CLI 与报告
@@ -39,14 +39,6 @@ def remove(code: str) -> int:
     return execute("DELETE FROM watchlist WHERE code = %s", (code,))
 
 
-def list_all() -> list[dict]:
-    df = query_df(
-        "SELECT w.code, w.name, w.added_at, w.note FROM watchlist w ORDER BY w.added_at, w.code"
-    )
-    return [
-        {"code": r.code, "name": r.name, "added_at": r.added_at, "note": r.note or ""}
-        for r in df.itertuples()
-    ]
 
 
 def status_rows(trade_date: date | None = None) -> list[dict]:

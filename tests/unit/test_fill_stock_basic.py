@@ -10,8 +10,8 @@ f20/f21 自 2026-10-12 起已收录（provider 侧 `_SINA_UNIT_SCALE` 做万元�
 所以本机 EM 持续 502 时回退源下市值/流通股本照样有值。
 
 `is_st`（2026-10-13 接入）走**简称前缀** `ST`/`*ST`，先剥 `XD`/`XR`/`DR` 除权标记：
-东财 clist 不给风险警示标志，而 `ref_security_status.populate_is_st_from_wind()`
-要逐股烧 Wind 配额。该列进个股诊断 LLM prompt，此前全表 false（198 只漏标）。
+东财 clist 不给风险警示标志，要逐股烧 Wind 配额回填 ST 历史。
+该列进个股诊断 LLM prompt，此前全表 false（198 只漏标）。
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""信号质量评估（replay / forward_stats / ebb_days）：断言逐列语义与出口族收益（不连库）。
+"""信号质量评估（replay / forward_stats）：断言逐列语义与出口族收益（不连库）。
 
 语义来源 lkl/services/evaluate.py；差异仅限 emotion-core 契约（见 evaluate.py 模块文档）：
 - name 来自 entry._candidate_view（LadderDay 无 name 字段）；
@@ -229,7 +229,6 @@ class TestForwardStats:
     @pytest.fixture
     def stubbed(self, monkeypatch):
         state: dict = {"nb": pd.DataFrame(), "base": 10.0, "rule": 1.23}
-        monkeypatch.setattr(evaluate, "ebb_days", lambda start: [])
         monkeypatch.setattr(
             evaluate,
             "query_df",
@@ -241,7 +240,7 @@ class TestForwardStats:
         )
         monkeypatch.setattr(evaluate, "_next_bars", lambda code, d0, n=5: state["nb"])
         monkeypatch.setattr(evaluate, "_limit_up_on", lambda code, d: True)
-        monkeypatch.setattr(evaluate, "_rule_ret", lambda code, d0, ebbs=None: state["rule"])
+        monkeypatch.setattr(evaluate, "_rule_ret", lambda code, d0: state["rule"])
         return state
 
     def test_full_window_metrics(self, stubbed):
@@ -280,35 +279,12 @@ class TestForwardStats:
         )
         assert evaluate.forward_stats(pd.DataFrame([SIG])).empty
 
-    def test_ebbs_injected_once_for_all_signals(self, stubbed, monkeypatch):
-        calls: list[date] = []
-        monkeypatch.setattr(evaluate, "ebb_days", lambda start: calls.append(start) or [])
-        stubbed["nb"] = _bars(
-            [10.5, 10.6, 11.0], [11.0, 12.0, 11.5], [9.8, 10.2, 10.0], [10.8, 11.8, 10.5]
-        )
-        evaluate.forward_stats(pd.DataFrame([SIG, {**SIG, "date": D3}]))
-        assert calls == [D2]
-
 
 class TestRuleRet:
-    def test_prefers_ebb_exit_over_break(self, monkeypatch):
-        monkeypatch.setattr(
-            evaluate,
-            "_exit_family",
-            lambda code, d0, ebbs=None: {"E_退潮清仓": -3.0, "A_断板开盘": 1.0},
-        )
-        assert evaluate._rule_ret("000017", D2) == -3.0
 
-    def test_falls_back_to_a_when_ebb_pending(self, monkeypatch):
-        monkeypatch.setattr(
-            evaluate,
-            "_exit_family",
-            lambda code, d0, ebbs=None: {"E_退潮清仓": None, "A_断板开盘": 2.0},
-        )
-        assert evaluate._rule_ret("000017", D2) == 2.0
 
     def test_empty_family_returns_none(self, monkeypatch):
-        monkeypatch.setattr(evaluate, "_exit_family", lambda code, d0, ebbs=None: {})
+        monkeypatch.setattr(evaluate, "_exit_family", lambda code, d0: {})
         assert evaluate._rule_ret("000017", D2) is None
 
 
@@ -317,8 +293,6 @@ class TestExitFamily:
 
     @pytest.fixture
     def stubbed(self, monkeypatch):
-        monkeypatch.setattr(evaluate, "ebb_days", lambda start: [])
-        monkeypatch.setattr(evaluate, "_ebb_exit", lambda nb, d0, ret, ebbs=None: ret(9.85))
         return monkeypatch
 
     @staticmethod
@@ -345,7 +319,6 @@ class TestExitFamily:
         assert fam["B_断板收盘"] == r(12.5)  # 断板判定当日收盘（index 2）
         assert fam["C_两日收盘"] == r(11.5)  # 固定 T+2 收盘
         assert fam["D_半仓"] == round(0.5 * fam["C_两日收盘"] + 0.5 * fam["B_断板收盘"], 2)
-        assert fam["E_退潮清仓"] == r(9.85)
 
     def test_still_limit_up_in_window_is_pending(self, stubbed):
         stubbed.setattr(evaluate, "_next_bars", lambda code, d0, n=5: self._nb())
@@ -363,38 +336,3 @@ class TestExitFamily:
     def test_no_forward_bar(self, stubbed):
         stubbed.setattr(evaluate, "_next_bars", lambda code, d0, n=5: pd.DataFrame())
         assert evaluate._exit_family("000017", D2) == {}
-
-
-class TestEbbExit:
-    NB = _bars([10.0, 10.5, 10.8], [10.0, 10.5, 10.8], [10.0, 10.5, 10.8], [10.2, 10.6, 9.9])
-
-    def test_liquidates_on_first_ebb_after_signal(self):
-        ed = list(self.NB["date"])[1]
-        assert evaluate._ebb_exit(self.NB, D2, lambda p: round(p, 2), [ed]) == round(
-            float(self.NB["close"].iloc[1]), 2
-        )
-
-    def test_ebb_outside_window_is_pending(self):
-        before = list(self.NB["date"])[0] - timedelta(days=1)
-        assert evaluate._ebb_exit(self.NB, D2, lambda p: p, [before]) is None
-
-    def test_no_ebb_after_signal(self):
-        assert evaluate._ebb_exit(self.NB, D2, lambda p: p, []) is None
-
-    def test_falls_back_to_own_query(self, monkeypatch):
-        ed = list(self.NB["date"])[0]
-        monkeypatch.setattr(evaluate, "ebb_days", lambda start: [ed])
-        assert evaluate._ebb_exit(self.NB, D2, lambda p: p) == float(self.NB["close"].iloc[0])
-
-
-class TestEbbDays:
-    def test_reads_force_liquidate_days(self, monkeypatch):
-        seen: dict = {}
-
-        def q(sql, params=(), conn=None):
-            seen["sql"], seen["params"] = sql, params
-            return pd.DataFrame({"date": [D2, D3]})
-
-        monkeypatch.setattr(evaluate, "query_df", q)
-        assert evaluate.ebb_days(D1) == [D2, D3]
-        assert "force_liquidate" in seen["sql"] and seen["params"] == (D1,)

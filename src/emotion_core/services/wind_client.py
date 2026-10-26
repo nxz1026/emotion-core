@@ -230,6 +230,4 @@ class WindClient:
         return str(payload)
 
 
-def get_wind_client() -> WindClient:
-    """工厂函数：返回默认配置的 WindClient 实例。"""
-    return WindClient()
+

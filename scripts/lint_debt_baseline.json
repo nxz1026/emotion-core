@@ -5,5 +5,5 @@
     "E402": 6,
     "UP042": 2
   },
-  "note": "2026-10-25 夜：149→8。E402（TYPE_CHECKING/lazy import）×6 + UP042（str+enum 三元继承）×2，均为有意保留。"
+  "note": "2026-10-26：审计减法后。E402 × 6（TYPE_CHECKING/lazy import）+ UP042 × 2（str+enum 三元继承），均为有意保留。"
 }
