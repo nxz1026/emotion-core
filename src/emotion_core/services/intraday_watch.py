@@ -554,7 +554,8 @@ def loop(
         except Exception:  # noqa: BLE001 - 单轮失败不停摆
             log.exception("本轮扫描失败，等下一轮")
         age = _round_age_min(res.get("round_at"), now)
-        if now.time() >= ALARM_GRACE_UNTIL and (age is None or age > STALE_MINUTES):
+        in_sess = in_session(now)
+        if in_sess and now.time() >= ALARM_GRACE_UNTIL and (age is None or age > STALE_MINUTES):
             gap = last_alarm is None or (now - last_alarm).total_seconds() >= ALARM_GAP_SEC
             if gap:
                 ok = _alarm(_stale_text(res, now, age))

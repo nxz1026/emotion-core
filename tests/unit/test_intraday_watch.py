@@ -588,7 +588,7 @@ class TestLoopAlarm:
 
 
 class TestAlarmGrace:
-    """早盘首轮宽限：09:35 之前「没有轮次」是正常的，不该告警。"""
+    """早盘首轮宽限：09:35 之前「没有轮次」是正常的，不该告警。午休 11:30–13:00 同理。"""
 
     def _clock(self, *times):
         seq = iter(times)
@@ -639,6 +639,39 @@ class TestAlarmGrace:
             )
         assert "卡死告警已触发" in caplog.text
         assert "推送未配置/失败" in caplog.text
+
+    def test_no_alarm_during_lunch_break(self, monkeypatch):
+        """午休 11:30–13:00 不轮次，数据停滞不该触发卡死告警。"""
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(
+            w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0}
+        )
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=2,
+            sleep=lambda s: None,
+            now_fn=self._clock(
+                datetime(2026, 10, 23, 12, 0, tzinfo=w._BJ),
+                datetime(2026, 10, 23, 12, 30, tzinfo=w._BJ),
+            ),
+        )
+        assert alarms == []
+
+    def test_no_alarm_after_market_close(self, monkeypatch):
+        """收盘后（15:05 后）不轮次，数据停滞不该触发卡死告警。"""
+        monkeypatch.setattr(w, "is_trading_day", lambda d: True)
+        monkeypatch.setattr(
+            w, "run_round", lambda **kw: {"round_at": None, "triggers": 0, "written": 0}
+        )
+        alarms: list[str] = []
+        monkeypatch.setattr(w, "_alarm", alarms.append)
+        w.loop(
+            max_rounds=1,
+            sleep=lambda s: None,
+            now_fn=self._clock(datetime(2026, 10, 23, 16, 0, tzinfo=w._BJ)),
+        )
+        assert alarms == []
 
 
 class TestLoopSettle:
