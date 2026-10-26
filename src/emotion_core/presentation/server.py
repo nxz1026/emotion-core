@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -32,8 +33,9 @@ BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
-# nginx 转发前缀（proxy_pass /emotion/ -> /）
-BASE_PATH = "/emotion"
+#: nginx 转发前缀（proxy_pass 会把前缀剥掉）—— 可用环境变量覆盖，
+#: 便于把看板迁到新的挂载路径（如 /ecpt/emotion/）。
+BASE_PATH = os.environ.get("EMOTION_BASE_PATH", "/emotion")
 
 # Jinja2 环境
 _jinja = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
