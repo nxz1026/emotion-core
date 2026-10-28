@@ -245,6 +245,7 @@ def _wire(
     # 2026-10-09 日志巡检 D：补跑轮退避基数默认置 0，避免单测真的 sleep。
     retry_round_delay=0.0,
     max_consecutive_failures=3,
+    flush_every=20,
     tradable=None,
     **cfg,
 ):
@@ -264,6 +265,7 @@ def _wire(
     monkeypatch.setattr(runner, "RETRY_BASE_DELAY", retry_base_delay)
     monkeypatch.setattr(runner, "RETRY_ROUND_DELAY", retry_round_delay)
     monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
+    monkeypatch.setattr(runner, "FLUSH_EVERY", flush_every)
     # R67-3 硬闸门会查库（tradable_codes）——本文件必须 DB-free，按日缓存也要清。
     monkeypatch.setattr(
         runner, "tradable_codes", lambda _d: set(codes if tradable is None else tradable)
@@ -707,3 +709,75 @@ class TestRateLimitResilience:
             runner.run_for_date(TRADE_DATE)
         summary = [r.getMessage() for r in caplog.records if "策略观察" in r.getMessage()]
         assert summary and "失败 1" in summary[-1], summary
+
+
+class TestIncrementalFlush:
+    """按批落库：2026-10-28 上游延迟劣化 → 2h 超时 TERM，旧实现只在循环末尾
+    一次性 _save_batch ⇒ 233 次调用全部作废、当日零信号。"""
+
+    def test_flush_every_persists_progressively(self, monkeypatch):
+        """每 FLUSH_EVERY 条就落库一次，且最终条目不重不漏。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        calls: list[int] = []
+        real_save = store.save
+
+        def counting_save(trade_date, items):
+            calls.append(len(items))
+            return real_save(trade_date, items)
+
+        store.save = counting_save
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=[f"c{i}" for i in range(5)],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=10,
+            flush_every=2,
+        )
+        runner.run_for_date(TRADE_DATE)
+
+        # 5 条信号 → 2 + 2 + 1（收尾）三次落库
+        assert calls == [2, 2, 1], calls
+        assert len(store.items) == 5
+        assert len({(it["code"], it["strategy"]) for it in store.items}) == 5
+
+    def test_flush_failure_does_not_abort_run(self, monkeypatch, caplog):
+        """落库异常只告警，不中断整轮；失败条目由后续 flush 兜住。"""
+        client, snap = _FakeClient(), _Snapshots()
+        store = _FakeSignalStore()
+        real_save = store.save
+        state = {"failed": False}
+
+        def flaky_save(trade_date, items):
+            if not state["failed"]:
+                state["failed"] = True
+                raise RuntimeError("db down")
+            return real_save(trade_date, items)
+
+        store.save = flaky_save
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=[f"c{i}" for i in range(4)],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=10,
+            flush_every=2,
+        )
+        with caplog.at_level(logging.WARNING):
+            runner.run_for_date(TRADE_DATE)
+
+        assert any("落库失败" in r.getMessage() for r in caplog.records)
+        # 第一次 flush 失败保留 2 条，第二次 flush 连同新条目一起写成功
+        assert len(store.items) == 4
+
+    def test_flush_noop_when_nothing_new(self, monkeypatch):
+        """没有新信号时不产生空的 UPSERT。"""
+        def boom(*a, **kw):
+            raise AssertionError("_save_batch 不该在空列表上被调用")
+
+        monkeypatch.setattr(runner, "_save_batch", boom)
+        runner._flush_signals(TRADE_DATE, [], calls=0, total=0)

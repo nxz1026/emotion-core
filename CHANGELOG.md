@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-28 策略观察按批落库（2h 超时不再丢光整轮）
+
+- 事故：上游 apihub 延迟劣化 5~15 倍（调用间隔中位 4.0s → 23.5s，p90 60s），
+  `emotion-core-strategy.service` 跑满 `TimeoutStartSec=7200` 被 TERM；旧实现只在循环
+  结束后一次性 `_save_batch` ⇒ 233 次 LLM 调用全部作废，当日 `strategy_signal` 零行、
+  `reports/strategy_2026-10-28.json` 未生成。
+- 改法：新增 `runner.FLUSH_EVERY`（env `EC_STRATEGY_FLUSH_EVERY`，默认 20）与
+  `_flush_signals()`，每 N 条成功信号 UPSERT 一次（主循环 + 失败补跑 + 收尾三条路径）；
+  落库异常只告警不中断，条目留在待落库队列下次重试（UPSERT 幂等）。
+- 效果：中断后重跑由 `_existing(prompt_hash)` 跳过已落库组合 ⇒ 天然增量续跑。
+- 验证：`tests/unit` 全量 2306 passed / 1 skipped；新增 `TestIncrementalFlush` 3 例
+  （分批次数 [2,2,1] 不重不漏 / 落库失败不中断 / 空列表不产生空 UPSERT）。
+
 ### 修复 · 2026-10-26
 - **卡死告警误报午休/收盘后**：stale alarm 加入 `in_session()` 判断，只在交易时段内告警。早盘首轮宽限、午休 11:30\–13:00、收盘后 15:05 后均不报。
 

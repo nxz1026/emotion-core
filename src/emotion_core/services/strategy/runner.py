@@ -43,6 +43,11 @@ RETRY_BASE_DELAY: float = float(os.environ.get("EC_STRATEGY_RETRY_BASE_DELAY", "
 # 瞬时故障（尤其限流）在第一轮退避后往往需要更长冷却，故补跑用更大的基数。
 RETRY_ROUND_DELAY: float = float(os.environ.get("EC_STRATEGY_RETRY_DELAY", "10.0"))
 MAX_CONSECUTIVE_FAILURES: int = int(os.environ.get("EC_STRATEGY_MAX_CONSECUTIVE_FAILURES", "8"))
+# 按批落库条数。2026-10-28：上游延迟劣化 5~15 倍，systemd 2h 超时 TERM，
+# 而旧实现只在循环结束后一次性 _save_batch ⇒ 233 次 LLM 调用全部作废，当日
+# 零信号、无快照。现在每 N 条成功信号 UPSERT 一次；中断后重跑靠
+# _existing(prompt_hash) 跳过已落库组合，天然增量。
+FLUSH_EVERY: int = int(os.environ.get("EC_STRATEGY_FLUSH_EVERY", "20"))
 _CONTRACT = (
     '只输出 JSON：{"action":"BUY|WATCH|PASS","score":0-100,'
     '"confidence":0-1,"reason":"≤80字中文","evidence":{"k1":"v1"}}。'
@@ -311,6 +316,7 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
     client = LLMClient(CONFIG.STRATEGY_PROFILE, max_tokens=CONFIG.STRATEGY_MAX_TOKENS)
 
     items, skipped, calls = [], [], 0
+    unflushed: list[dict] = []  # 已成功但还没落库的信号（按 FLUSH_EVERY 批量落）
     failed_attempts = 0  # 仅用于调用间定速；最终「失败」按 skipped 统计
     consecutive_failures = 0
     retry_pairs: list[tuple[Skill, str]] = []
@@ -363,7 +369,11 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
             )
             skipped.append({"strategy": skill.name, "code": code, "reason": "no_bar_today"})
             continue
-        items.append(_item(skill, code, parsed, reply, prompt_hash))
+        item = _item(skill, code, parsed, reply, prompt_hash)
+        items.append(item)
+        unflushed.append(item)
+        if len(unflushed) >= FLUSH_EVERY:
+            _flush_signals(trade_date, unflushed, calls=calls, total=len(items))
 
     # ── 失败补跑（2026-10-09 日志巡检 D）─────────────────────────────
     # 仅在「有可补组合 + 配额未满 + 熔断未开」时执行；已入库组合不重复。
@@ -419,12 +429,15 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
                 _drop_skipped(skipped, skill.name, code)  # 先移除首轮失败记录
                 skipped.append({"strategy": skill.name, "code": code, "reason": "no_bar_today"})
                 continue
-            items.append(_item(skill, code, parsed, reply, prompt_hash))
+            item = _item(skill, code, parsed, reply, prompt_hash)
+            items.append(item)
+            unflushed.append(item)
+            if len(unflushed) >= FLUSH_EVERY:
+                _flush_signals(trade_date, unflushed, calls=calls, total=len(items))
             _drop_skipped(skipped, skill.name, code)
 
-    # Upsert to strategy_signal
-    if items:
-        _save_batch(trade_date, items)
+    # 收尾落库：不足一批的尾巴（前面已按 FLUSH_EVERY 落过的不重复写）
+    _flush_signals(trade_date, unflushed, calls=calls, total=len(items))
 
     # R67-4：WATCH 信号即时推飞书（按 code 聚合、best-effort 不抛）。放在
     # `_save_batch` **调用处**之后而非函数内部，保持「落库」与「推送」分离。
@@ -471,6 +484,23 @@ def _signal_row(trade_date: date, it: dict) -> tuple:
         json.dumps(it.get("evidence", {}), ensure_ascii=False),
         it.get("model", ""),
     )
+
+
+def _flush_signals(trade_date: date, pending: list[dict], *, calls: int, total: int) -> None:
+    """把已完成的信号立刻 UPSERT 落库（按批 checkpoint）。
+
+    落库失败**不中断整轮**：条目留在 pending 里等下一次 flush 重试（UPSERT
+    幂等），最坏情况由收尾那次兜住。
+    """
+    if not pending:
+        return
+    try:
+        saved = _save_batch(trade_date, pending)
+    except Exception as exc:  # noqa: BLE001 — 单次落库失败不该毁掉整轮
+        log.warning("策略信号落库失败（保留 %d 条待重试）：%s", len(pending), exc)
+        return
+    log.info("策略信号落库 %d 条（累计 %d 条 / 已调用 %d 次）", saved, total, calls)
+    pending.clear()
 
 
 def _save_batch(trade_date: date, items: list[dict]) -> int:

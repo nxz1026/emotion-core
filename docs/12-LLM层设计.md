@@ -253,6 +253,16 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 ⇒ 300 次约 36min）。因此 `emotion-core-strategy.service` 的 `TimeoutStartSec` 由 `3600`
 抬到 **`7200`** —— oneshot 跑到一半被 systemd 杀掉不会留任何告警，**再抬配额必须同步抬该超时**。
 
+**按批落库 / 断点续跑**（2026-10-28 事故后加）：上游 apihub 当天延迟劣化 5~15 倍
+（调用间隔中位 4.0s → 23.5s，p90 60s），一轮 2h 只发出 233 次调用就被
+`TimeoutStartSec` TERM。旧实现只在主循环**结束后**一次性 `_save_batch` ⇒
+**233 次调用全部作废，当日 `strategy_signal` 零行、`reports/strategy_<date>.json` 也没生成**。
+现在每 `FLUSH_EVERY` 条成功信号（env `EC_STRATEGY_FLUSH_EVERY`，默认 20）就 UPSERT 一次，
+主循环与失败补跑两条路径都接，收尾再补尾巴；`items` 仍全量保留供快照与 WATCH 推送。
+落库失败只 `log.warning` 不中断整轮，条目留在待落库队列里下次重试（UPSERT 幂等）。
+⇒ **中断后重跑是增量的**：`_existing(prompt_hash)` 会跳过已落库的 `(code, strategy)` 组合。
+排查入口：日志里 `策略信号落库 N 条（累计 M 条 / 已调用 K 次）` 每批一行。
+
 **候选池口径**（`universe.py`，2026-10-09 改，用户拍板「覆盖手动输入和热门池就可以」）：
 `build_universe` = **手动自选 `watchlist`（`ORDER BY code`，优先）+ 当日热门池 `hot_rank`
 前 `STRATEGY_HOT_N` 条（默认 20，`ORDER BY rank, code`）**，**不再读 `limit_pool_em`**
