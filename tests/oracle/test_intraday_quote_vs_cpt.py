@@ -53,13 +53,27 @@ def _response(rows: list[tuple[str, list[str]]]) -> str:
 
 
 @pytest.fixture(scope="module")
-def cpt_parser():
+def cpt_repo():
+    """CPT 仓可用性守卫：非同一机器时整份跳过，可用时把仓根塞进 `sys.path`。
+
+    ⚠️ 2026-10-29：此前只有 `cpt_parser` 做这个守卫，`TestBatchLimit` 直接
+    `from cpt... import SINA_BATCH_LIMIT` ⇒ CI（无 CPT 仓）报
+    `ModuleNotFoundError: No module named 'cpt'`，main 的 CI 一直红。
+    把守卫抽成独立 fixture，凡是要 import `cpt` 的用例都必须依赖它。
+    """
     if os.path.isdir(CPT_PATH) and CPT_PATH not in sys.path:
         sys.path.insert(0, CPT_PATH)
     try:
-        from cpt.adapters.a_share_public import parse_sina_quotes
+        import cpt  # noqa: F401
     except ImportError:  # pragma: no cover
         pytest.skip("CPT 仓不可用（非同一机器）")
+    return CPT_PATH
+
+
+@pytest.fixture(scope="module")
+def cpt_parser(cpt_repo):  # noqa: ARG001 —— 只要它的 skip/path 副作用
+    from cpt.adapters.a_share_public import parse_sina_quotes
+
     return parse_sina_quotes
 
 
@@ -173,7 +187,7 @@ class TestNormalizeCodeMatchesCpt:
 
 
 class TestBatchLimit:
-    def test_chunk_split(self):
+    def test_chunk_split(self, cpt_repo):  # noqa: ARG002 —— 只要它的 skip 副作用
         codes = [f"{600000 + i:06d}" for i in range(120)]
         assert len(codes) == 120
         # 120 只 → 3 块（50/50/20），与 CPT 的 SINA_BATCH_LIMIT=50 一致。
