@@ -47,7 +47,7 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 **阶段 2b（Rust 移植）✅ · 阶段 3（PyO3 接线）✅ · 阶段 4~7（数据/编排/展示/LLM）✅ 已落地 · 阶段 8（上线）✅ 已完成**
 
-Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）。当前基线（2026-10-29 实测，覆盖 unit/oracle/caliber/architecture）为 **2968 passed + 2 skipped**，约 6 分钟；**它不是 DB-free**——13 个展示层用例会真发 SQL，缺 `~/.dbconfig` 时会失败。`.so` 随仓库分发（`src/core_lib/emotion_core_rust.so` 已被 git 跟踪），本机可加载；CI 是 x86_64，加载失败时 `tests/conftest.py` 会把依赖 Rust 的对账测试整份跳过，故 CI 的 passed/skipped 数与本机不同。命令见 `docs/15`「测试覆盖」。
+Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）。当前基线（2026-10-29 实测，覆盖 unit/oracle/caliber/architecture）为 **2969 passed + 2 skipped**，约 6 分钟；**它不是 DB-free**——13 个展示层用例会真发 SQL，缺 `~/.dbconfig` 时会失败。`.so` 随仓库分发（`src/core_lib/emotion_core_rust.so` 已被 git 跟踪），本机可加载；CI 是 x86_64，加载失败时 `tests/conftest.py` 会把依赖 Rust 的对账测试整份跳过，故 CI 的 passed/skipped 数与本机不同。命令见 `docs/15`「测试覆盖」。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
 ### Python ↔ Rust 模块对照
@@ -224,7 +224,7 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 cd emotion-core
 # 主基线（需本机 Postgres + ~/.dbconfig；CI 会起 postgres service 并建库）
 # ⚠️ 不是 DB-free：13 个展示层用例真发 SQL，无 ~/.dbconfig 时会失败（2026-10-29 实测）。
-# 2026-10-29 实测约 6 分钟（2968 passed + 2 skipped；数字随提交变动，以实测为准）
+# 2026-10-29 实测约 6 分钟（2969 passed + 2 skipped；数字随提交变动，以实测为准）
 PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber tests/architecture -q
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）

@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from emotion_core.utils.dates import today_sh
 from emotion_core.utils.db import execute, query_df
 
 log = logging.getLogger("emotion_core.compare")
@@ -134,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     try:
-        d = date.fromisoformat(args.date) if args.date else date.today()
+        d = date.fromisoformat(args.date) if args.date else today_sh()
     except ValueError:
         print(f"日期格式错误：{args.date}（应为 YYYY-MM-DD）", file=sys.stderr)
         return 2

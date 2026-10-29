@@ -16,6 +16,7 @@ import logging
 import time
 from datetime import date, timedelta
 
+from emotion_core.utils.dates import today_sh
 from emotion_core.utils.db import query_df
 
 log = logging.getLogger("emotion_core.dash.snapshot")
@@ -122,7 +123,7 @@ def calendar_ctx(
     """渲染月历所需的数据（周一为每周第一天，与国内看盘习惯一致）。"""
     dates = available_dates()
     have = set(dates)
-    anchor = selected or (dates[0] if dates else (today or date.today()))
+    anchor = selected or (dates[0] if dates else (today or today_sh()))
     first = _parse_month(month, anchor)
     nxt = _shift_month(first, 1)
     prev = _shift_month(first, -1)
@@ -141,7 +142,7 @@ def calendar_ctx(
                     "has_data": day in have,
                     "is_selected": day == selected,
                     "is_latest": bool(dates) and day == dates[0],
-                    "is_today": day == (today or date.today()),
+                    "is_today": day == (today or today_sh()),
                 }
             )
             day += timedelta(days=1)

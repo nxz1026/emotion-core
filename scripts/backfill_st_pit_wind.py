@@ -28,6 +28,7 @@ from emotion_core.services.ref_security_status import (
     backfill_security_status_bulk,
     bulk_progress,
 )
+from emotion_core.utils.dates import today_sh
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end) if args.end else date.today()
+    end = date.fromisoformat(args.end) if args.end else today_sh()
     before = bulk_progress(start, end)
     print(f"窗口 {before['total']} 个｜ok {before['ok']}｜待办 "
           f"{before['pending']}｜上次失败 {before['failed']}｜"

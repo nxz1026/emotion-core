@@ -17,6 +17,7 @@ from datetime import date
 
 from emotion_core.lab import db as labdb
 from emotion_core.lab import notify, panel, score, search
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # c5 的「可核验」基准取运行当天（与主线 check_signal 的 as_of=None 同义）
-    found = search.run(start, end, as_of=date.today(), persist=not args.dry_run)
+    found = search.run(start, end, as_of=today_sh(), persist=not args.dry_run)
     log.info("变体 %d 个，过门禁 %d 个", found["vars"], len(found["proposals"]))
     if not args.no_push and not args.dry_run:
         notify.push(notify.digest(found))

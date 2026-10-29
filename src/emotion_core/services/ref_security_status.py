@@ -39,6 +39,7 @@ from emotion_core.services.wind_client import (
     WindUnavailableError,
 )
 from emotion_core.services.wind_manifest import record_call
+from emotion_core.utils.dates import today_sh
 from emotion_core.utils.db import connect as db_connect
 
 logger = logging.getLogger(__name__)
@@ -634,7 +635,7 @@ def bulk_progress(start: date | None = None, end: date | None = None) -> dict:
     if start is None:
         start = date(2024, 1, 1)
     if end is None:
-        end = date.today()
+        end = today_sh()
     plan = window_plan(start, end)
     done = _window_status()
     ok = [w for w in plan if done.get(w) == _WINDOW_OK]
@@ -676,7 +677,7 @@ def backfill_security_status_bulk(
     if start is None:
         start = date(2024, 1, 1)
     if end is None:
-        end = date.today()
+        end = today_sh()
     budget = budget_calls if budget_calls is not None else _default_call_budget()
     plan = window_plan(start, end)
     done = _window_status()

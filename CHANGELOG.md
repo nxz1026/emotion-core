@@ -6,6 +6,30 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-29 收尾：时区口径 / mypy 接入 / 孤儿脚本 / 上线生效
+
+- **「今天」统一走 `today_sh()`**：`date.today()` 在 9 个模块里还有 12 处隐式调用，
+  机器时区是 `Etc/UTC` ⇒ 北京时间 00:00~08:00 会取到昨天（2026-09-28 直观层「今日无推荐」、
+  2026-10-07 pool/strategy 取错日期同源）。改到 `services/intraday_watch.py`（结算默认日）、
+  `services/diagnose_service.py`（缺省 as_of）、`services/ref_security_status.py`（回填 end）、
+  `algorithms/compare.py`、`data/sync.py`（守卫降级分支）、`presentation/snapshot.py`
+  （月历 `is_today` 高亮）、`lab/*`（6 个 CLI 默认值）、`scripts/backfill_st_pit_wind.py`。
+  新增架构门禁 `test_no_implicit_local_today`（AST 判定，注释里提到不算违规）。
+- **mypy strict 真正接进 CI**：`pyproject.toml` 里 `[tool.mypy] strict = true` 一直配着，
+  但**没有任何门禁或 CI 跑过**。首次真跑 **593 errors / 86 files**（mypy 2.4.1，
+  `python_version=3.12`）。按本仓既有做法接进 `scripts/check_lint_debt.py` 的棘轮
+  （只许减不许增），基线记在 `scripts/lint_debt_baseline.json`；CI 钉 `mypy==2.4.1`
+  并注明「换版本会漂，用 `--update-baseline` 重记」。
+- **删除孤儿脚本** `scripts/reconcile_2a.py`：它的对账对象 `lkl` 仓（`/home/ubuntu/DSH/longkonglong`）
+  已不在本机（只剩空 `reports/`），脚本 import 即 `ModuleNotFoundError`；该轮对账
+  （2644/2644 全过）已记录在 `b80b0c3`，无任何文档/CI/定时任务引用它。
+  需要时 `git show b80b0c3:scripts/reconcile_2a.py` 可取回。
+- **上线生效**：`emotion-core-dash` 重启（此前进程是 10-26 的旧代码，仍监听 `0.0.0.0:8098`
+  且是单线程 `HTTPServer`）；现为 `127.0.0.1:8098` + `ThreadingHTTPServer`，nginx 反代不受影响。
+  `deploy/bin/wind-pull-daily.sh` 同步到 `/home/ubuntu/bin/`（`FAILED` 标记生效）。
+- 验证：全量 `pytest tests` **2969 passed / 6 skipped**；`check_doc_numbers` /
+  `check_lint_debt`（含 mypy）/ `check_gate_coverage` / `ruff check` + `ruff format` 全绿。
+
 ### 修复 · 2026-10-29 策略观察墙钟预算 + 优雅停止 + 覆盖均匀（timeout 治本）
 
 - 事故：上游 apihub/agnes 延迟劣化到单次 ≈60s，15 票 × 15 策略 = 225 组需 ≈3.75h，
@@ -52,7 +76,7 @@
   docs/12 的 `STRATEGY_MAX_LLM` 当前默认 200；docs/15 补记本次回归与 services 31 个文件。
 - **验证**：`ruff check` 5 errors（均有意保留）/ `ruff format` 0；`check_doc_numbers.py`
   `check_lint_debt.py` `check_gate_coverage.py` 全绿；`pytest tests/unit tests/oracle
-  tests/caliber tests/architecture` = **2968 passed + 2 skipped**（需真库，约 6 分钟）。
+  tests/caliber tests/architecture` = **2969 passed + 2 skipped**（需真库，约 6 分钟）。
 
 ### 修复 · 2026-10-28 策略观察按批落库（2h 超时不再丢光整轮）
 

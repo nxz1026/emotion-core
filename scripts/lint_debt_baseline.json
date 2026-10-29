@@ -4,5 +4,19 @@
   "by_rule": {
     "E402": 3
   },
-  "note": "2026-10-29 审计后：E402 × 3（test_systemd_units.py 的 TYPE_CHECKING/lazy import）+ UP042 × 2（domain/market.py 的 str+enum 三元继承）。均有意保留；by_rule 解析器只识别 E+数字，故 UP042 未计入 by_rule，但计入总数。"
+  "mypy_errors": 593,
+  "mypy_files": 86,
+  "mypy_by_package": {
+    "utils": 17,
+    "presentation": 72,
+    "llm": 9,
+    "lab": 10,
+    "data": 52,
+    "core": 6,
+    "algorithms": 232,
+    "services": 210,
+    "domain": 8,
+    "orchestration": 7
+  },
+  "note": "2026-10-29：ruff 5 = E402 × 3（test_systemd_units.py 的 TYPE_CHECKING/lazy import）+ UP042 × 2（domain/market.py 的 str+enum 三元继承，by_rule 解析器只认 E+数字故未计入）。mypy 593 是 `[tool.mypy] strict` 首次真跑的结果（mypy 2.4.1，pyproject python_version=3.12）；基线绑定该版本，换版本后数量会漂，用 --update-baseline 重新记录。"
 }

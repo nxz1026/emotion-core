@@ -30,7 +30,7 @@ from emotion_core.algorithms import entry
 from emotion_core.algorithms import stock as stock_algo
 from emotion_core.domain.ladder import LadderDay
 from emotion_core.domain.signal import Checklist
-from emotion_core.utils.dates import prev_trading_day
+from emotion_core.utils.dates import prev_trading_day, today_sh
 from emotion_core.utils.db import query_df
 
 log = logging.getLogger("emotion_core.diagnose_service")
@@ -502,8 +502,11 @@ def diagnose(code: str, as_of: date | None = None, *, stats: dict | None = None)
         任一段缺数只写 note，不抛异常。
     """
     if as_of is None:
-        prev = prev_trading_day(date.today())
-        as_of = prev if prev else date.today()
+        # ⚠️ 机器时区 Etc/UTC ⇒ 北京时间 00:00~08:00 的 `date.today()` 还是昨天，
+        # 「上一交易日」会退成前天（盘中/盘前看诊断会少一天）。统一走 today_sh()。
+        today = today_sh()
+        prev = prev_trading_day(today)
+        as_of = prev if prev else today
     code = (code or "").strip()
 
     technical = {}

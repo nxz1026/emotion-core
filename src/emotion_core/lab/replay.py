@@ -31,6 +31,7 @@ import pandas as pd
 from emotion_core.algorithms import entry, state
 from emotion_core.lab import panel as labpanel
 from emotion_core.lab.rules import BASELINE, LabRules
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger(__name__)
 
@@ -235,9 +236,9 @@ def main(argv: list[str] | None = None) -> int:
     """命令行：复刻基线并与 `signal` 表对照（只读）。"""
     ap = argparse.ArgumentParser(description="Lab 变体回放（默认只读对照）")
     ap.add_argument("--start", default="2024-01-01")
-    ap.add_argument("--end", default=str(date.today()))
+    ap.add_argument("--end", default=str(today_sh()))
     ap.add_argument(
-        "--as-of", default=str(date.today()), help="c5 可核验基准日（主线回放当天 = 今天）"
+        "--as-of", default=str(today_sh()), help="c5 可核验基准日（主线回放当天 = 今天）"
     )
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)

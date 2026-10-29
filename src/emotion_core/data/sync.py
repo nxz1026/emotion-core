@@ -17,6 +17,7 @@ import pandas as pd
 
 from emotion_core.data.bar_guard import check_bars
 from emotion_core.data.providers.base import BAR_COLS, ProviderError, valid_frame
+from emotion_core.utils.dates import today_sh
 from emotion_core.utils.db import transaction
 from emotion_core.utils.errors import DataError
 
@@ -43,7 +44,7 @@ def sync_daily(days: int = 5) -> int:
         end = em_data_date()
     except Exception as exc:  # noqa: BLE001 —— 守卫不可用不该拦住同步
         log.warning("数据日期守卫不可用（%s），退回日历日", exc)
-        end = date.today()
+        end = today_sh()
     start = end - timedelta(days=days)
     log.info("sync_daily: %s ~ %s", start, end)
 

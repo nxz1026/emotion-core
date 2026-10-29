@@ -13,6 +13,10 @@
 # 所以：**现在**跑测试 + 门禁（含一条**只许减不许增**的债务棘轮），
 # **之后** debt 清到接近零再把 ruff/mypy 真正接进来。
 # 详见 scripts/check_lint_debt.py 的文件头。
+#
+# ★ 2026-10-29：mypy strict（`[tool.mypy] strict = true`，早就配着但从没跑过）
+#   也接进了同一道棘轮 —— 首次真跑 593 errors / 86 files。它守的是「不许再涨」，
+#   不是「现在全绿」；清到零之前不要把它改成硬失败。
 name: emotion-core CI
 
 on:
@@ -52,7 +56,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install pytest ruff==0.16.8
+          # ⚠️ mypy 版本要钉：`scripts/lint_debt_baseline.json` 的 mypy_errors
+          # 是按 mypy 2.4.1 记的，换版本数量会漂（棘轮会误报「债务增长」）。
+          python -m pip install pytest ruff==0.16.8 mypy==2.4.1
 
       # ⚠️ 必须显式设 PYTHONPATH：仓里没有 console_scripts 入口，
       # 代码是 `src/` 布局（生产靠 systemd 的 PYTHONPATH 跑）。

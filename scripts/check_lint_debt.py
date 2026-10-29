@@ -9,6 +9,10 @@
     ruff format: 226 个文件待格式化
     mypy  strict: 未跑（无配置）
 
+2026-10-29 补：`pyproject.toml` 里 `[tool.mypy] strict = true` **一直是配着的**，
+但从没被任何门禁/CI 跑过 —— 实测 **593 errors / 86 files**（`python_version`
+钉 3.12，mypy 2.4.1）。所以 mypy 也进本棘轮，与 ruff 同口径：**只许减不许增**。
+
 **直接把 ruff 挂进 CI 会让它第一秒就红** —— 而一个从第一天就红的门禁，
 结局只有两个：被人注释掉，或者被人学会无视。**那比没有门禁更糟**，
 因为它还占着「我们有 CI」的位子。
@@ -66,9 +70,7 @@ def _ruff_cmd() -> list[str] | None:
 
 
 def _run(argv: list[str]) -> tuple[int, str]:
-    proc = subprocess.run(
-        argv, cwd=str(ROOT), capture_output=True, text=True, timeout=600
-    )
+    proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True, text=True, timeout=600)
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -105,6 +107,32 @@ def ruff_findings() -> tuple[int, dict[str, int]]:
     return total, by_rule
 
 
+def mypy_findings() -> tuple[int, int, dict[str, int]]:
+    """返回 (错误数, 涉及文件数, 按包分布)。
+
+    `pyproject.toml` 里 `[tool.mypy] strict = true` 早就配好了，但**没有任何
+    门禁/CI 在跑它** —— 配了不跑等于没配（本仓对此的判据见文件头）。
+    这里与 ruff 同口径：工具没跑成 ≠ 零个错误，解析不出结论就直接红。
+    """
+    rc, out = _run([sys.executable, "-m", "mypy", "src/emotion_core"])
+    if "Success: no issues found" in out:
+        return 0, 0, {}
+    m = re.search(r"Found (\d+) errors? in (\d+) files?", out)
+    if not m:
+        raise RuntimeError(
+            f"mypy 没能给出结论（rc={rc}）。**这不等于类型检查通过** —— "
+            f"多半是 mypy 没装或配置报错（`pip install mypy==2.4.1`）。"
+            f"输出片段：{out[:300]!r}"
+        )
+    total, files = int(m.group(1)), int(m.group(2))
+    by_pkg: dict[str, int] = {}
+    for line in out.splitlines():
+        pkg = re.match(r"src/emotion_core/([^/]+)/", line)
+        if pkg:
+            by_pkg[pkg.group(1)] = by_pkg.get(pkg.group(1), 0) + 1
+    return total, files, by_pkg
+
+
 def format_findings() -> int:
     base = _ruff_cmd()
     if base is None:
@@ -116,7 +144,10 @@ def format_findings() -> int:
     m = re.search(r"(\d+)\s+files?\s+would be reformat", out)
     if m:
         return int(m.group(1))
-    if re.search(r"\d+\s+files?\s+already formatted|^\d+ files? already formatted", out, re.M) or "already formatted" in out:
+    if (
+        re.search(r"\d+\s+files?\s+already formatted|^\d+ files? already formatted", out, re.M)
+        or "already formatted" in out
+    ):
         return 0
     raise RuntimeError(
         f"ruff format --check 没能给出结论（rc={rc}）。"
@@ -140,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         errors, by_rule = ruff_findings()
         unformatted = format_findings()
+        mypy_errors, mypy_files, mypy_by_pkg = mypy_findings()
     except FileNotFoundError:
         print("  ⚠️ 找不到 ruff —— 本门禁需要它（uvx ruff 或 pip install ruff）")
         return 1
@@ -151,11 +183,18 @@ def main(argv: list[str] | None = None) -> int:
     if by_rule:
         top = sorted(by_rule.items(), key=lambda kv: -kv[1])[:6]
         print("    按规则：" + "  ".join(f"{k}={v}" for k, v in top))
+    print(f"    mypy strict：{mypy_errors} 个错误 / {mypy_files} 个文件")
+    if mypy_by_pkg:
+        top = sorted(mypy_by_pkg.items(), key=lambda kv: -kv[1])[:6]
+        print("    按包：" + "  ".join(f"{k}={v}" for k, v in top))
 
     current = {
         "ruff_check_errors": errors,
         "ruff_format_files": unformatted,
         "by_rule": by_rule,
+        "mypy_errors": mypy_errors,
+        "mypy_files": mypy_files,
+        "mypy_by_package": mypy_by_pkg,
     }
 
     if a.update_baseline:
@@ -182,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     for key, label in (
         ("ruff_check_errors", "ruff check 错误数"),
         ("ruff_format_files", "ruff format 待格式化文件数"),
+        ("mypy_errors", "mypy strict 错误数"),
     ):
         before, now = int(base.get(key, 0)), int(current[key])
         if now > before:
@@ -199,7 +239,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dropped = int(base.get("ruff_check_errors", 0)) - errors
-    tail = f"（较基线减少 {dropped}）" if dropped > 0 else "（与基线持平）"
+    dropped_mypy = int(base.get("mypy_errors", 0)) - mypy_errors
+    tail = (
+        f"（ruff {dropped:+d}，mypy {dropped_mypy:+d}）"
+        if dropped or dropped_mypy
+        else "（与基线持平）"
+    )
     print(f"\n  ✅ 债务未增长 {tail} —— 允许存量，禁止新增")
     return 0
 

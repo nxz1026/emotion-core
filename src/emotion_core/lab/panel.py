@@ -18,6 +18,7 @@ from typing import Any
 import pandas as pd
 
 from emotion_core.lab import db as labdb
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def load(path: Path = PANEL_PATH) -> pd.DataFrame:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="物化回放面板")
     ap.add_argument("--start", default="2024-01-01")
-    ap.add_argument("--end", default=str(date.today()))
+    ap.add_argument("--end", default=str(today_sh()))
     ap.add_argument("--build", action="store_true", help="从 DB 重建并缓存")
     args = ap.parse_args(argv)
     if not args.build:

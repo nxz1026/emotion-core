@@ -18,6 +18,7 @@ import pandas as pd
 
 from emotion_core.lab import db as labdb
 from emotion_core.lab import metrics, panel
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ def run(
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Lab 打分（P1 只有主线基线）")
     ap.add_argument("--start", default="2024-01-01")
-    ap.add_argument("--end", default=str(date.today()))
+    ap.add_argument("--end", default=str(today_sh()))
     ap.add_argument("--action", default="BUY")
     ap.add_argument("--persist", action="store_true", help="写 lab.lab_score")
     ap.add_argument("--json", action="store_true")

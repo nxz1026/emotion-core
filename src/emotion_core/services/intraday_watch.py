@@ -42,7 +42,7 @@ from emotion_core.algorithms import exit as exit_svc
 from emotion_core.algorithms import intraday
 from emotion_core.data import loader
 from emotion_core.data.providers import cpt_intraday
-from emotion_core.utils.dates import next_trading_day, prev_trading_day
+from emotion_core.utils.dates import next_trading_day, prev_trading_day, today_sh
 from emotion_core.utils.db import connect_ro
 
 log = logging.getLogger("emotion_core.intraday_watch")
@@ -168,7 +168,9 @@ def settle_pending(*, as_of: date | None = None, dry_run: bool = False) -> list[
     那批就永远停在 `settled_at IS NULL`（2026-10-23 实测：5 条触发，15:05
     结 0 条，且此后不会再被任何一次「结今天」碰到）。
     """
-    today = as_of or date.today()
+    # ⚠️ 机器时区是 Etc/UTC：北京时间 00:00~08:00 时 `date.today()` 还是昨天，
+    # 会把「今天该结的账」判成未到期（同 orchestration/strategy.py 的 2026-10-07 修）。
+    today = as_of or today_sh()
     out: list[dict[str, Any]] = []
     for d in loader.pending_trigger_dates(today):
         out.append(settle(d, dry_run=dry_run))
@@ -614,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
-    d = date.fromisoformat(ns.date) if ns.date else date.today()
+    d = date.fromisoformat(ns.date) if ns.date else today_sh()
     out = settle(d, dry_run=ns.dry_run)
     tag = "（dry-run，未写库）" if ns.dry_run else ""
     print(

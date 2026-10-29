@@ -31,6 +31,7 @@ import pandas as pd
 from emotion_core.lab import db as labdb
 from emotion_core.lab import metrics, panel, replay, score
 from emotion_core.lab.rules import BASELINE, LabRules, variants
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger(__name__)
 
@@ -441,8 +442,8 @@ def _write_outcomes(
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Lab 变体搜索（hold-out + 七门禁）")
     ap.add_argument("--start", default="2024-01-01")
-    ap.add_argument("--end", default=str(date.today()))
-    ap.add_argument("--as-of", default=str(date.today()))
+    ap.add_argument("--end", default=str(today_sh()))
+    ap.add_argument("--as-of", default=str(today_sh()))
     ap.add_argument("--hold", type=int, default=HOLD_DAYS)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--persist", action="store_true")

@@ -16,7 +16,6 @@ import argparse
 import json
 import logging
 import sys
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ import jinja2
 
 from emotion_core.lab import cpt_watch
 from emotion_core.lab import db as labdb
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger(__name__)
 
@@ -224,7 +224,7 @@ def _ctx() -> dict[str, Any]:
     finally:
         conn.close()
     return {
-        "today": date.today().isoformat(),
+        "today": today_sh().isoformat(),
         "base": base,
         "variants": variants,
         "proposals": proposals,
@@ -285,7 +285,7 @@ class _Handler(BaseHTTPRequestHandler):
                         _render(
                             "lab_variant.html",
                             {
-                                "today": date.today().isoformat(),
+                                "today": today_sh().isoformat(),
                                 "v": row,
                                 "variants": variants,
                                 "min_n": MIN_N,

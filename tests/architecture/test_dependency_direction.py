@@ -349,3 +349,37 @@ def test_scripts_import_existing_emotion_core_modules():
                     except Exception as exc:  # noqa: BLE001
                         bad.append(f"{py.name}: import {alias.name} -> {type(exc).__name__}: {exc}")
     assert not bad, "scripts/ 引用了不存在的 emotion_core 模块/符号：\n" + "\n".join(bad)
+
+
+# ── 9. 禁止隐式「今天」：date.today() / datetime.now() 无时区 ────────────────
+def test_no_implicit_local_today():
+    """`date.today()` / `datetime.now()`（无 tz）在 src/ 里一律禁用。
+
+    机器时区是 Etc/UTC，北京时间 00:00~08:00 时 `date.today()` 还是昨天 ——
+    2026-09-28「直观层显示未知/今日无推荐」、2026-10-07 pool/strategy 取错日期
+    都是这个形状（`algorithms/entry.py` 的 P1-3 已把它写成规范）。
+
+    统一入口：`utils/dates.today_sh()`（UTC + 8h）。这里用 AST 只认真正的调用，
+    注释/文档里提到 `date.today()` 不算违规（多处正是在解释「为什么不用它」）。
+    """
+    src = Path(__file__).resolve().parents[2] / "src" / "emotion_core"
+    allow = {src / "utils" / "dates.py"}
+    bad: list[str] = []
+    for py in sorted(src.rglob("*.py")):
+        if py in allow:
+            continue
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            owner = node.func.value
+            if not isinstance(owner, ast.Name):
+                continue
+            # date.today() / datetime.today()
+            if node.func.attr == "today" and owner.id in ("date", "datetime"):
+                bad.append(f"{py.relative_to(src)}:{node.lineno}: {owner.id}.today()")
+            # datetime.now() 不带 tzinfo（带 UTC/ZoneInfo 的合法）
+            if node.func.attr == "now" and owner.id == "datetime" and not node.args:
+                if not node.keywords:
+                    bad.append(f"{py.relative_to(src)}:{node.lineno}: datetime.now()")
+    assert not bad, "发现隐式「今天」，请改用 utils.dates.today_sh()：\n" + "\n".join(bad)
