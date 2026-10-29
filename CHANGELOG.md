@@ -18,8 +18,9 @@
 - **mypy strict 真正接进 CI**：`pyproject.toml` 里 `[tool.mypy] strict = true` 一直配着，
   但**没有任何门禁或 CI 跑过**。首次真跑 **593 errors / 86 files**（mypy 2.4.1，
   `python_version=3.12`）。按本仓既有做法接进 `scripts/check_lint_debt.py` 的棘轮
-  （只许减不许增），基线记在 `scripts/lint_debt_baseline.json`；CI 钉 `mypy==2.4.1`
-  并注明「换版本会漂，用 `--update-baseline` 重记」。
+  （只许减不许增），基线记在 `scripts/lint_debt_baseline.json`。错误数**随解释器漂移**
+  （实测 3.14=593、CI 的 3.12=596，差的 3 条在 algorithms），故基线按解释器分桶、
+  只跟同版本比；CI 钉 `mypy==2.4.1`，新版本解释器先 `--update-baseline` 记录。
 - **删除孤儿脚本** `scripts/reconcile_2a.py`：它的对账对象 `lkl` 仓（`/home/ubuntu/DSH/longkonglong`）
   已不在本机（只剩空 `reports/`），脚本 import 即 `ModuleNotFoundError`；该轮对账
   （2644/2644 全过）已记录在 `b80b0c3`，无任何文档/CI/定时任务引用它。

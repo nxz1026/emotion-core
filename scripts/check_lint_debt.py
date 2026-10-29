@@ -188,11 +188,24 @@ def main(argv: list[str] | None = None) -> int:
         top = sorted(mypy_by_pkg.items(), key=lambda kv: -kv[1])[:6]
         print("    按包：" + "  ".join(f"{k}={v}" for k, v in top))
 
+    # ⚠️ mypy 的错误数**随解释器版本漂移**（实测同一份代码：3.14 = 593、
+    # CI 的 3.12 = 596，差的 3 条在 algorithms）。所以基线按解释器分桶，
+    # 只跟同版本比 —— 否则 CI 与本地必然互相「判红」。
+    py_key = f"{sys.version_info.major}.{sys.version_info.minor}"
+    prev_map: dict[str, int] = {}
+    if BASELINE.exists():
+        try:
+            prev_map = dict(
+                json.loads(BASELINE.read_text(encoding="utf-8")).get("mypy_errors_by_python") or {}
+            )
+        except (json.JSONDecodeError, OSError):
+            prev_map = {}
+
     current = {
         "ruff_check_errors": errors,
         "ruff_format_files": unformatted,
         "by_rule": by_rule,
-        "mypy_errors": mypy_errors,
+        "mypy_errors_by_python": {**prev_map, py_key: mypy_errors},
         "mypy_files": mypy_files,
         "mypy_by_package": mypy_by_pkg,
     }
@@ -201,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
         BASELINE.write_text(
             json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
-        print(f"\n  ✅ 基线已更新 → {BASELINE.relative_to(ROOT)}")
+        print(f"\n  ✅ 基线已更新（python {py_key}）→ {BASELINE.relative_to(ROOT)}")
         return 0
 
     if not BASELINE.exists():
@@ -221,11 +234,27 @@ def main(argv: list[str] | None = None) -> int:
     for key, label in (
         ("ruff_check_errors", "ruff check 错误数"),
         ("ruff_format_files", "ruff format 待格式化文件数"),
-        ("mypy_errors", "mypy strict 错误数"),
     ):
         before, now = int(base.get(key, 0)), int(current[key])
         if now > before:
             regressions.append(f"{label} 从 {before} 涨到 {now}（+{now - before}）")
+
+    # mypy 只跟**同一解释器版本**的基线比（跨版本数量本就不同）。
+    before_mypy = (base.get("mypy_errors_by_python") or {}).get(py_key)
+    if before_mypy is None:
+        print(
+            f"\n❌ 基线里没有 python {py_key} 的 mypy 记录（现有："
+            f"{sorted(base.get('mypy_errors_by_python') or {})}）。\n"
+            f"   mypy 的错误数随解释器版本漂移，不能跨版本比较；\n"
+            f"   在 python {py_key} 下跑一次 `python scripts/check_lint_debt.py "
+            f"--update-baseline` 记录。"
+        )
+        return 1
+    if mypy_errors > int(before_mypy):
+        regressions.append(
+            f"mypy strict 错误数从 {before_mypy} 涨到 {mypy_errors}"
+            f"（+{mypy_errors - int(before_mypy)}）"
+        )
 
     if regressions:
         print("\n❌ 静态检查债务**增长**了：")
@@ -239,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dropped = int(base.get("ruff_check_errors", 0)) - errors
-    dropped_mypy = int(base.get("mypy_errors", 0)) - mypy_errors
+    dropped_mypy = int(before_mypy) - mypy_errors
     tail = (
         f"（ruff {dropped:+d}，mypy {dropped_mypy:+d}）"
         if dropped or dropped_mypy

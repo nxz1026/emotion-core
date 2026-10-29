@@ -4,7 +4,10 @@
   "by_rule": {
     "E402": 3
   },
-  "mypy_errors": 593,
+  "mypy_errors_by_python": {
+    "3.12": 596,
+    "3.14": 593
+  },
   "mypy_files": 86,
   "mypy_by_package": {
     "utils": 17,
@@ -18,5 +21,5 @@
     "domain": 8,
     "orchestration": 7
   },
-  "note": "2026-10-29：ruff 5 = E402 × 3（test_systemd_units.py 的 TYPE_CHECKING/lazy import）+ UP042 × 2（domain/market.py 的 str+enum 三元继承，by_rule 解析器只认 E+数字故未计入）。mypy 593 是 `[tool.mypy] strict` 首次真跑的结果（mypy 2.4.1，pyproject python_version=3.12）；基线绑定该版本，换版本后数量会漂，用 --update-baseline 重新记录。"
+  "note": "2026-10-29：ruff 5 = E402 × 3（test_systemd_units.py 的 TYPE_CHECKING/lazy import）+ UP042 × 2（domain/market.py 的 str+enum 三元继承，by_rule 解析器只认 E+数字故未计入）。mypy 是 `[tool.mypy] strict` 首次真跑的结果（mypy 2.4.1，pyproject python_version=3.12）；错误数随**解释器**版本漂移（实测 3.14=593、CI 3.12=596），故按解释器分桶，只跟同版本比；新增解释器版本先跑 --update-baseline 记录。"
 }
