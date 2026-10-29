@@ -93,7 +93,8 @@ class Config:
     # 2026-10-09 用户拍板「上调配额」：50 只够 3.3 只票（50 / 15 个策略），
     # 而拍板口径的候选池 = 手动自选 + 热门池前 STRATEGY_HOT_N 只 ≈ 20 只，
     # 20 × 15 = 300 才算覆盖。再往上抬要同时抬 emotion-core-strategy.service
-    # 的 TimeoutStartSec（实测 ~7.2s/次调用，300 次约 36min；单元现为 2h）。
+    # 的 TimeoutStartSec（实测 ~7.2s/次调用，300 次约 36min；单元现为 4h ——
+    # 上游延迟劣化后实测 233 次就撞满 2h，见 docs/12-LLM层设计.md）。
     STRATEGY_MAX_LLM: int = int(os.environ.get("EC_STRATEGY_MAX_LLM", "300"))
     # 注意：调用侧的定速/退避/熔断参数**故意不在这里**。config_hash() 哈希
     # asdict(CONFIG) 的全字段，任何新增键都会让 pipeline_state / signal /

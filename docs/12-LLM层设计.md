@@ -251,7 +251,11 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 **配额与超时**（2026-10-09 用户拍板）：`CONFIG.STRATEGY_MAX_LLM`（`utils/config.py`，env
 `EC_STRATEGY_MAX_LLM`）默认 `50` → **`300`**（20 只 × 15 策略；实测每次 LLM 调用约 7.2s
 ⇒ 300 次约 36min）。因此 `emotion-core-strategy.service` 的 `TimeoutStartSec` 由 `3600`
-抬到 **`7200`** —— oneshot 跑到一半被 systemd 杀掉不会留任何告警，**再抬配额必须同步抬该超时**。
+抬到 **`14400`（4h）** —— oneshot 跑到一半被 systemd 杀掉不会留任何告警，**再抬配额必须同步抬该超时**。
+
+> ⚠️ 2026-10-29 再抬：`7200` 是照「7.2s/次」估的，而上游延迟劣化后实测**每轮 233 次调用就撞满 2h**
+> （间隔中位 23.5s、p90 60s）⇒ 300 次配额永远跑不完，每天一次 `Result=timeout` 的假故障。
+> 按 p90 估 300×(60+1.5) ≈ 5.1h，取 4h 覆盖中位/尾部主要区间（连续失败 8 次会熔断，不会真跑满 5h）。
 
 **按批落库 / 断点续跑**（2026-10-28 事故后加）：上游 apihub 当天延迟劣化 5~15 倍
 （调用间隔中位 4.0s → 23.5s，p90 60s），一轮 2h 只发出 233 次调用就被
@@ -275,7 +279,8 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 （历史提示：若日后重新引入 `limit_pool_em`，注意 `DT` 行的 `first_seal` 存的是**空串而非
 NULL**，排序需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌停股会被排到最前。）
 
-**调度**：`src/emotion_core/orchestration/systemd/emotion-core-strategy.{service,timer}`，工作日 17:50 `Asia/Shanghai`
+**调度**：`src/emotion_core/orchestration/systemd/emotion-core-strategy.{service,timer}`，工作日 **18:15** `Asia/Shanghai`
+（2026-10-25 从 17:50 挪开：与 crontab 的因子重算同分钟起跑；2026-10-29 同步修正 timer 的 Description）
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
 
 ```bash
