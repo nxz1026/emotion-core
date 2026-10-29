@@ -87,7 +87,10 @@ class TestTransaction:
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
 
-        with patch("emotion_core.utils.db.psycopg.connect", return_value=mock_conn):
+        with (
+            patch("emotion_core.utils.db._kwargs", return_value={}),
+            patch("emotion_core.utils.db.psycopg.connect", return_value=mock_conn),
+        ):
             with db.transaction() as conn:
                 assert conn is mock_conn
 
@@ -98,7 +101,10 @@ class TestTransaction:
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
 
-        with patch("emotion_core.utils.db.psycopg.connect", return_value=mock_conn):
+        with (
+            patch("emotion_core.utils.db._kwargs", return_value={}),
+            patch("emotion_core.utils.db.psycopg.connect", return_value=mock_conn),
+        ):
             try:
                 with db.transaction():
                     raise ValueError("test error")

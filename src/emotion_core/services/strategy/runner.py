@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from collections import Counter
 from datetime import UTC, date, datetime
@@ -48,6 +49,68 @@ MAX_CONSECUTIVE_FAILURES: int = int(os.environ.get("EC_STRATEGY_MAX_CONSECUTIVE_
 # 零信号、无快照。现在每 N 条成功信号 UPSERT 一次；中断后重跑靠
 # _existing(prompt_hash) 跳过已落库组合，天然增量。
 FLUSH_EVERY: int = int(os.environ.get("EC_STRATEGY_FLUSH_EVERY", "20"))
+# 墙钟预算：一轮策略观察允许消耗的墙钟秒数。2026-10-29：上游 apihub/agnes
+# 延迟劣化后（调用间隔中位 23.5s、p90 60s），一整轮 225 组要 ~3.75h，
+# 而 systemd 单元的 TimeoutStartSec 是 4h —— 中间只有 15min 余量，一旦上游再慢
+# 一点就是「跑到一半被 TERM ⇒ Result=timeout ⇒ 门户报单元失败」。
+#
+# 这里给循环加一道**墙钟闸门**：超过预算就不再发起新的 LLM 调用，剩余组合记
+# skipped（reason=达到时间预算上限），然后**正常退出 0**。这样
+#   ① systemd 看到 Result=success，门户不再报假故障；
+#   ② 已经跑出来的信号全部落库（按批落库），快照也照常写。
+# 预算默认 12600s = 3.5h，比单元的 TimeoutStartSec(4h) 留 30min 余量给
+# 收尾（落库 + 写快照 + 推送），保证一定在 systemd 掐死之前自己走完。
+TIME_BUDGET: float = float(os.environ.get("EC_STRATEGY_TIME_BUDGET", "12600"))
+
+# ── 优雅停止（systemd SIGTERM）────────────────────────────────
+# 2026-10-29：systemd TimeoutStartSec 到点会发 SIGTERM 直接掐死进程，尾部
+# 未满 FLUSH_EVERY 的信号全丢。CLI 装 SIGTERM 处理器 → 置这里的标记 →
+# 主循环/补跑轮在下一个组合前看到标记就停下，走正常的「落库 + 写快照 + 退出 0」
+# 收尾路径（数据保住，退出码也干净）。
+_STOP_REQUESTED = threading.Event()
+
+
+def request_stop() -> None:
+    """请求当前这轮策略观察尽快收尾（SIGTERM 处理器调用）。"""
+    _STOP_REQUESTED.set()
+
+
+def stop_requested() -> bool:
+    """是否已收到收尾请求。"""
+    return _STOP_REQUESTED.is_set()
+
+
+def _budget_exhausted(started: float) -> bool:
+    """墙钟预算是否用尽（用单调钟，避免 wall clock 被调整影响判断）。"""
+    return time.monotonic() - started >= TIME_BUDGET
+
+
+def _plan_pairs(codes: list[str], skills: list[Skill]) -> list[tuple[Skill, str]]:
+    """轮转遍历（Latin 方阵）：第 r 轮里第 i 只票配第 ``(i + r) % S`` 个策略。
+
+    两种朴素顺序各有各的坑：
+    - 纯代码优先（``for code: for skill:``）：配额/墙钟不够时，排在后面的票
+      **一条信号都拿不到** —— 2026-10-29 实测一轮 225 组只覆盖了前 3 只票。
+    - 纯策略优先（``for skill: for code:``）：首个策略独吞配额，其余策略一次
+      都轮不到（2026-09-30 事故，回归锁在 TestStrategyRotation）。
+
+    轮转遍历两条都满足：
+    - 前 ``len(codes)`` 次调用覆盖**每一只票**（广度优先）；
+    - 同一批里每个策略也各轮到一次（深度不被饿死）；
+    - 每个 ``(code, skill)`` 组合恰好出现一次，不重复调用；
+    - 票的优先级顺序（自选在前、热门池在后）在**每一轮内**保持不变 ⇒ 自选票
+      拿到第一条信号永远早于热门池票。
+    """
+    plan: list[tuple[Skill, str]] = []
+    if not codes or not skills:
+        return plan
+    n_skills = len(skills)
+    for round_index in range(n_skills):
+        for code_index, code in enumerate(codes):
+            plan.append((skills[(code_index + round_index) % n_skills], code))
+    return plan
+
+
 _CONTRACT = (
     '只输出 JSON：{"action":"BUY|WATCH|PASS","score":0-100,'
     '"confidence":0-1,"reason":"≤80字中文","evidence":{"k1":"v1"}}。'
@@ -283,6 +346,12 @@ def _item(skill: Skill, code: str, parsed: dict, reply: Any, prompt_hash: str) -
     }
 
 
+def _skip_rest(skipped: list[dict], rest: list[tuple[Skill, str]], reason: str) -> None:
+    """把未跑的组合批量记为 skipped（预算用尽 / 收到停止信号时用）。"""
+    for skill, code in rest:
+        skipped.append({"strategy": skill.name, "code": code, "reason": reason})
+
+
 def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
     """执行当日策略观察；关闭时零成本返回 0。
 
@@ -320,10 +389,29 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
     failed_attempts = 0  # 仅用于调用间定速；最终「失败」按 skipped 统计
     consecutive_failures = 0
     retry_pairs: list[tuple[Skill, str]] = []
-    # 交错遍历（代码优先、策略轮转）：原 `for skill: for code:` 会让首个策略
-    # 独吞 STRATEGY_MAX_LLM 配额，其余策略一次都轮不到。
-    pairs = [(skill, code) for code in codes for skill in skills]
-    for skill, code in pairs:
+    # 轮转遍历（Latin 方阵）：见 _plan_pairs 的说明——每票至少轮到 1 个策略，
+    # 且同一批里每个策略都轮得到。
+    pairs = _plan_pairs(codes, skills)
+    started = time.monotonic()
+    for index, (skill, code) in enumerate(pairs):
+        # 优雅停止：SIGTERM 后不再发起新的 LLM 调用，剩余组合记 skipped，
+        # 走正常收尾路径（落库 + 写快照 + 退出 0）。
+        if stop_requested():
+            _skip_rest(skipped, pairs[index:], "收到停止信号")
+            log.warning(
+                "策略观察 %s: 收到停止信号，剩余 %d 组不再调用", trade_date, len(pairs) - index
+            )
+            break
+        # 墙钟预算：耗尽即收尾（而不是被 systemd TimeoutStartSec 掐成 Result=timeout）。
+        if _budget_exhausted(started):
+            _skip_rest(skipped, pairs[index:], "达到时间预算上限")
+            log.warning(
+                "策略观察 %s: 墙钟预算 %.0fs 用尽，剩余 %d 组不再调用",
+                trade_date,
+                TIME_BUDGET,
+                len(pairs) - index,
+            )
+            break
         if calls >= CONFIG.STRATEGY_MAX_LLM:
             skipped.append({"strategy": skill.name, "code": code, "reason": "达到LLM调用上限"})
             continue
@@ -390,6 +478,12 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
         )
         time.sleep(RETRY_ROUND_DELAY)
         for skill, code in retry_pairs:
+            if stop_requested():
+                log.warning("策略观察 %s: 收到停止信号，失败补跑提前结束", trade_date)
+                break
+            if _budget_exhausted(started):
+                log.warning("策略观察 %s: 墙钟预算用尽，失败补跑提前结束", trade_date)
+                break
             if calls >= CONFIG.STRATEGY_MAX_LLM:
                 log.info("策略观察 %s: 配额已满，失败补跑提前结束", trade_date)
                 break

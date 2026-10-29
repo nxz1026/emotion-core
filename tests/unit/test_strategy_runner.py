@@ -19,6 +19,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import threading
 from datetime import date
 from pathlib import Path
 
@@ -782,3 +783,248 @@ class TestIncrementalFlush:
 
         monkeypatch.setattr(runner, "_save_batch", boom)
         runner._flush_signals(TRADE_DATE, [], calls=0, total=0)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# D 墙钟预算 / 停止信号 / 覆盖均匀（m02064，2026-10-29 事故后加）
+#
+# 事故：上游 apihub/agnes 延迟劣化到单次 ≈60s，15 票 × 15 策略 = 225 组需
+# ≈3.75h，撞满 `TimeoutStartSec=14400`（4h）被 systemd TERM ⇒ 当天
+# `Result=timeout`、门户红灯。旧实现两处放大损失：
+#   ① 没有墙钟闸门：跑到 4h 才被外部杀掉，收尾逻辑（落库尾巴、快照）根本
+#      没机会执行；
+#   ② `for code: for skill:` 代码优先遍历：配额/墙钟一断，只有前排票有信号
+#      ——10-29 那轮跑满 1h 只覆盖了 15 只票里的 3 只。
+# 修复后：进程内预算 ≤ systemd 超时（留 30min 收尾），耗尽即把剩余组合记
+# skipped 并**正常返回**；SIGTERM 转成「不再发起新调用」而不是硬中断；
+# 遍历改 Latin 方阵轮转，前 len(codes) 次调用就覆盖到每一只票。
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestWallClockBudget:
+    """D-1：进程内墙钟预算必须早于 systemd 超时收口。"""
+
+    def test_budget_is_below_systemd_timeout(self):
+        """预算默认值必须给 systemd 的 4h 留出收尾余量。"""
+        assert 0 < runner.TIME_BUDGET <= 4 * 3600 - 15 * 60, (
+            f"TIME_BUDGET={runner.TIME_BUDGET}s 没有给 TimeoutStartSec 留足收尾时间，"
+            "仍会被 systemd TERM 掉"
+        )
+
+    def test_budget_exhausted_skips_everything_without_calling(self, monkeypatch):
+        """预算一开始就用尽 ⇒ 一次调用都不发，剩余全记 skipped 并正常返回。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1", "s2"]),
+            codes=["c1", "c2", "c3"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=6,
+        )
+        monkeypatch.setattr(runner, "TIME_BUDGET", 0.0)
+
+        count = runner.run_for_date(TRADE_DATE)
+
+        assert count == 0, "预算耗尽时应正常返回 0，而不是抛异常"
+        assert client.attempts == 0, "预算耗尽后不得再发起 LLM 调用"
+        assert len(snap.skipped) == 6, "3 票 × 2 策略全部要记 skipped"
+        assert {s["reason"] for s in snap.skipped} == {"达到时间预算上限"}
+        assert snap.calls, "预算耗尽也必须写快照"
+
+    def test_budget_exhausted_mid_run_keeps_earlier_signals(self, monkeypatch):
+        """跑到一半用尽 ⇒ 已入库的保住，剩余记 skipped，返回已入库条数。"""
+
+        class _Clock:
+            """替身时钟：让每次调用推进 6s，第三次调用前越过 10s 预算。"""
+
+            def __init__(self) -> None:
+                self.now = 0.0
+
+            def monotonic(self) -> float:
+                return self.now
+
+            def sleep(self, seconds: float) -> None:
+                self.now += seconds
+
+        clock = _Clock()
+
+        class _TickingClient(_FakeClient):
+            def chat(self, messages, purpose="chat", json_mode=False):
+                clock.now += 6.0
+                return super().chat(messages, purpose=purpose, json_mode=json_mode)
+
+        monkeypatch.setattr(runner, "time", clock)
+        monkeypatch.setattr(runner, "TIME_BUDGET", 10.0)
+
+        client, store, snap = _TickingClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2", "c3", "c4", "c5", "c6"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=10,
+        )
+
+        count = runner.run_for_date(TRADE_DATE)
+
+        assert client.attempts == 2, "预算 10s / 每次 6s ⇒ 只够两次调用"
+        assert count == 2, "已跑出的信号必须计入返回值"
+        assert len(store.items) == 2, "耗尽前跑出的信号必须落库"
+        assert len(snap.skipped) == 4, "剩余 4 组要记 skipped"
+        assert {s["reason"] for s in snap.skipped} == {"达到时间预算上限"}
+
+    def test_budget_exhaustion_does_not_mask_quota_reason(self, monkeypatch):
+        """配额先撞满时，reason 仍须是精确的「达到LLM调用上限」。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2", "c3", "c4"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=2,
+        )
+        monkeypatch.setattr(runner, "TIME_BUDGET", 600.0)
+
+        runner.run_for_date(TRADE_DATE)
+
+        reasons = {s["reason"] for s in snap.skipped}
+        assert reasons == {"达到LLM调用上限"}, "预算没耗尽时不得污染配额口径"
+
+
+class TestStopSignal:
+    """D-2：SIGTERM 转成「不再发起新调用」，已跑出的信号必须落库。"""
+
+    def test_request_stop_sets_flag_idempotently(self, monkeypatch):
+        """`request_stop()` 幂等置位，`stop_requested()` 读得到。"""
+        event = threading.Event()
+        monkeypatch.setattr(runner, "_STOP_REQUESTED", event)
+
+        assert runner.stop_requested() is False
+        runner.request_stop()
+        assert runner.stop_requested() is True
+        runner.request_stop()
+        assert runner.stop_requested() is True, "重复信号不得抛异常或复位"
+
+    def test_stop_before_start_skips_everything(self, monkeypatch):
+        """开跑前就收到停止信号 ⇒ 不发调用，全部记 skipped 并正常返回。"""
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1", "s2"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=6,
+        )
+        event = threading.Event()
+        event.set()
+        monkeypatch.setattr(runner, "_STOP_REQUESTED", event)
+
+        count = runner.run_for_date(TRADE_DATE)
+
+        assert count == 0
+        assert client.attempts == 0
+        assert {s["reason"] for s in snap.skipped} == {"收到停止信号"}
+        assert snap.calls, "收到停止信号也必须写快照"
+
+    def test_stop_mid_run_keeps_earlier_signals(self, monkeypatch):
+        """跑到一半收到停止信号 ⇒ 已入库的保住，剩余记 skipped。"""
+        event = threading.Event()
+
+        class _StoppingClient(_FakeClient):
+            def chat(self, messages, purpose="chat", json_mode=False):
+                reply = super().chat(messages, purpose=purpose, json_mode=json_mode)
+                if len(self.called) == 2:
+                    event.set()
+                return reply
+
+        monkeypatch.setattr(runner, "_STOP_REQUESTED", event)
+        client, store, snap = _StoppingClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2", "c3", "c4", "c5"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=10,
+        )
+
+        count = runner.run_for_date(TRADE_DATE)
+
+        assert client.attempts == 2, "置位后不得再发起新调用"
+        assert count == 2
+        assert len(store.items) == 2, "中断前跑出的信号必须落库"
+        assert {s["reason"] for s in snap.skipped} == {"收到停止信号"}
+        assert len(snap.skipped) == 3
+
+
+class TestRoundRobinPlan:
+    """D-3：遍历必须让每只票在前 len(codes) 次调用内就轮到策略。"""
+
+    def test_first_round_covers_every_code_in_priority_order(self):
+        """前 len(codes) 组覆盖每一只票，且票序不变（自选优先承诺）。"""
+        skills = _skills(["s1", "s2", "s3"])
+        codes = ["c1", "c2", "c3"]
+        plan = runner._plan_pairs(codes, skills)
+        first_round = plan[: len(codes)]
+
+        assert [code for _, code in first_round] == codes, "首轮必须按原票序覆盖每只票"
+        assert {s.name for s, _ in first_round} == {"s1", "s2", "s3"}
+
+    def test_plan_is_full_grid_permutation(self):
+        """每个 (策略, 票) 组合恰好出现一次，总量不变。"""
+        skills = _skills(["s1", "s2", "s3"])
+        codes = ["c1", "c2", "c3"]
+        plan = runner._plan_pairs(codes, skills)
+        pairs = [(s.name, code) for s, code in plan]
+
+        assert len(pairs) == len(codes) * len(skills)
+        assert len(set(pairs)) == len(pairs), "存在重复组合，说明轮转有偏"
+        assert set(pairs) == {(s.name, c) for s in skills for c in codes}, "漏了组合"
+
+    def test_each_round_has_every_skill_once(self):
+        """每一轮（每 len(codes) 组）都均匀摊到一个策略，不偏置。"""
+        skills = _skills(["s1", "s2", "s3"])
+        codes = ["c1", "c2", "c3"]
+        plan = runner._plan_pairs(codes, skills)
+
+        for start in range(0, len(plan), len(codes)):
+            chunk = plan[start : start + len(codes)]
+            assert sorted(s.name for s, _ in chunk) == ["s1", "s2", "s3"]
+
+    def test_empty_inputs_yield_empty_plan(self):
+        assert runner._plan_pairs([], _skills(["s1"])) == []
+        assert runner._plan_pairs(["c1"], []) == []
+
+    def test_quota_equal_to_code_count_covers_every_code(self, monkeypatch):
+        """10-29 事故回归锁：15 票 × 15 策略、配额 15 ⇒ 每只票都有信号。
+
+        旧「代码优先」遍历下，配额 15 只够跑完第 1 只票的 15 个策略，
+        其余 14 只票零信号 —— 这正是当天「只覆盖 3/15 票」的成因。
+        """
+        codes = [f"c{i}" for i in range(15)]
+        skills = _skills([f"s{i}" for i in range(15)])
+        client, store, snap = _FakeClient(), _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=skills,
+            codes=codes,
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=15,
+        )
+
+        runner.run_for_date(TRADE_DATE)
+
+        covered = {code for _, code in client.called}
+        assert covered == set(codes), f"配额 15 只覆盖了 {len(covered)}/15 只票"
+        assert len(store.items) == 15

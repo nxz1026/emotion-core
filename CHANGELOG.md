@@ -6,6 +6,54 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-10-29 策略观察墙钟预算 + 优雅停止 + 覆盖均匀（timeout 治本）
+
+- 事故：上游 apihub/agnes 延迟劣化到单次 ≈60s，15 票 × 15 策略 = 225 组需 ≈3.75h，
+  撞满 `TimeoutStartSec=14400`（4h）被 systemd TERM ⇒ 当天 `Result=timeout`、门户红灯；
+  10-28 那轮 0 行，10-29 那轮跑满 1h 只覆盖 **3/15 只票**（旧 `for code: for skill:`
+  代码优先遍历，配额/墙钟一断后排票零信号）。按批落库只保住了「已跑出的那部分」，
+  收尾逻辑（落库尾巴 / 快照 / WATCH 推送）根本没机会执行。
+- 改法一（`services/strategy/runner.py`）：新增 `TIME_BUDGET`
+  （env `EC_STRATEGY_TIME_BUDGET`，默认 `12600` = 3.5h，给 4h 超时留 30min 收尾）、
+  `_budget_exhausted()`（`time.monotonic()`），主循环与失败补跑轮最前各判一次；
+  耗尽即把剩余组合批量记 `skipped: 达到时间预算上限` 后 `break`，**照常收尾并返回 0**。
+- 改法二：`_STOP_REQUESTED` + `request_stop()` / `stop_requested()`；`SIGTERM`/`SIGINT`
+  经 `orchestration/strategy.py::_install_stop_handler()` 接上，剩余组合记
+  `收到停止信号` 后 `break` —— 不再有「跑到一半被杀、收尾没跑」的路径。
+- 改法三：`_plan_pairs()` 改 Latin 方阵轮转（`skills[(code_index + round_index) % n_skills]`）：
+  前 `len(codes)` 次调用覆盖每只票、每轮每策略各一次、每组合恰好一次、**每轮内票序不变**
+  ⇒ `universe.py` 的「自选永远先于热门池」承诺不变。
+- 验证：`tests/unit/test_strategy_runner.py` 新增 `TestWallClockBudget`(4)、`TestStopSignal`(3)、
+  `TestRoundRobinPlan`(5)，`test_strategy_orchestration.py` 新增 `TestStopHandler`(2)；
+  strategy 三文件 **80 passed**（原 66）。事故回归锁：15 票 × 15 策略、配额 15 ⇒ 15 只票
+  各拿到 1 个策略（旧实现只覆盖第 1 只）。
+
+### 修复 · 2026-10-29 代码/文档审计（脚本依赖 + 展示层并发 + 文档对齐）
+
+- **恢复被误删的生产依赖**：`services/ref_security_status.py`、`services/wind_manifest.py`、
+  `ingest.hot_universe` 在 2026-10-26 减法审计中被判「0 消费者」删除，但 `scripts/`
+  仍在用（审计只扫 src/tests）。生产 cron 的 ST PIT 回补自 10-26 起每天
+  `ModuleNotFoundError`（`ref_security_status` 0 行），wrapper 恒退 0 导致静默。
+  已从 `350ef95^` 恢复模块与对应单测，并新增架构门禁
+  `test_scripts_import_existing_emotion_core_modules`。
+- **展示层并发**：`presentation/server.py` 由单线程 `HTTPServer` 改为
+  `ThreadingHTTPServer`。`/api/stock/llm` 单次 4~6s、`/api/stock` 首次 ~2s，
+  单线程下会堵住 `/api/status` 与 watchdog 探活（合并前 lkl/asel 均为 Threading）。
+- **少一次无谓查库**：`presentation/snapshot.py::resolve_date` 的 `latest_date()`
+  改为惰性求值；合法 `?date=` 不再多打一次全表聚合，无库环境下纯逻辑用例也能过。
+- **测试隔离**：`tests/unit/test_db.py::TestTransaction` 同时桩 `_kwargs`，不再依赖
+  真实 `~/.dbconfig`；`test_review_entrypoints` 补桩 `load_suspended_candidates`。
+- **编排打点**：daily 的 `strategy` 步在未启用时写 `detail=disabled（由 …timer 独立执行）`，
+  不再 0.02s 静默 OK、detail 恒空。
+- **Wind 兜底脚本**：`deploy/bin/wind-pull-daily.sh` 不再把任意非 0 退出码写成
+  「撞额度/失败＝正常结束」；非 0 记 `FAILED`（额度耗尽时脚本自身返回 0）。
+- **文档对齐**：README 的测试口径（不是 DB-free、7 skipped）、表数/行数、timer 时间
+  （strategy 18:15 而非 17:50）、已删 CLI 模块；docs/06 的 T6/T7/T9/T10/T13/T15；
+  docs/12 的 `STRATEGY_MAX_LLM` 当前默认 200；docs/15 补记本次回归与 services 31 个文件。
+- **验证**：`ruff check` 5 errors（均有意保留）/ `ruff format` 0；`check_doc_numbers.py`
+  `check_lint_debt.py` `check_gate_coverage.py` 全绿；`pytest tests/unit tests/oracle
+  tests/caliber tests/architecture` = **2968 passed + 2 skipped**（需真库，约 6 分钟）。
+
 ### 修复 · 2026-10-28 策略观察按批落库（2h 超时不再丢光整轮）
 
 - 事故：上游 apihub 延迟劣化 5~15 倍（调用间隔中位 4.0s → 23.5s，p90 60s），

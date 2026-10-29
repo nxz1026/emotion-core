@@ -512,6 +512,22 @@ def _em_symbol(code: str) -> str:
     return p + code
 
 
+def hot_universe(lookback_start: date) -> list[str]:
+    """回填票池：lookback 起有连板史 ∪ 出过信号的票（影子验证样本域）。
+
+    ⚠️ 2026-10-26 减法审计曾把它当「0 消费者」删除，但
+    ``scripts/backfill_hot_rank_r21.py`` 仍在用（脚本不在 src/tests 扫描范围内，
+    审计漏了）。2026-10-29 审计恢复。
+    """
+    df = query_df(
+        "SELECT DISTINCT code FROM derived_bar"
+        " WHERE cont_days >= 2 AND date >= %s"
+        " UNION SELECT DISTINCT code FROM signal ORDER BY 1",
+        (lookback_start,),
+    )
+    return list(df["code"])
+
+
 def fetch_hot_history(code: str) -> int:
     """单票人气榜排名史（约366日）→ hot_rank（影子验证回填源）。
 

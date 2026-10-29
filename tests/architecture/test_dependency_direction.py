@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import re
 from pathlib import Path
 
@@ -297,3 +298,54 @@ def test_presentation_is_read_only():
         for f, ln, text in bad:
             msg += f"  {f}:{ln}  {text}\n"
         pytest.fail(msg)
+
+
+# ── 8. scripts/ 的 emotion_core 导入必须可解析 ──────────────────────────────
+def test_scripts_import_existing_emotion_core_modules():
+    """scripts/*.py 里的 `emotion_core` 导入必须真实存在。
+
+    2026-10-26 减法审计只扫 src/ 与 tests/，把 `services/ref_security_status.py`
+    当「0 消费者」删了，但 `scripts/backfill_st_pit_wind.py` 仍在 import 它 ——
+    生产 cron 从 10-26 起每天 `ModuleNotFoundError`，而 wrapper 恒退 0，
+    日志里只写「撞额度/失败＝正常结束」。同理 `hot_universe` 被删后
+    `scripts/backfill_hot_rank_r21.py` 也 ImportError。
+
+    本测试把 scripts/ 纳入扫描：模块不存在、或 `from ... import name` 的名字
+    不存在，都直接红。
+    """
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    bad: list[str] = []
+    for py in sorted(scripts.glob("*.py")):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if not node.module.startswith("emotion_core"):
+                    continue
+                try:
+                    mod = importlib.import_module(node.module)
+                except Exception as exc:  # noqa: BLE001 - 报告全部失败
+                    bad.append(f"{py.name}: import {node.module} -> {type(exc).__name__}: {exc}")
+                    continue
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    if hasattr(mod, alias.name):
+                        continue
+                    # `from pkg import submodule`：包不 eager import 子模块时
+                    # hasattr 为假，但 `pkg.submodule` 可能真实存在。
+                    try:
+                        importlib.import_module(f"{node.module}.{alias.name}")
+                    except Exception:
+                        bad.append(f"{py.name}: {node.module}.{alias.name} 不存在")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if not alias.name.startswith("emotion_core"):
+                        continue
+                    try:
+                        importlib.import_module(alias.name)
+                    except Exception as exc:  # noqa: BLE001
+                        bad.append(f"{py.name}: import {alias.name} -> {type(exc).__name__}: {exc}")
+    assert not bad, "scripts/ 引用了不存在的 emotion_core 模块/符号：\n" + "\n".join(bad)

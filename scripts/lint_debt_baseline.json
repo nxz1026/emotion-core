@@ -1,9 +1,8 @@
 {
-  "ruff_check_errors": 8,
+  "ruff_check_errors": 5,
   "ruff_format_files": 0,
   "by_rule": {
-    "E402": 6,
-    "UP042": 2
+    "E402": 3
   },
-  "note": "2026-10-26：审计减法后。E402 × 6（TYPE_CHECKING/lazy import）+ UP042 × 2（str+enum 三元继承），均为有意保留。"
+  "note": "2026-10-29 审计后：E402 × 3（test_systemd_units.py 的 TYPE_CHECKING/lazy import）+ UP042 × 2（domain/market.py 的 str+enum 三元继承）。均有意保留；by_rule 解析器只识别 E+数字，故 UP042 未计入 by_rule，但计入总数。"
 }

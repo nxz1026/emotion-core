@@ -74,19 +74,25 @@ def resolve_date(raw: str | None, default: date | None = None) -> date | None:
     - 合法日期但无快照（非交易日 / 那天没跑）→ 最新快照日（并由调用方在页面上提示）
     - 非法字符串 → 最新快照日
     """
-    fallback = default if default is not None else latest_date()
+
+    def _fallback() -> date | None:
+        # 惰性求值：合法日期命中时不需要查库。此前无条件先算 latest_date()，
+        # 每个请求（包括明确带 ?date= 的）都多打一次 daily 聚合查询；无库环境下
+        # 连「合法日期直接返回」这条纯逻辑也会因取不到 dbconfig 而失败。
+        return default if default is not None else latest_date()
+
     text = (raw or "").strip()
     if not text:
-        return fallback
+        return _fallback()
     try:
         parsed = date.fromisoformat(text[:10])
     except ValueError:
-        log.warning("非法快照日期参数：%r，回退到 %s", raw, fallback)
-        return fallback
+        log.warning("非法快照日期参数：%r，回退到最新快照日", raw)
+        return _fallback()
     if is_trading_day(parsed):
         return parsed
-    log.info("快照日期 %s 无快照，回退到 %s", parsed, fallback)
-    return fallback
+    log.info("快照日期 %s 无快照，回退到最新快照日", parsed)
+    return _fallback()
 
 
 def _parse_month(raw: str | None, anchor: date) -> date:

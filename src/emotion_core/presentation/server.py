@@ -17,7 +17,7 @@ import json
 import logging
 import os
 from datetime import date, datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -962,7 +962,14 @@ def run_server(port: int = 8098) -> None:
     单点依赖防火墙。如需在容器内/本机外访问，用 EMOTION_DASH_HOST 显式指定。
     """
     host = os.environ.get("EMOTION_DASH_HOST", "127.0.0.1")
-    server = HTTPServer((host, port), DashboardHandler)
+    # ⚠️ 2026-10-29：由单线程 HTTPServer 改为 ThreadingHTTPServer。`/api/stock/llm`
+    # 单次 4~6s、`/api/stock` 首次全表聚合 ~2s，单线程下任何一次慢请求都会把
+    # 其余页面、`/api/status` 和 5 分钟一次的 watchdog 探活一起堵住（watchdog
+    # `--max-time 8`，两次慢请求叠加就会被判宕机并重启）。合并前的 lkl/asel
+    # 两个源仓库都用 ThreadingHTTPServer（docs/evidence/merge-analysis §HTTP 栈），
+    # 这里是合并时退化。缓存是进程内 dict（GIL 下读写原子），每个请求自开连接，
+    # 无需额外锁。
+    server = ThreadingHTTPServer((host, port), DashboardHandler)
     print(f"emotion-core dash running on {host}:{port}")
     server.serve_forever()
 

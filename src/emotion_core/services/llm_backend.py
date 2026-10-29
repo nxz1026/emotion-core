@@ -11,8 +11,13 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import re
+import threading
+import time
 from pathlib import Path
+
+import httpx as _httpx
 
 from emotion_core.utils.config import CONFIG
 
@@ -204,13 +209,6 @@ def short_error(exc: Exception, secrets: tuple[str, ...] = ()) -> str:
 
 # ── LLM Client (strategy observer) ──────────────────
 
-import threading
-import time
-
-import httpx as _httpx
-
-import random
-
 # 429 限速退避（对齐 league 的 ai/llm_client 行为）：指数退避 + 抖动。
 # agnes 账号 RPM 极低（≈1 次/分钟，2026-10-28 实测），旧退避 2**attempt（1s/2s）
 # 会在限速窗口内反复撞 429 后放弃，导致策略观察整轮跑不完。
@@ -235,7 +233,7 @@ def _backoff_seconds(attempt, resp=None):
     hint = _retry_after(resp) if resp is not None else None
     if hint is not None:
         return min(hint, _EC_LLM_BACKOFF_MAX)
-    wait = min(_EC_LLM_BACKOFF_BASE * (2 ** attempt), _EC_LLM_BACKOFF_MAX)
+    wait = min(_EC_LLM_BACKOFF_BASE * (2**attempt), _EC_LLM_BACKOFF_MAX)
     return wait + random.uniform(0, min(3.0, wait * 0.1))
 
 

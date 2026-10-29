@@ -213,7 +213,7 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 
 | 事项 | 旧行为 | 现行为 |
 |---|---|---|
-| 配额分配 | `for skill: for code:`，上限判在内层 → 首个策略独吞 `STRATEGY_MAX_LLM` 全部名额（实测 15 策略 × 68 只 = 1020 组合里只有 `bottom_volume` 跑过，落库 18 行全是它；该 68 只系票池尚未按 `pool_type` 收窄时的口径） | 交错遍历（代码优先、策略轮转），每个策略都能轮到 |
+| 配额分配 | `for skill: for code:`，上限判在内层 → 首个策略独吞 `STRATEGY_MAX_LLM` 全部名额（实测 15 策略 × 68 只 = 1020 组合里只有 `bottom_volume` 跑过，落库 18 行全是它；该 68 只系票池尚未按 `pool_type` 收窄时的口径） | Latin 方阵轮转（`_plan_pairs`）：前 `len(codes)` 次调用就覆盖到**每一只票**，每轮内票序不变（自选优先），每个策略每轮各轮到一次 |
 | 429 限流 | agnes 单后端时 `llm_backend._chat_locked` 传入的 `allow_status_retry=len(chain) > 1` 为假，客户端自带 `max_retry` 对 429 不生效；且失败照样扣配额（实测 50 次里 32 次 429）。**客户端层 2026-10-29 才真正修好**（见下 ⚠️） | 调用侧定速 + 429/5xx 指数退避；**失败不占配额**；连续失败超阈值熔断。客户端 429 退避 2026-10-29 起**对单后端 agnes 也无条件生效**：指数退避 + 抖动，步长 20s/上限 120s（env `EC_LLM_BACKOFF_BASE_SECONDS` / `EC_LLM_BACKOFF_MAX_SECONDS`），agnes 默认 `max_retry` 2→5（env `EC_LLM_MAX_RETRY`）。根因：agnes 账号 RPM≈1/分钟（2026-10-28 实测） |
 | 去重 | 查询用 `sha256(prompt 文本)`、入库用 `sha256(strategy:code:date)`，两者永不相等 → `_existing()` 恒 False，每次重跑全量重打 LLM | 两侧同源，均取 prompt 文本摘要（`_signal_row` 直接用调用侧算好的值） |
 
@@ -231,9 +231,12 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 | `EC_STRATEGY_RETRY_BASE_DELAY` | `2.0` | `runner.py` | 退避基数，第 n 次重试等待 `base × 2^(n-1)` 秒 |
 | `EC_STRATEGY_MAX_CONSECUTIVE_FAILURES` | `8` | `runner.py` | 连续失败达此数即熔断，其余组合记 `连续调用失败熔断` |
 | `EC_STRATEGY_RETRY_DELAY` | `10.0` | `runner.py` | 主循环后的失败补跑轮之前的等待秒数（2026-10-09 新增） |
+| `EC_STRATEGY_TIME_BUDGET` | `12600` | `runner.py` | 单轮墙钟预算（秒，3.5h）。耗尽即停止发起新调用、剩余组合记 `达到时间预算上限` 并**正常退出 0**（2026-10-29 新增，见下） |
+
+`skipped` 里可区分 `达到LLM调用上限` / `连续调用失败熔断` / `LLM调用失败:<原因>` /
+`返回不符合输出契约` / `no_bar_today` / `达到时间预算上限` / `收到停止信号`。
 
 汇总日志形如 `策略观察 2026-09-29: 调用 50, 入库 18, 失败 3, 跳过 1002, 快照 ...`。
-`skipped` 里可区分 `达到LLM调用上限` / `连续调用失败熔断` / `LLM调用失败:<原因>`。
 2026-10-09 起汇总行还带**跳过原因分布**（`runner.py::_reason_distribution`，按次数降序）
 ——此前「为什么只跑了 4 只票」在 DB 与日志里都不可见。
 
@@ -252,6 +255,7 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 `EC_STRATEGY_MAX_LLM`）默认 `50` → **`300`**（20 只 × 15 策略；实测每次 LLM 调用约 7.2s
 ⇒ 300 次约 36min）。因此 `emotion-core-strategy.service` 的 `TimeoutStartSec` 由 `3600`
 抬到 **`14400`（4h）** —— oneshot 跑到一半被 systemd 杀掉不会留任何告警，**再抬配额必须同步抬该超时**。
+> ⚠️ **当前实际默认是 200，不是 300**（2026-10-29 因 agnes RPM≈1/min 下调，见下方注）。
 
 > ⚠️ 2026-10-29 再抬：`7200` 是照「7.2s/次」估的，而上游延迟劣化后实测**每轮 233 次调用就撞满 2h**
 > （间隔中位 23.5s、p90 60s）⇒ 300 次配额永远跑不完，每天一次 `Result=timeout` 的假故障。
@@ -259,6 +263,15 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 > 2026-10-29 同批（根因见上 §429 限流）：agnes 账号被 RPM≈1/分钟限速，故 `STRATEGY_MAX_LLM`
 > 默认 **300 → 200**（`utils/config.py`，env `EC_STRATEGY_MAX_LLM` 可覆盖）。按 ~1/min 估 200 次 ≈ 3.3h，
 > 可塞进 4h 窗口；再配合客户端 429 退避（见上），一轮能跑完而非每天 timeout。
+
+> ⚠️ 2026-10-29 二次修复（抬超时治不了本）：`TimeoutStartSec` 只是**外部**超时，
+> 它杀掉进程时收尾逻辑（落库尾巴 / 快照 / WATCH 推送）根本没跑；且 4h 窗口装不下
+> 225 组 × 60s ≈ 3.75h + 退避。故改为**进程内墙钟预算** `EC_STRATEGY_TIME_BUDGET`
+> （默认 12600s = 3.5h）+ `SIGTERM` 优雅停止（详见上节「墙钟预算与优雅停止」）。
+> `TimeoutStartSec=14400` 保留作为兜底，正常路径不再触及；配额外还要看**覆盖度**：
+> 旧代码优先遍历下配额 300 也只覆盖前排票，现按 Latin 方阵轮转，前 `len(codes)` 次调用
+> 即覆盖每只票。判「一轮是否健康」看日志 summary 的「入库 / 跳过」与 DB 的
+> `count(distinct code)`，不是只看 exit code。
 
 **按批落库 / 断点续跑**（2026-10-28 事故后加）：上游 apihub 当天延迟劣化 5~15 倍
 （调用间隔中位 4.0s → 23.5s，p90 60s），一轮 2h 只发出 233 次调用就被
@@ -269,6 +282,25 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 落库失败只 `log.warning` 不中断整轮，条目留在待落库队列里下次重试（UPSERT 幂等）。
 ⇒ **中断后重跑是增量的**：`_existing(prompt_hash)` 会跳过已落库的 `(code, strategy)` 组合。
 排查入口：日志里 `策略信号落库 N 条（累计 M 条 / 已调用 K 次）` 每批一行。
+
+**墙钟预算与优雅停止**（2026-10-29 事故后加）：按批落库保住了「已跑出的那部分」，
+但 10-29 又暴露两个剩下的洞 —— ①预算只由 systemd 的外部超时管，跑到 4h 才被 TERM，
+**收尾逻辑（落库尾巴、快照、WATCH 推送）根本来不及跑**；②`for code: for skill:` 代码优先，
+配额/墙钟一断，后排票零信号（10-29 那轮跑满 1h 只覆盖 15 只票里的 3 只）。
+
+- `TIME_BUDGET`（env `EC_STRATEGY_TIME_BUDGET`，默认 `12600` = 3.5h）：`run_for_date`
+  用 `time.monotonic()` 记起点，每次迭代最前判 `_budget_exhausted(started)`；耗尽即把
+  剩余 `(skill, code)` 批量记 `skipped: 达到时间预算上限` 并 `break`，**照常收尾、返回 0**。
+  3.5h 是给 `TimeoutStartSec=14400`（4h）留 30min 收尾余量 —— 服务端该超时仍在，
+  只是不再有机会真的用满。
+- 信号：`orchestration/strategy.py::_install_stop_handler()` 把 `SIGTERM`/`SIGINT` 接到
+  `runner.request_stop()`（置 `_STOP_REQUESTED`），主循环与失败补跑轮各自判
+  `stop_requested()`，剩下组合记 `收到停止信号` 后 `break`。**不再有「跑到一半被杀」的路径**：
+  已成功的信号已按批落库，尾巴 flush + 快照照常执行完再返回 0。
+- 遍历改 `_plan_pairs()`（Latin 方阵）：`plan[round * len(codes) + i] = skills[(i + round) % len(skills)]`。
+  四条性质（单测 `TestRoundRobinPlan` 锁死）：前 `len(codes)` 次覆盖每只票；每轮每策略各一次；
+  每个组合恰好一次；**每轮内票序不变** ⇒ `universe.py` 的「自选永远先于热门池」承诺不变。
+  事故回归锁：15 票 × 15 策略、配额 15 ⇒ 15 只票各拿到 1 个策略（旧实现只覆盖第 1 只）。
 
 **候选池口径**（`universe.py`，2026-10-09 改，用户拍板「覆盖手动输入和热门池就可以」）：
 `build_universe` = **手动自选 `watchlist`（`ORDER BY code`，优先）+ 当日热门池 `hot_rank`

@@ -78,8 +78,9 @@ def build_universe(trade_date: date) -> list[str]:
     真正想看的票在自选表里，手动自选才是确定性输入。
 
     顺序即优先级：``watchlist`` 的 code 全部排在 ``hot_rank`` 之前。
-    runner 按 ``(code, skill)`` 交错遍历、配额先烧到前面的 code，因此
-    自选永远先于热门池被 LLM 覆盖。
+    runner 用 Latin 方阵轮转遍历（``runner._plan_pairs``：每轮内票序不变、
+    每轮每策略各一次），配额/墙钟先烧到前面的 code，因此自选永远先于
+    热门池被 LLM 覆盖。
 
     两条查询都必须给出**完全确定**的 ORDER BY。结果会被
     ``STRATEGY_MAX_UNIVERSE`` 截断，而截断后的先后顺序直接决定 LLM 配额

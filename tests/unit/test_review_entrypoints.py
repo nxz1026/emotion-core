@@ -50,6 +50,9 @@ class TestYCompetition:
                 lambda d: set(today_exchange if d == D else [c for c, _, _ in prev_rows]),
             )
             monkeypatch.setattr(ladder, "prev_trading_day", prev_of)
+            # R67-2 起 build() 还会查当日停牌候选；本组只测淘汰赛口径，
+            # 不桩掉它会穿透到 DB（无 ~/.dbconfig 时整个用例 FileNotFoundError）。
+            monkeypatch.setattr(ladder, "load_suspended_candidates", lambda d: [])
 
         return _apply
 

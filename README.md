@@ -47,7 +47,7 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 **阶段 2b（Rust 移植）✅ · 阶段 3（PyO3 接线）✅ · 阶段 4~7（数据/编排/展示/LLM）✅ 已落地 · 阶段 8（上线）✅ 已完成**
 
-Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）；当前全量实测 **2906 passed + 3 skipped**（2026-10-29 实测，覆盖 unit/oracle/caliber/architecture）。差额是依赖 `.so` 的 Rust 对账测试——`.so` 是 gitignore 的构建产物，CI 无 cargo 故整份跳过，详见 `core/__init__.py` 模块说明。命令见 `docs/15`「测试覆盖」。
+Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）。当前基线（2026-10-29 实测，覆盖 unit/oracle/caliber/architecture）为 **2968 passed + 2 skipped**，约 6 分钟；**它不是 DB-free**——13 个展示层用例会真发 SQL，缺 `~/.dbconfig` 时会失败。`.so` 随仓库分发（`src/core_lib/emotion_core_rust.so` 已被 git 跟踪），本机可加载；CI 是 x86_64，加载失败时 `tests/conftest.py` 会把依赖 Rust 的对账测试整份跳过，故 CI 的 passed/skipped 数与本机不同。命令见 `docs/15`「测试覆盖」。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
 ### Python ↔ Rust 模块对照
@@ -73,15 +73,15 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 阶段 2a Python 参考实现 | ✅ 完成 | 11 个算法模块 |
 | 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
 | 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` **惰性**加载 .so（首次访问符号时才加载；产物缺失时抛 `RustCoreUnavailable` 并给出编译指引，不再在导入期崩） |
-| 阶段 4 数据层 | ✅ 已落地 | 37 张表 DDL（2026-10-15 已全部建齐；同一数据库另有 CPT 项目的 10 张 `cpt_*` 表，public 共 46 张）；`daily_bar` 340.9 万行 / 669 交易日 / 5224 只；`derived_bar` 340.9 万行；`market_stat` 669 行；`stock_basic` 5228 只（在市）；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
+| 阶段 4 数据层 | ✅ 已落地 | 37 张表 DDL（emotion-core 侧；2026-10-15 已全部建齐）。同库还有 CPT 的 9 张 `cpt_*` 表 + 1 张无前缀的 `intraday_seal_snapshot`，public 共 **47** 张。2026-10-29 实测：`daily_bar` 347.7 万行 / 682 交易日 / 5227 只；`derived_bar` 347.7 万行；`market_stat` 682 行；`stock_basic` 5228 只（在市）；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
 | 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` **14 步**（sync/coverage/hot/**basic**/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health，`basic` 于 2026-10-13 插入、fail-soft）；systemd（真相源在 `Emotion-CPT/src/emotion_cpt/deploy/systemd/`，由 `Emotion-CPT/scripts/install_units.sh` 安装）：6 个 `.service` + 5 个 `.timer` 共 **11 个 emotion-core core 单元**（`emotion-core-{daily,dash,pool,report,strategy,watchdog}.service` + `{daily,pool,report,strategy,watchdog}.timer`）。**2026-10-24 起真相源统一在 Emotion-CPT 并与 `/etc/systemd/system` 逐文件一致**，`close` 单元已撤销，详见下方「systemd 仓/生产漂移」小节 |
 | 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 14 条 `/api/*` 路由，端口 8098，nginx 前缀 `/ecpt/emotion`（2026-10-26 起由 `/emotion` 迁至 `/ecpt/emotion`） |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
 | 阶段 8 上线 | ✅ 已完成 | 2026-10-07 实测：`emotion-core-dash` 常驻（:8098 HTTP 200，basic auth 经 `/emotion/`，**该路径已于 2026-10-26 迁至 `/ecpt/emotion/`**）；五个 timer 全部 `enabled + active`，`emotion-core-daily.timer` 于 2026-10-06 17:20 北京成功执行、`pipeline_state` 13 步全 `OK`（`for_date=2026-09-30`，因 10-01~10-07 国庆休市，交易日守卫正常跳过，下一交易日 10-08 自动接上）；`signal`/`signal_outcome` 各 162 行全 `source='replay'`；`theme_group` 仍 0 行 |
 
-> 数据现状决定了展示口径：只有 `daily_bar` / `derived_bar` / `market_stat` / `stock_basic`
-> 四张表有数据，所以个股诊断等功能的统计**全部从这四张表现算**（PIT 安全），
-> 等上述信号表落数后按同签名加增强分支即可。
+> 数据现状（2026-10-29）：`signal` 444 行（436 replay + 8 live）、`signal_outcome` 443 行、
+> `theme_group` 134 行、`strategy_signal` 3185 行——信号/题材表已落数，展示层不再只依赖
+> `daily_bar` / `derived_bar` / `market_stat` / `stock_basic` 四张表。
 
 ### systemd：单元真相源在 Emotion-CPT（2026-10-24 迁移）
 
@@ -98,7 +98,8 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
    改了本体忘了 drop-in（或反过来）的表现是**排期静默偏 8 小时、零报错**。
 2. **`close` 单元已撤销**：它跑的是完整 13 步 daily，与 17:20 的 daily **全量重复**，
    而「收盘对账」所需的 `orchestration/close.py` 从未存在。
-3. **五个 timer 全部 `enabled + active`**，按北京时间 17:20/17:45/17:50/18:00/18:05+08:50 触发。
+3. **五个 timer 全部 `enabled + active`**，按北京时间 17:20/17:45/18:00/18:05+08:50 触发；
+   `emotion-core-strategy.timer` 是 **18:15**（不是 17:50——单元描述里那句旧文案已于 2026-10-29 标注更正）。
 
 > 逐单元实测表、nginx 路由、数据现状、备份路径见 **`docs/15` §部署状态**（唯一权威）。
 
@@ -221,8 +222,10 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 
 ```bash
 cd emotion-core
-# 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber tests/architecture -q   # 数字随提交变动，以实测为准（2026-10-29：2906 passed + 3 skipped；e2e 另算）
+# 主基线（需本机 Postgres + ~/.dbconfig；CI 会起 postgres service 并建库）
+# ⚠️ 不是 DB-free：13 个展示层用例真发 SQL，无 ~/.dbconfig 时会失败（2026-10-29 实测）。
+# 2026-10-29 实测约 6 分钟（2968 passed + 2 skipped；数字随提交变动，以实测为准）
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber tests/architecture -q
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
@@ -246,12 +249,10 @@ PYTHONPATH=src .venv/bin/python -m emotion_core.services.ecosystem_service --sta
 PYTHONPATH=src .venv/bin/python -m emotion_core.services.holding_service --code 601811 --cost 21.5 --shares 1000 --capital 1000000
 #                           + 可选：--risk-pct 0.02 --liq-pct 0.01 --max-position-pct 0.5 --ensure-factors --user alice
 
-# A 类死功能治理后接 CLI（2026-10-17 接线）：全仓健康 / 实盘 - 回测比对 / RS 排名 / 涨跌幅规则回填 / 分红除权回填
+# A 类死功能治理后接 CLI（2026-10-17 接线；ref_rs / ref_limit_rule / ref_dividend
+# 三个模块已于 2026-10-26 减法审计删除——0 消费者，对应表与 DDL 保留）
 PYTHONPATH=src .venv/bin/python -m emotion_core.algorithms.doctor                 # 全仓健康自检（7 项，未通过返回 1）
 PYTHONPATH=src .venv/bin/python -m emotion_core.algorithms.compare 2026-10-17      # 实盘 - 回测漂移比对（一致返 0，漂移返 1，--json 出 JSON）
-PYTHONPATH=src .venv/bin/python -m emotion_core.services.ref_rs --top 20           # RS 强弱排名（默认 top 20，--benchmark 改基准）
-PYTHONPATH=src .venv/bin/python -m emotion_core.services.ref_limit_rule --seed     # 涨跌幅制度规则回填（幂等 upsert，10 条）
-PYTHONPATH=src .venv/bin/python -m emotion_core.services.ref_dividend --codes 600519  # 分红除权回填试跑（--sleep 调 Wind 配额）
 
 # 持仓决策（HTTP，恒只读）：GET /api/holding?code=601811&cost=21.5&shares=1000&capital=1000000&cpt=0
 #                             + 可选：risk_pct=0.02&liq_pct=0.01&max_position_pct=0.5&ensure_factors=1&user=alice

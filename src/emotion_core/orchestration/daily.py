@@ -17,6 +17,7 @@ from datetime import date
 
 from emotion_core.orchestration import pipeline
 from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocked
+from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger("emotion_core.daily")
@@ -307,7 +308,12 @@ def _run_step(step: str, trade_date: date) -> str:
     elif step == "strategy":
         from emotion_core.services.strategy import run_for_date as strategy_run
 
-        strategy_run(trade_date)
+        # 策略观察默认关（daily 单元不注入 EC_STRATEGY_ENABLED，由 18:15 的
+        # 独立 timer 跑）。此前这里直接丢弃返回值 ⇒ 步骤 0.02s 就 OK、detail 恒空，
+        # 看库里与「真跑了一轮但零信号」完全同形。显式写出 disabled / signals=N。
+        if not CONFIG.STRATEGY_ENABLED:
+            return "disabled（由 emotion-core-strategy.timer 独立执行）"
+        return f"signals={strategy_run(trade_date)}"
     elif step == "outcome":
         # 回填 signal_outcome（L3 结果），不是回填 signal——replay_service 是
         # 「历史 signal 回填」另一件事，此前接错（审核文档 §9 第 12 条）。

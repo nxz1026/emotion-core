@@ -62,14 +62,25 @@ PYTHONPATH=src DB_CONFIG="$HOME/.dbconfig" EMOTION_WIND_DAILY_CALL_BUDGET="$AUDI
   timeout 2700 "$PY" scripts/backfill_limit_state_wind.py \
   --direction both --max-calls "$AUDIT_BUDGET" >>"$LOG" 2>&1
 rc=$?
-log "DONE limit_state_audit exit=$rc$([ "$rc" -ne 0 ] && echo '（撞额度/失败＝正常结束，次日续跑）')"
+if [ "$rc" -eq 0 ]; then
+  log "DONE limit_state_audit exit=0（撞额度＝正常结束，次日续跑）"
+else
+  # ⚠️ 2026-10-29：此前无论 rc 多少都写「撞额度/失败＝正常结束」，把
+  # ModuleNotFoundError 这类真故障也吞成正常。脚本自身在额度耗尽时返回 0，
+  # 所以非 0 一律按失败记，便于事后 grep。
+  log "FAILED limit_state_audit exit=$rc（真失败，不是额度耗尽）"
+fi
 
 log "START st_pit"
 PYTHONPATH=src DB_CONFIG="$HOME/.dbconfig" EMOTION_WIND_DAILY_CALL_BUDGET="$STPIT_BUDGET" \
   timeout 2700 "$PY" scripts/backfill_st_pit_wind.py \
   --max-calls "$STPIT_BUDGET" >>"$LOG" 2>&1
 rc=$?
-log "DONE st_pit exit=$rc$([ "$rc" -ne 0 ] && echo '（撞额度/失败＝正常结束，次日续跑）')"
+if [ "$rc" -eq 0 ]; then
+  log "DONE st_pit exit=0（未完成＝预算/额度，次日续跑）"
+else
+  log "FAILED st_pit exit=$rc（真失败，不是额度耗尽）"
+fi
 
 log "===== 结束 ====="
 exit 0

@@ -15,14 +15,49 @@ from __future__ import annotations
 
 import argparse
 import logging
+import signal
 import sys
+from collections.abc import Callable
 from datetime import date
+from typing import Any
 
-from emotion_core.services.strategy import run_for_date
+from emotion_core.services.strategy import request_stop, run_for_date
 from emotion_core.utils.dates import today_sh
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("emotion_core.strategy")
+
+
+def _install_stop_handler() -> Callable[[], None]:
+    """装 SIGTERM 处理器：systemd 停止/超时 TERM 时优雅收尾。
+
+    2026-10-29：oneshot 单元被 systemd 掐死（``TimeoutStartSec`` 到点发 SIGTERM）
+    时，进程直接死掉 —— 尾部未满 ``FLUSH_EVERY`` 的信号全丢、当日无快照。
+    收到 SIGTERM 后只置「请收尾」标记，runner 在下一个组合前停下，走正常的
+    「落库 + 写快照 + 退出 0」路径。数据保住，systemd 也能看到干净的退出码。
+
+    ``SIGINT``（Ctrl-C）同样走这条路径：手动跑时中断也要留住已跑出来的信号。
+
+    返回一个还原函数（把原来的处理器装回去）：单测会直接调 ``main()``，
+    不还原的话会把 pytest 自己的 Ctrl-C 处理器顶掉。
+    """
+    previous: list[tuple[signal.Signals, Any]] = []
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            previous.append((sig, signal.getsignal(sig)))
+            signal.signal(sig, lambda signum, _frame: request_stop())
+        except ValueError:  # 非主线程：装不了信号处理器（signal.signal 限制）
+            log.warning("无法安装信号处理器 %s（不在主线程）", sig)
+    log.info("已装 SIGTERM/SIGINT 收尾处理器（systemd 停止时保住已跑出的信号）")
+
+    def restore() -> None:
+        for sig, handler in previous:
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, TypeError):
+                pass
+
+    return restore
 
 
 def parse_codes(raw: str) -> list[str]:
@@ -64,6 +99,7 @@ def main() -> int:
     # date.today()：同一数据 30 天后重跑必须同一结论）。
     trade_date = args.date or today_sh()
     log.info("===== strategy observer %s =====", trade_date)
+    _install_stop_handler()
 
     try:
         count = run_for_date(trade_date, codes)

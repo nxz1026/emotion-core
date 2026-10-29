@@ -7,8 +7,6 @@
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 from emotion_core.algorithms import levels as lv
@@ -160,30 +158,23 @@ class TestConstantsMatchCpt:
 
 
 class TestConstantsMatchCptLive:
-    """从 CPT 仓源码 import 真实常量，防两侧漂移（R4 S6）。"""
+    """从 CPT 契约包 import 真实常量，防两侧漂移（R4 S6）。
 
-    @pytest.fixture(autouse=True)
-    def _add_cpt_path(self):
-        import os
+    ⚠️ 2026-10-29：CPT 已把常数迁到 `emotion_cpt.contracts.pricing`，旧路径
+    `cpt.application.track_points` 不再导出 `_BI_LOOKBACK` / `_ZHONGSHU_LOOKBACK`。
+    原测试因此一直 `pytest.skip("CPT 仓不可用（非同一机器）")` —— 不是机器问题，
+    是符号改名，导致「防漂移」实际上从未生效。改为直接验已安装的契约包。
+    """
 
-        cpt_path = "/home/ubuntu/DSH/Chan_Pattern_Trader"
-        if os.path.isdir(cpt_path) and cpt_path not in sys.path:
-            sys.path.insert(0, cpt_path)
-        yield
+    def test_lookback_matches_contract(self):
+        from emotion_cpt.contracts.pricing import BI_LOOKBACK, ZHONGSHU_LOOKBACK
 
-    def test_lookback_matches_cpt(self):
-        try:
-            from cpt.application.track_points import _BI_LOOKBACK, _ZHONGSHU_LOOKBACK
-        except ImportError:
-            pytest.skip("CPT 仓不可用（非同一机器）")
-        assert lv.BI_LOOKBACK == _BI_LOOKBACK
-        assert lv.ZHONGSHU_LOOKBACK == _ZHONGSHU_LOOKBACK
+        assert lv.BI_LOOKBACK == BI_LOOKBACK
+        assert lv.ZHONGSHU_LOOKBACK == ZHONGSHU_LOOKBACK
 
-    def test_buffers_match_cpt(self):
-        try:
-            from cpt.application.track_points import BUY_BUFFER, SELL_BUFFER, STOP_LOSS_RATIO
-        except ImportError:
-            pytest.skip("CPT 仓不可用")
+    def test_buffers_match_contract(self):
+        from emotion_cpt.contracts.pricing import BUY_BUFFER, SELL_BUFFER, STOP_LOSS_RATIO
+
         assert lv.BUY_BUFFER == BUY_BUFFER
         assert lv.SELL_BUFFER == SELL_BUFFER
         assert lv.STOP_LOSS_RATIO == STOP_LOSS_RATIO

@@ -21,9 +21,9 @@ llm 层要的是"填入 prompt、输出信息"的可插拔实现。
 from __future__ import annotations
 
 import os
+import random
 import re
 import time
-import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -75,7 +75,7 @@ def _agnes_backoff_seconds(attempt, resp=None):
     hint = _agnes_retry_after(resp) if resp is not None else None
     if hint is not None:
         return min(hint, _AGNES_BACKOFF_MAX)
-    wait = min(_AGNES_BACKOFF_BASE * (2 ** attempt), _AGNES_BACKOFF_MAX)
+    wait = min(_AGNES_BACKOFF_BASE * (2**attempt), _AGNES_BACKOFF_MAX)
     return wait + random.uniform(0, min(3.0, wait * 0.1))
 
 
