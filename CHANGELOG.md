@@ -19,6 +19,22 @@
 - 验证：`tests/unit` 全量 2306 passed / 1 skipped；新增 `TestIncrementalFlush` 3 例
   （分批次数 [2,2,1] 不重不漏 / 落库失败不中断 / 空列表不产生空 UPSERT）。
 
+### 修复 · 2026-10-29 策略观察 429 退避（单后端 agnes 不再立即失败）+ 配额 300→200
+
+- 事故根因：两个日更 LLM 任务（emotion-core 策略观察、league AI 富化）共享上游
+  `apihub.agnes-ai.com` 同一账号，该账号被 RPM≈1/分钟限速（2026-10-28 实测：连发约 10 次后
+  持续返回 HTTP 429，无 Retry-After）。emotion-core 撞满 `TimeoutStartSec`（当时 2h）假故障；
+  league AI 富化子作业服务端 30min 超时。
+- 改法（emotion-core）：`llm_backend._post` 原先只在多后端回退链（`allow_status_retry`）时才重试 429，
+  单后端 agnes 的 `max_retry` 对 429 **从不生效**、调用直接失败。现 **429 无条件退避重试**（单/多后端都生效），
+  退避从无效的 `2**attempt`（1s/2s）改为**指数退避 + 抖动**（步长 20s、上限 120s，env
+  `EC_LLM_BACKOFF_BASE_SECONDS` / `EC_LLM_BACKOFF_MAX_SECONDS`）；agnes profile `max_retry` 2→5
+  （env `EC_LLM_MAX_RETRY`）。`llm/agnes.py` 同步改为健壮退避。
+- 减量：`STRATEGY_MAX_LLM` 默认 **300 → 200**（`utils/config.py`，env `EC_STRATEGY_MAX_LLM` 可覆盖），
+  按 ~1/min 估 200 次 ≈ 3.3h 可塞进 4h 窗口。
+- 验证：`tests/unit/test_llm_backend.py` + `test_llm_agnes.py` 42 passed；专项验证单后端 agnes 连续 429
+  下重试满 `max_retry+1` 次而非立即失败；三文件 `py_compile` 通过。
+
 ### 修复 · 2026-10-26
 - **卡死告警误报午休/收盘后**：stale alarm 加入 `in_session()` 判断，只在交易时段内告警。早盘首轮宽限、午休 11:30\–13:00、收盘后 15:05 后均不报。
 

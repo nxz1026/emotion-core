@@ -214,7 +214,7 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 | 事项 | 旧行为 | 现行为 |
 |---|---|---|
 | 配额分配 | `for skill: for code:`，上限判在内层 → 首个策略独吞 `STRATEGY_MAX_LLM` 全部名额（实测 15 策略 × 68 只 = 1020 组合里只有 `bottom_volume` 跑过，落库 18 行全是它；该 68 只系票池尚未按 `pool_type` 收窄时的口径） | 交错遍历（代码优先、策略轮转），每个策略都能轮到 |
-| 429 限流 | agnes 单后端时 `llm_backend._chat_locked` 传入的 `allow_status_retry=len(chain) > 1` 为假，客户端自带 `max_retry` 对 429 不生效；且失败照样扣配额（实测 50 次里 32 次 429） | 调用侧定速 + 429/5xx 指数退避；**失败不占配额**；连续失败超阈值熔断 |
+| 429 限流 | agnes 单后端时 `llm_backend._chat_locked` 传入的 `allow_status_retry=len(chain) > 1` 为假，客户端自带 `max_retry` 对 429 不生效；且失败照样扣配额（实测 50 次里 32 次 429）。**客户端层 2026-10-29 才真正修好**（见下 ⚠️） | 调用侧定速 + 429/5xx 指数退避；**失败不占配额**；连续失败超阈值熔断。客户端 429 退避 2026-10-29 起**对单后端 agnes 也无条件生效**：指数退避 + 抖动，步长 20s/上限 120s（env `EC_LLM_BACKOFF_BASE_SECONDS` / `EC_LLM_BACKOFF_MAX_SECONDS`），agnes 默认 `max_retry` 2→5（env `EC_LLM_MAX_RETRY`）。根因：agnes 账号 RPM≈1/分钟（2026-10-28 实测） |
 | 去重 | 查询用 `sha256(prompt 文本)`、入库用 `sha256(strategy:code:date)`，两者永不相等 → `_existing()` 恒 False，每次重跑全量重打 LLM | 两侧同源，均取 prompt 文本摘要（`_signal_row` 直接用调用侧算好的值） |
 
 调用侧旋钮（**模块级常量，刻意不进 `utils/config.py` 的 `Config`**）：
@@ -256,6 +256,9 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 > ⚠️ 2026-10-29 再抬：`7200` 是照「7.2s/次」估的，而上游延迟劣化后实测**每轮 233 次调用就撞满 2h**
 > （间隔中位 23.5s、p90 60s）⇒ 300 次配额永远跑不完，每天一次 `Result=timeout` 的假故障。
 > 按 p90 估 300×(60+1.5) ≈ 5.1h，取 4h 覆盖中位/尾部主要区间（连续失败 8 次会熔断，不会真跑满 5h）。
+> 2026-10-29 同批（根因见上 §429 限流）：agnes 账号被 RPM≈1/分钟限速，故 `STRATEGY_MAX_LLM`
+> 默认 **300 → 200**（`utils/config.py`，env `EC_STRATEGY_MAX_LLM` 可覆盖）。按 ~1/min 估 200 次 ≈ 3.3h，
+> 可塞进 4h 窗口；再配合客户端 429 退避（见上），一轮能跑完而非每天 timeout。
 
 **按批落库 / 断点续跑**（2026-10-28 事故后加）：上游 apihub 当天延迟劣化 5~15 倍
 （调用间隔中位 4.0s → 23.5s，p90 60s），一轮 2h 只发出 233 次调用就被

@@ -58,7 +58,7 @@ LLM_PROFILES: dict[str, dict] = {
         "max_tokens": 8192,
         "top_p": 1.0,
         "timeout": 180,
-        "max_retry": 2,
+        "max_retry": 5,
     },
 }
 LLM_KEY_ENV = "LKL_LLM_API_KEY"
@@ -209,6 +209,35 @@ import time
 
 import httpx as _httpx
 
+import random
+
+# 429 限速退避（对齐 league 的 ai/llm_client 行为）：指数退避 + 抖动。
+# agnes 账号 RPM 极低（≈1 次/分钟，2026-10-28 实测），旧退避 2**attempt（1s/2s）
+# 会在限速窗口内反复撞 429 后放弃，导致策略观察整轮跑不完。
+_EC_LLM_BACKOFF_BASE = float(os.environ.get("EC_LLM_BACKOFF_BASE_SECONDS", "20"))
+_EC_LLM_BACKOFF_MAX = float(os.environ.get("EC_LLM_BACKOFF_MAX_SECONDS", "120"))
+
+
+def _retry_after(resp):
+    try:
+        value = resp.headers.get("Retry-After")
+    except Exception:
+        return None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_seconds(attempt, resp=None):
+    hint = _retry_after(resp) if resp is not None else None
+    if hint is not None:
+        return min(hint, _EC_LLM_BACKOFF_MAX)
+    wait = min(_EC_LLM_BACKOFF_BASE * (2 ** attempt), _EC_LLM_BACKOFF_MAX)
+    return wait + random.uniform(0, min(3.0, wait * 0.1))
+
 
 class LLMReply:
     """LLM 回复包装。"""
@@ -305,7 +334,9 @@ class LLMClient:
         url = self.params["base_url"].rstrip("/") + "/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         last: Exception = RuntimeError("unreachable")
-        for attempt in range(self.params.get("max_retry", 2) + 1):
+        last_resp = None
+        max_retry = self.params.get("max_retry", 2)
+        for attempt in range(max_retry + 1):
             try:
                 resp = _httpx.post(
                     url, json=payload, headers=headers, timeout=self.params["timeout"]
@@ -313,13 +344,17 @@ class LLMClient:
                 resp.raise_for_status()
                 return resp.json()
             except _httpx.HTTPStatusError as exc:
-                if not allow_status_retry or not fallback_error(exc):
+                # 429（限速）无论是否回退链都必须退避重试；其余 4xx 仅按原规则。
+                if exc.response.status_code != 429 and (
+                    not allow_status_retry or not fallback_error(exc)
+                ):
                     raise
                 last = exc
+                last_resp = exc.response
             except (_httpx.TimeoutException, _httpx.TransportError) as exc:
                 last = exc
-            if attempt < self.params.get("max_retry", 2):
-                time.sleep(2**attempt)
+            if attempt < max_retry:
+                time.sleep(_backoff_seconds(attempt, last_resp))
         raise last
 
 
@@ -360,7 +395,7 @@ _DEFAULT_PROFILES: dict[str, dict] = {
         "max_tokens": 8192,
         "top_p": 1.0,
         "timeout": 180,
-        "max_retry": 2,
+        "max_retry": 5,
     },
 }
 
@@ -371,6 +406,7 @@ _ENV_MAP = {
     "EC_LLM_TOP_P": "top_p",
     "EC_LLM_TIMEOUT": "timeout",
     "EC_LLM_BASE_URL": "base_url",
+    "EC_LLM_MAX_RETRY": "max_retry",
 }
 
 

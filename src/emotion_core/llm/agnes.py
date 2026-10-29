@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -41,13 +42,41 @@ LLM_PROFILES: dict[str, dict] = {
         "max_tokens": 8192,
         "top_p": 1.0,
         "timeout": 180,
-        "max_retry": 2,
+        "max_retry": 5,
     },
 }
 LLM_KEY_ENV = "LKL_LLM_API_KEY"
 LLM_KEY_FILES = ["~/.llmkey", ".secrets/llmkey"]
 LLM_PROFILE_KEY_ENV: dict[str, str] = {"agnes": "AGNES_API_KEY"}
 LLM_ENV_FILES = ["~/.env"]
+
+
+# 429 限速退避（对齐 league 的 ai/llm_client 行为）：指数退避 + 抖动。
+# agnes 账号 RPM 极低（≈1 次/分钟），旧退避 2**attempt（1s/2s）会在限速窗口内
+# 反复撞 429 后放弃。
+_AGNES_BACKOFF_BASE = float(os.environ.get("AGNES_BACKOFF_BASE_SECONDS", "20"))
+_AGNES_BACKOFF_MAX = float(os.environ.get("AGNES_BACKOFF_MAX_SECONDS", "120"))
+
+
+def _agnes_retry_after(resp):
+    try:
+        value = resp.headers.get("Retry-After")
+    except Exception:
+        return None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _agnes_backoff_seconds(attempt, resp=None):
+    hint = _agnes_retry_after(resp) if resp is not None else None
+    if hint is not None:
+        return min(hint, _AGNES_BACKOFF_MAX)
+    wait = min(_AGNES_BACKOFF_BASE * (2 ** attempt), _AGNES_BACKOFF_MAX)
+    return wait + random.uniform(0, min(3.0, wait * 0.1))
 
 
 class LLMNotConfigured(RuntimeError):
@@ -219,6 +248,7 @@ class AgnesClient:
         url = params.base_url.rstrip("/") + "/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         last: Exception = RuntimeError("unreachable")
+        last_resp = None
         for attempt in range(params.max_retry + 1):
             try:
                 resp = httpx.post(url, json=payload, headers=headers, timeout=params.timeout)
@@ -230,8 +260,9 @@ class AgnesClient:
                 if exc.response.status_code != 429:
                     raise
                 last = exc
+                last_resp = exc.response
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last = exc
             if attempt < params.max_retry:
-                time.sleep(2**attempt)
+                time.sleep(_agnes_backoff_seconds(attempt, last_resp))
         raise last

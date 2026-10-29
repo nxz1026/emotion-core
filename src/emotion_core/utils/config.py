@@ -95,7 +95,10 @@ class Config:
     # 20 × 15 = 300 才算覆盖。再往上抬要同时抬 emotion-core-strategy.service
     # 的 TimeoutStartSec（实测 ~7.2s/次调用，300 次约 36min；单元现为 4h ——
     # 上游延迟劣化后实测 233 次就撞满 2h，见 docs/12-LLM层设计.md）。
-    STRATEGY_MAX_LLM: int = int(os.environ.get("EC_STRATEGY_MAX_LLM", "300"))
+    STRATEGY_MAX_LLM: int = int(os.environ.get("EC_STRATEGY_MAX_LLM", "200"))
+    # 2026-10-29：由 300 下调到 200——上游 apihub/agnes 账号 RPM≈1/分钟限速，
+    # 300 次在 4h 窗口内跑不完（即使有健壮退避）；200 留余量，仍可用
+    # EC_STRATEGY_MAX_LLM 环境变量随时覆盖。
     # 注意：调用侧的定速/退避/熔断参数**故意不在这里**。config_hash() 哈希
     # asdict(CONFIG) 的全字段，任何新增键都会让 pipeline_state / signal /
     # eval_result 里的策略指纹换代（同 theme_service.py:31、notify.py:31 的告警）。
