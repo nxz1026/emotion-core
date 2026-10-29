@@ -160,4 +160,3 @@ class TestCompareCli:
     def test_bad_date_returns_two(self, capsys):
         assert compare.main(["2026-13-45"]) == 2
         assert "日期格式错误" in capsys.readouterr().err
-

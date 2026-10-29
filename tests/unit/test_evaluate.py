@@ -281,8 +281,6 @@ class TestForwardStats:
 
 
 class TestRuleRet:
-
-
     def test_empty_family_returns_none(self, monkeypatch):
         monkeypatch.setattr(evaluate, "_exit_family", lambda code, d0: {})
         assert evaluate._rule_ret("000017", D2) is None

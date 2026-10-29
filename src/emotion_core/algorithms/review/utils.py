@@ -76,8 +76,10 @@ def _fmt_stat(cur: dict | None, prev: dict | None) -> str:
     W11′（说人话）：比率类指标按百分数显示（库里存 0.3678 这种小数，直接印出来
     读者要自己乘 100）；家数类强制整数。缺数一律 '—'，不补 0。
     """
+
     def star(name):
         return "（当前判据）" if _EMOTION_PERF_BASIS == name else ""
+
     keys = [
         ("limit_up_count", "涨停家数", _int),
         ("bomb_rate", "炸板率", _pct),
@@ -123,6 +125,8 @@ _ENV_MEANING = {
     "NEUTRAL": "生态一般/证据不足",
     "UNFAVORABLE": "生态不适合，倾向空仓观察",
 }
+
+
 def _MARK(s):
     return "?" if s is None else ("✓" if s else "✗")
 

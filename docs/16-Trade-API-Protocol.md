@@ -145,7 +145,7 @@ location /trade/ {
 ## 安全
 
 - HTTPS 由 nginx 提供（Let's Encrypt 证书）
-- **basic auth 已强制**（2026-10-09 补；此前 `/trade/` 无鉴权，`/trade/health` 匿名可读、`/trade/decisions` 匿名可取决策）。凭据与 `/cpt/`、`/emotion/` 共用 `/etc/nginx/.htpasswd`；LKL-Trade 客户端必须带 `Authorization: Basic …`（`curl -u <user>:<pass>`），否则一律 401。
+- **basic auth 已强制**（2026-10-09 补；此前 `/trade/` 无鉴权，`/trade/health` 匿名可读、`/trade/decisions` 匿名可取决策）。凭据与 `/cpt/`、`/ecpt/emotion/` 共用 `/etc/nginx/.htpasswd`；LKL-Trade 客户端必须带 `Authorization: Basic …`（`curl -u <user>:<pass>`），否则一律 401。
 - 直连 `:8098` 的旁路不可达：宿主 iptables INPUT 只放行 443/80/22/ICMP/lo，其余 REJECT（2026-10-09 实测）。
 - `client_max_body_size 64k` 限制请求体大小
 
@@ -163,6 +163,6 @@ curl -k -u admin:**** "https://140.83.62.161/trade/decisions?date=2026-09-30"
 
 ## 代码位置
 
-- **Handler:** `src/emotion_core/presentation/trade_api.py`
-- **Server:** `src/emotion_core/presentation/server.py`（路由注册 + do_POST）
-- **Docs:** `docs/16-Trade-API-Protocol.md`
+- **Handler:** src/emotion_core/presentation/trade_api.py
+- **Server:** src/emotion_core/presentation/server.py（路由注册 + do_POST）
+- **Docs:** docs/16-Trade-API-Protocol.md

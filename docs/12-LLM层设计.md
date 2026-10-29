@@ -73,7 +73,7 @@ def get_client(profile: str | None = None) -> LLMClient: ...
 
 ⚠️ 2026-10-07：本章原内嵌 33 行 `AgnesClient` 草图，**已与代码不符**——
 真实实现已是**多 profile 链**，不再是「一个 AgnesClient 读 AGNES_API_KEY」的单体。
-实现请读 `src/emotion_core/llm/agnes.py`。
+实现请读 src/emotion_core/llm/agnes.py。
 
 | 事实 | 值 | 出处 |
 |---|---|---|
@@ -168,7 +168,7 @@ def get_client(profile: str | None = None) -> LLMClient: ...
 
 ### 6.1 策略观察子系统（DSA 移植）
 
-移植自 `daily_stock_analysis`（MIT，见 `docs/archive-lkl/adr/0003-m9-dsa-integration.md`），
+移植自 `daily_stock_analysis`（MIT，见 docs/archive-lkl/adr/0003-m9-dsa-integration.md），
 只搬模块思想、不合并仓库，因此**无运行时依赖**。
 
 ```
@@ -207,7 +207,7 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 解析到不存在的 `src/llm/strategies`；而 `load_strategies()` 对不存在的目录
 `glob("*.yaml")` **返回空列表且不抛异常**，于是直接掉进第 2 道门的「跳过」分支 ——
 15 个策略一个不跑、不落库、无告警，是典型的静默失败。
-回归锁在 `tests/unit/test_strategy_runner.py`（21 项断言）。
+回归锁在 tests/unit/test_strategy_runner.py（21 项断言）。
 
 **配额、限流与去重**（`runner.py`，2026-09-30 修复）：
 
@@ -279,7 +279,7 @@ STRATEGY_DIR = Path(__file__).resolve().parents[2] / "llm" / "strategies"
 （历史提示：若日后重新引入 `limit_pool_em`，注意 `DT` 行的 `first_seal` 存的是**空串而非
 NULL**，排序需写 `NULLIF(first_seal,'')`，否则空串比 `'092500'` 小、跌停股会被排到最前。）
 
-**调度**：`src/emotion_core/orchestration/systemd/emotion-core-strategy.{service,timer}`，工作日 **18:15** `Asia/Shanghai`
+**调度**：`Emotion-CPT/src/emotion_cpt/deploy/systemd/emotion-core-strategy.{service,timer}`（由 `Emotion-CPT/scripts/install_units.sh` 安装），工作日 **18:15** `Asia/Shanghai`
 （2026-10-25 从 17:50 挪开：与 crontab 的因子重算同分钟起跑；2026-10-29 同步修正 timer 的 Description）
 （`Persistent=true`，在 `emotion-core-daily.timer` 之后）。手工补跑：
 

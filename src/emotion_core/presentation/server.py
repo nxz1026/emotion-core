@@ -330,6 +330,25 @@ def cpt_points_payload(parsed) -> tuple[dict, int]:
         return {"ok": False, "error": str(exc)}, 500
 
 
+def _read_post_body(handler, max_bytes: int) -> tuple[bytes | None, int]:
+    """安全读取 POST 请求体。
+
+    返回 ``(body, status)``：``body is None`` 表示请求有问题，``status`` 是对应的
+    HTTP 状态码（调用方直接返回错误 JSON）。Content-Length 非法 / 为负 / 超限一律
+    拦在 500 之前，避免 ``int()`` 抛 ValueError 把整个请求打成 500。
+    """
+    raw = handler.headers.get("Content-Length", "0")
+    try:
+        content_length = int(raw)
+    except (TypeError, ValueError):
+        return None, 400
+    if content_length < 0:
+        return None, 400
+    if content_length > max_bytes:
+        return None, 413
+    return (handler.rfile.read(content_length) if content_length > 0 else b"{}"), 200
+
+
 def _handle_watchlist_post(handler) -> tuple[dict, int] | None:
     """`POST /api/watchlist`：add / remove / restore。
 
@@ -337,10 +356,10 @@ def _handle_watchlist_post(handler) -> tuple[dict, int] | None:
     """
     from emotion_core.services import watchlist_service
 
-    content_length = int(handler.headers.get("Content-Length", 0))
-    raw = handler.rfile.read(content_length) if content_length > 0 else b"{}"
-    if content_length > 4096:
-        return {"ok": False, "error": "请求体过大（最大 4KiB）"}, 413
+    body, status = _read_post_body(handler, 4096)
+    if body is None:
+        return {"ok": False, "error": "请求体过大或 Content-Length 非法"}, status
+    raw = body
     try:
         body = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -890,8 +909,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/trade/results":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            body, status = _read_post_body(self, trade_api.MAX_BODY_BYTES)
+            if body is None:
+                self._send_json({"error": "invalid or too large Content-Length"}, status)
+                return
             payload, status = trade_api.handle_trade_results_post(body)
             self._send_json(payload, status)
             return
@@ -934,9 +955,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int = 8098) -> None:
-    """启动 web 服务。"""
-    server = HTTPServer(("", port), DashboardHandler)
-    print(f"emotion-core dash running on :{port}")
+    """启动 web 服务。
+
+    默认只监听 127.0.0.1：本服务自身不鉴权（basic auth 由 nginx 转发层处理），
+    必须由反向代理（nginx）做访问控制。绑 0.0.0.0 会把看板裸暴露在公网，
+    单点依赖防火墙。如需在容器内/本机外访问，用 EMOTION_DASH_HOST 显式指定。
+    """
+    host = os.environ.get("EMOTION_DASH_HOST", "127.0.0.1")
+    server = HTTPServer((host, port), DashboardHandler)
+    print(f"emotion-core dash running on {host}:{port}")
     server.serve_forever()
 
 

@@ -13,6 +13,14 @@ dependencies = [
     # 判据（结构位算式与常量）已迁至 Emotion-CPT —— 单向依赖：emotion_core → emotion_cpt。
     # 钉到 tag 而不是 main：main 是移动目标，重建环境会拿到不确定的判据版本。
     "emotion-cpt @ git+https://github.com/nxz1026/Emotion-CPT.git@v0.8.4",
+    # 以下 6 个与 requirements.txt 保持一致（钉死版本，原因见 requirements.txt）。
+    # 让 `pip install -e .` 也能自洽拉齐全量依赖，不必再单独装 requirements.txt。
+    "akshare==1.18.97",
+    "httpx==0.28.1",
+    "Jinja2==3.1.6",
+    "pandas==3.0.6",
+    "psycopg==3.3.6",
+    "requests==2.34.2",
 ]
 
 [project.scripts]

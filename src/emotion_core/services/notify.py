@@ -18,6 +18,7 @@ import time
 from datetime import date as _date
 
 from emotion_core.utils.config import CONFIG
+from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger("emotion_core.notify")
 _POS_RE = re.compile(r"\*\*当前持仓\*\*：.*(?=\n|$)")
@@ -323,7 +324,7 @@ def push_buy_signal(
     if not url:
         log.debug("LKL_WEBHOOK_URL 未配置，观察记录即时推送跳过")
         return False
-    d_iso = (trade_date or _date.today()).isoformat()
+    d_iso = (trade_date or today_sh()).isoformat()
     key = (d_iso, code)
     now = time.time()
     last = _BUY_DEDUP.get(key, 0.0)
@@ -450,7 +451,7 @@ def push_watch_signals(rows: list[dict] | None, trade_date: _date | None = None)
         return 0
     min_score = _watch_env_int("WATCH_PUSH_MIN_SCORE", 60)
     max_codes = _watch_env_int("WATCH_PUSH_MAX_CODES", 10)
-    d_iso = (trade_date or _date.today()).isoformat()
+    d_iso = (trade_date or today_sh()).isoformat()
 
     # 先按行过阈值，再按 code 聚合（同票多策略只出一条）。
     grouped: dict[str, list[tuple[int, str, str]]] = {}

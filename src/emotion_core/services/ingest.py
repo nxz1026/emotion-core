@@ -539,4 +539,3 @@ def fetch_hot_history(code: str) -> int:
         if calc_time is not None and rk is not None:
             rows.append((pd.to_datetime(calc_time).date(), code, rk))
     return _upsert_rows("hot_rank", _HOT_COLS, rows, ["date", "code"])
-

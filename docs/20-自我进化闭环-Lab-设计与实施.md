@@ -229,9 +229,9 @@ B 轮的教训直接套用：**别用 `LEFT JOIN LATERAL` 逐行找前一日**�
 | 位置 | 内容 |
 |---|---|
 | `src/emotion_core/lab/` | 新子包：`db`（连接 + 读写守卫）、`schema`（五张表 DDL）、`metrics`（口径与统计）、`panel`（面板物化）、`score`（打分）、`runner`（每日流水线）、`web`（:8091 只读页）、`templates/`、`static/lab.css` |
-| `tests/unit/test_lab_metrics.py` | 17 例：成交看最高价、卖在 T+2 开盘、跌停封死顺延、右截断不猜、统计量小样本纪律 |
-| `tests/architecture/test_lab_isolation.py` | 6 例：主线不得 import lab、lab 不得碰 services/orchestration/presentation/data、写语句只能落 `lab.`、禁 f-string 拼 SQL、读写守卫反例 |
-| `deploy` → `src/emotion_core/orchestration/systemd/` | `emotion-lab.service`（oneshot，每日 17:45 Asia/Shanghai）、`emotion-lab.timer`、`emotion-lab-web.service`（:8091） |
+| tests/unit/test_lab_metrics.py | 17 例：成交看最高价、卖在 T+2 开盘、跌停封死顺延、右截断不猜、统计量小样本纪律 |
+| tests/architecture/test_lab_isolation.py | 6 例：主线不得 import lab、lab 不得碰 services/orchestration/presentation/data、写语句只能落 `lab.`、禁 f-string 拼 SQL、读写守卫反例 |
+| `deploy` → `Emotion-CPT/src/emotion_cpt/deploy/systemd/`（2026-10-24 起单元真相源在此；由 `Emotion-CPT/scripts/install_units.sh` 安装） | `emotion-lab.service`（oneshot，每日 17:45 Asia/Shanghai）、`emotion-lab.timer`、`emotion-lab-web.service`（:8091） |
 | `var/lab/panel.pkl` | 面板缓存（8801 行 / 675 天 / 1988 票 / 2.0 MB），`.gitignore` 已加 `var/` |
 
 ### 14.2 基线首次跑通（口径B 触及即成交）
@@ -268,13 +268,13 @@ B 轮的教训直接套用：**别用 `LEFT JOIN LATERAL` 逐行找前一日**�
 
 | 文件 | 作用 |
 |---|---|
-| `src/emotion_core/algorithms/state.py` | 新增 `StateRules`(frozen) + `DEFAULT_RULES`；四个 `_rule_*` 与 `classify_series(series, rules=None)` 全部读规则对象。不传规则 = 原行为（`tests/caliber/test_state_rules_default.py` 钉住每条字段与 `CONFIG` 的对应关系） |
-| `src/emotion_core/lab/panel.py` | 面板扩列到「够重跑一遍判据」：`derived_bar` 的 `is_one_word/is_limit_up/is_bomb/touched_limit`、`limit_pool_em` 的 `bomb_times/turnover_rate`、`stock_basic.name`、`market_stat` 全部状态机输入 |
-| `src/emotion_core/lab/rules.py` | `LabRules`(frozen) = 状态机 9 项 + 判据 5 项 + 档位倍率 3 项；`variants()` 只造**单点变体**（一次改一个旋钮，17 个，避免 8 个旋钮 5832 格组合爆炸） |
-| `src/emotion_core/lab/replay.py` | 内存内重跑「状态机 → 梯队 → c1..c5 → 档位」整条判据，`signals()` 出观察记录；默认规则下与 `signal` 表 BUY 集合**逐条一致**（377 vs 377，`tests/e2e/test_lab_replay_live.py` 真库复核） |
-| `src/emotion_core/lab/search.py` | 选参/验证切分 + 七道门禁 + ±1 邻域稳健性 + 淘汰标记 + 提案落库 |
-| `src/emotion_core/lab/notify.py` | Lab 自己的飞书摘要（不复用主线 `services/notify.py`；正文明确写「没有变体过门禁是有效结论，不是故障」） |
-| `src/emotion_core/lab/runner.py` | 面板 → 基线打分 → 变体搜索 → 提案 → 推送；新增 `--no-search/--no-push` |
+| src/emotion_core/algorithms/state.py | 新增 `StateRules`(frozen) + `DEFAULT_RULES`；四个 `_rule_*` 与 `classify_series(series, rules=None)` 全部读规则对象。不传规则 = 原行为（tests/caliber/test_state_rules_default.py 钉住每条字段与 `CONFIG` 的对应关系） |
+| src/emotion_core/lab/panel.py | 面板扩列到「够重跑一遍判据」：`derived_bar` 的 `is_one_word/is_limit_up/is_bomb/touched_limit`、`limit_pool_em` 的 `bomb_times/turnover_rate`、`stock_basic.name`、`market_stat` 全部状态机输入 |
+| src/emotion_core/lab/rules.py | `LabRules`(frozen) = 状态机 9 项 + 判据 5 项 + 档位倍率 3 项；`variants()` 只造**单点变体**（一次改一个旋钮，17 个，避免 8 个旋钮 5832 格组合爆炸） |
+| src/emotion_core/lab/replay.py | 内存内重跑「状态机 → 梯队 → c1..c5 → 档位」整条判据，`signals()` 出观察记录；默认规则下与 `signal` 表 BUY 集合**逐条一致**（377 vs 377，tests/e2e/test_lab_replay_live.py 真库复核） |
+| src/emotion_core/lab/search.py | 选参/验证切分 + 七道门禁 + ±1 邻域稳健性 + 淘汰标记 + 提案落库 |
+| src/emotion_core/lab/notify.py | Lab 自己的飞书摘要（不复用主线 `services/notify.py`；正文明确写「没有变体过门禁是有效结论，不是故障」） |
+| src/emotion_core/lab/runner.py | 面板 → 基线打分 → 变体搜索 → 提案 → 推送；新增 `--no-search/--no-push` |
 
 ### 15.2 首轮搜索结果（2024-01-01 ~ 2026-10-20）
 

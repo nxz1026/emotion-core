@@ -244,8 +244,15 @@ def run(
     )
 
     evs = [
-        evaluate(prep, pan, r, as_of=as_of, sel_days=sel_days,
-                 hold_days=hold_days_list, store_outcomes=True)
+        evaluate(
+            prep,
+            pan,
+            r,
+            as_of=as_of,
+            sel_days=sel_days,
+            hold_days=hold_days_list,
+            store_outcomes=True,
+        )
         for r in cands
     ]
     base = next(e for e in evs if e["variant_id"] == variant_id(BASELINE))
@@ -288,8 +295,14 @@ def run(
     if persist:
         # 收集每个变体的逐条收益（写 lab_outcome）
         outcomes_map = {e["variant_id"]: e["_outcomes"] for e in evs if "_outcomes" in e}
-        _persist(results, proposals, base, (sel_days, hold_days_list),
-                 trials=len(evs), outcomes_map=outcomes_map)
+        _persist(
+            results,
+            proposals,
+            base,
+            (sel_days, hold_days_list),
+            trials=len(evs),
+            outcomes_map=outcomes_map,
+        )
     return {
         "baseline": {
             "variant_id": base["variant_id"],

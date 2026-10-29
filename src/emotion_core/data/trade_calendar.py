@@ -110,8 +110,6 @@ def refresh(conn: Any | None = None) -> dict[str, Any]:
     return info
 
 
-
-
 def lookup(d: date) -> bool | None:
     """查缓存：True/False；表内无此行（区间外）→ None。"""
     with connect_ro() as conn:

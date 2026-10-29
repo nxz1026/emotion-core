@@ -553,4 +553,3 @@ def create_all(conn) -> int:
         for stmt in [*DDL.values(), *_INDEXES]:
             cur.execute(stmt)
     return len(DDL)
-

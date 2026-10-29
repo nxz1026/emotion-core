@@ -776,6 +776,7 @@ class TestIncrementalFlush:
 
     def test_flush_noop_when_nothing_new(self, monkeypatch):
         """没有新信号时不产生空的 UPSERT。"""
+
         def boom(*a, **kw):
             raise AssertionError("_save_batch 不该在空列表上被调用")
 

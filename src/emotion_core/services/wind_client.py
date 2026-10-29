@@ -228,6 +228,3 @@ class WindClient:
             if text:
                 return text
         return str(payload)
-
-
-

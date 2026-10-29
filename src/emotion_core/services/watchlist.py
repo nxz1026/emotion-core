@@ -39,8 +39,6 @@ def remove(code: str) -> int:
     return execute("DELETE FROM watchlist WHERE code = %s", (code,))
 
 
-
-
 def status_rows(trade_date: date | None = None) -> list[dict]:
     """自选清单 + 当日状态（无当日行情=空仓未上市/停牌/数据缺，pct None）。
 

@@ -2,8 +2,8 @@
 
 裁决依据
 --------
-§1「依赖方向自上而下，禁止反向依赖：core 不依赖 Python，algorithms 不直连 DB，
-   presentation 不写库」；§5 层级表（低 → 高）：
+§1「依赖方向自上而下，禁止反向依赖：core 不依赖 Python，DB 访问集中在 `utils.db`
+   单一访问面（任何层都经它，不裸持连接），presentation 不写库」；§5 层级表（低 → 高）：
 
     utils < core < domain < algorithms < data < services < orchestration < presentation
 

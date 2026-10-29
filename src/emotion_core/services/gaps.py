@@ -87,9 +87,8 @@ def _check_ecosystem_rs() -> dict | None:
         }
     text = rs.read_text()
     lines = [
-    line for line in text.splitlines()
-    if line.strip() and not line.strip().startswith("//")
-]
+        line for line in text.splitlines() if line.strip() and not line.strip().startswith("//")
+    ]
     if len(lines) < 20:  # 空壳阈值
         return {
             "item": "ecosystem.rs 是空壳",

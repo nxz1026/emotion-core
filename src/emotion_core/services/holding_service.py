@@ -551,8 +551,8 @@ def decide(
                         {
                             "kind": "degrade",
                             "text": "price_ratio=None"
-                                "（快照与 daily_bar 不在同一天）"
-                                "→ 结构位不可换算",
+                            "（快照与 daily_bar 不在同一天）"
+                            "→ 结构位不可换算",
                             "src": "docs/17 §6.1",
                         }
                     )

@@ -6,10 +6,11 @@
 # ——akshare 凭空消失，没人说得清它该在不在，重建环境也无从复现。venv 里的包是
 # 历史累积的，不是任何一份声明的产物；下一次重建必会再丢一批。
 #
-# 范围：**只列 src/ 真正直接 import 的三方包**（akshare / httpx / jinja2 / pandas /
-# psycopg / requests），传递依赖（numpy、lxml、beautifulsoup4、curl_cffi 等）由 pip 解析，
-# 不必手写。pytdx 故意不在列：`data/providers/pytdx_provider.py` 不 import pytdx，
-# 缺失时走既有降级路径。
+# 范围：**只列 src/ 真正直接 import 的三方包**。pytdx 故意不在列：
+# `data/providers/pytdx_provider.py` 不 import pytdx，缺失时走既有降级路径。
+# emotion-cpt 是**本仓唯一直接 import 的非 PyPI 依赖**（utils/price.py、algorithms/levels.py、
+# algorithms/intraday.py 都硬依赖它），用 git URL 钉到与 pyproject.toml 相同的 tag。
+# 漏掉它会导致 `import emotion_core` 在 price 转发层直接失败——2026-10 审计已确认。
 #
 # 精确锁版本（=）而非 ~=: 本仓是**生产日更**作业，akshare 的 EM 接口字段改名、
 # pandas 3.x 行为变化都会直接让 17:20 那轮静默失败——锁死换取可重现。
@@ -18,7 +19,7 @@
 # 重建：
 #   uv venv .venv --python 3.13
 #   uv pip install --python .venv/bin/python -r requirements.txt
-#   PYTHONPATH=src .venv/bin/python -m pytest tests -q   # 全量口径实测 2026-09-30：1859 collected / 1857 passed + 2 skipped
+#   PYTHONPATH=src .venv/bin/python -m pytest tests -q   # 全量口径见 CI；本仓当前 2900+ 用例
 
 akshare==1.18.97
 httpx==0.28.1
@@ -26,3 +27,4 @@ Jinja2==3.1.6
 pandas==3.0.6
 psycopg==3.3.6
 requests==2.34.2
+emotion-cpt @ git+https://github.com/nxz1026/Emotion-CPT.git@v0.8.4

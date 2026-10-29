@@ -47,7 +47,7 @@ A 股市场情绪周期 · 事实底座 · 决策系统
 
 **阶段 2b（Rust 移植）✅ · 阶段 3（PyO3 接线）✅ · 阶段 4~7（数据/编排/展示/LLM）✅ 已落地 · 阶段 8（上线）✅ 已完成**
 
-Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）；当前全量实测 **生产 1927 passed + 2 skipped / CI 1483 passed + 2 skipped**（均 2026-10-07）。差额是依赖 `.so` 的 Rust 对账测试——`.so` 是 gitignore 的构建产物，CI 无 cargo 故整份跳过，详见 `core/__init__.py` 模块说明。命令见 `docs/15`「测试覆盖」。
+Python 参考实现（阶段 2a）全部完成：11 个算法模块 + 1822 tests 全绿（2026-09-26 时点，历史口径）；当前全量实测 **2906 passed + 3 skipped**（2026-10-29 实测，覆盖 unit/oracle/caliber/architecture）。差额是依赖 `.so` 的 Rust 对账测试——`.so` 是 gitignore 的构建产物，CI 无 cargo 故整份跳过，详见 `core/__init__.py` 模块说明。命令见 `docs/15`「测试覆盖」。
 Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模块附 Python vs Rust 对账测试。
 
 ### Python ↔ Rust 模块对照
@@ -74,19 +74,23 @@ Rust 移植（阶段 2b）按 `docs/07` 依赖拓扑逐模块推进，每个模�
 | 阶段 2b Rust 移植 | ✅ 完成 | 11/11 模块 |
 | 阶段 3 PyO3 绑定 + 外壳 | ✅ 接线完成 | `core/__init__.py` **惰性**加载 .so（首次访问符号时才加载；产物缺失时抛 `RustCoreUnavailable` 并给出编译指引，不再在导入期崩） |
 | 阶段 4 数据层 | ✅ 已落地 | 37 张表 DDL（2026-10-15 已全部建齐；同一数据库另有 CPT 项目的 10 张 `cpt_*` 表，public 共 46 张）；`daily_bar` 340.9 万行 / 669 交易日 / 5224 只；`derived_bar` 340.9 万行；`market_stat` 669 行；`stock_basic` 5228 只（在市）；独立交易日历表 `trade_calendar`（8797 个开市日，1990-12-19~2026-12-31） |
-| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` **14 步**（sync/coverage/hot/**basic**/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health，`basic` 于 2026-10-13 插入、fail-soft）；仓内 systemd：6 个 `.service` + 5 个 `.timer` 共 **11 个单元**（`emotion-core-{daily,dash,pool,report,strategy,watchdog}.service` + `{daily,pool,report,strategy,watchdog}.timer`）。**2026-10-07 起与 `/etc/systemd/system` 逐文件一致**，`close` 单元已撤销，详见下方「systemd 仓/生产漂移」小节 |
-| 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 4 个 JSON 接口（另有 `/api/*` 兜底状态），端口 8098，nginx 前缀 `/emotion` |
+| 阶段 5 编排层 | ✅ 已落地 | `orchestration/daily.py` **14 步**（sync/coverage/hot/**basic**/derive/market/ladder/signal/promotion/theme/ecosystem/strategy/outcome/health，`basic` 于 2026-10-13 插入、fail-soft）；systemd（真相源在 `Emotion-CPT/src/emotion_cpt/deploy/systemd/`，由 `Emotion-CPT/scripts/install_units.sh` 安装）：6 个 `.service` + 5 个 `.timer` 共 **11 个 emotion-core core 单元**（`emotion-core-{daily,dash,pool,report,strategy,watchdog}.service` + `{daily,pool,report,strategy,watchdog}.timer`）。**2026-10-24 起真相源统一在 Emotion-CPT 并与 `/etc/systemd/system` 逐文件一致**，`close` 单元已撤销，详见下方「systemd 仓/生产漂移」小节 |
+| 阶段 6 展示层 | ✅ 已落地 | 5 个页面 + 14 条 `/api/*` 路由，端口 8098，nginx 前缀 `/ecpt/emotion`（2026-10-26 起由 `/emotion` 迁至 `/ecpt/emotion`） |
 | 阶段 7 LLM 层 | ✅ 已落地 | 4 个 profile（default/fast/smart/agnes）+ 回退链 + `llm_call_log` 审计；**信号链默认关**（`LLM_PROFILE=None`） |
-| 阶段 8 上线 | ✅ 已完成 | 2026-10-07 实测：`emotion-core-dash` 常驻（:8098 HTTP 200，basic auth 经 `/emotion/`）；五个 timer 全部 `enabled + active`，`emotion-core-daily.timer` 于 2026-10-06 17:20 北京成功执行、`pipeline_state` 13 步全 `OK`（`for_date=2026-09-30`，因 10-01~10-07 国庆休市，交易日守卫正常跳过，下一交易日 10-08 自动接上）；`signal`/`signal_outcome` 各 162 行全 `source='replay'`；`theme_group` 仍 0 行 |
+| 阶段 8 上线 | ✅ 已完成 | 2026-10-07 实测：`emotion-core-dash` 常驻（:8098 HTTP 200，basic auth 经 `/emotion/`，**该路径已于 2026-10-26 迁至 `/ecpt/emotion/`**）；五个 timer 全部 `enabled + active`，`emotion-core-daily.timer` 于 2026-10-06 17:20 北京成功执行、`pipeline_state` 13 步全 `OK`（`for_date=2026-09-30`，因 10-01~10-07 国庆休市，交易日守卫正常跳过，下一交易日 10-08 自动接上）；`signal`/`signal_outcome` 各 162 行全 `source='replay'`；`theme_group` 仍 0 行 |
 
 > 数据现状决定了展示口径：只有 `daily_bar` / `derived_bar` / `market_stat` / `stock_basic`
 > 四张表有数据，所以个股诊断等功能的统计**全部从这四张表现算**（PIT 安全），
 > 等上述信号表落数后按同签名加增强分支即可。
 
-### systemd：仓与 `/etc/systemd/system` 已于 2026-10-07 对齐
+### systemd：单元真相源在 Emotion-CPT（2026-10-24 迁移）
 
-两边现在都是 **11 个单元**（6 `.service` + 5 `.timer`），**仓内
-`src/emotion_core/orchestration/systemd/` 是唯一真相源**，与生产逐文件一致。
+本仓**不再保存 unit 副本**。唯一真相源是
+`Emotion-CPT/src/emotion_cpt/deploy/systemd/`，由
+`Emotion-CPT/scripts/install_units.sh` 装到 `/etc/systemd/system`；
+`emotion_cpt.cli.check_unit_paths` 做仓内 ↔ 线上双向对账。
+生产当前有 **11 个 emotion-core core 单元**（6 `.service` + 5 `.timer`），
+另有 `emotion-intraday` / `emotion-lab` / `emotion-cpt-web` 等旁支单元。
 三个曾经咬过人的坑，改之前先知道：
 
 1. **时区只有一份**。`Asia/Shanghai` 直接写在每个 `.timer` 的 `OnCalendar` 上；
@@ -108,12 +112,12 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 | DSH 自动化 `automation_97b54cfa…`「ST PIT 回补」 | 19:00 | ST PIT 20 次 | **主**；落 `ref_security_status`（+`_window`/`_event`） |
 | cron `/etc/cron.d/emotion-core-wind` → `/home/ubuntu/bin/wind-pull-daily.sh` | 20:30 | 对账 40 + ST PIT 20 | **兜底**：自动化没跑成时接住，已完成部分自动跳过 |
 
-- 仓内真相源：`deploy/bin/wind-pull-daily.sh`（串行 + `flock` 防重入 + 退出码恒 0）与 `deploy/cron/emotion-core-wind`。
+- 仓内真相源：deploy/bin/wind-pull-daily.sh（串行 + `flock` 防重入 + 退出码恒 0）与 `deploy/cron/emotion-core-wind`。
 - 装法：脚本 `cp` 到 `/home/ubuntu/bin/`；cron 文件需 root（ubuntu 直写 `/etc/cron.d` 被拒），本机走
   `docker run --rm -i --privileged --pid=host -v /:/host alpine:3.20 chroot /host sh -c 'cat > /etc/cron.d/emotion-core-wind …' < deploy/cron/emotion-core-wind`。
 - 锁文件在 `/home/ubuntu/logs/wind-pull-daily.lock`：**不能放 `/tmp`** —— 本机 cron 在宿主 `/tmp`、DSH/手工跑在容器 `/tmp`，两个命名空间，放 `/tmp` 等于没锁。
 - 日志：`/home/ubuntu/logs/wind-pull-daily.log`（脚本自身）与 `wind-pull-daily.cron.log`（cron 重定向）。
-> 契约由 `tests/architecture/test_systemd_units.py` 钉住：禁 `python -c`、`-m` 目标
+> 契约由 tests/architecture/test_systemd_units.py 钉住：禁 `python -c`、`-m` 目标
 > 必须真有入口、`OnCalendar` 必须自带时区、单元引用不得指向不存在的单元。
 
 设计文档（阶段 0~1 全部定稿）：
@@ -134,7 +138,7 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 | 9 | 架构评审与逐层框架 | ✅ 已定稿 | `docs/13-架构评审与逐层代码框架设计.md`（⚠️ 无「§9 缺口清单」——该引用是错的，`docs/13` 只有一~七节；交接文档已归档 `docs/archive/`） |
 | 10 | 自主决策日志 | ⭐ 逐条拍板留痕 | `docs/14-自主决策日志.md` |
 | 11 | 实施追踪 | ⭐ 缺口修复与运维记录 | `docs/15-实施追踪.md` |
-| 12 | Trade API 协议 | 活路由 `/api/trade/*` 的唯一协议真身 | `docs/16-Trade-API-Protocol.md` |
+| 12 | Trade API 协议 | 活路由 `/api/trade/*` 的唯一协议真身 | docs/16-Trade-API-Protocol.md |
 
 ### 已接受的架构决策
 
@@ -155,15 +159,15 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 
 ## 现在能做什么（web 端）
 
-入口 `https://<主机>/emotion/`：nginx 反代到本机 8098，basic auth 由 nginx 处理（服务自身不鉴权）。
+入口 `https://<主机>/ecpt/emotion/`：nginx 反代到本机 8098（剥离 `/ecpt/emotion/` 前缀），basic auth 由 nginx 处理（服务自身不鉴权）。
 
 | 页面 | 路径 | 内容 |
 |---|---|---|
-| 直观层 | `/emotion/` | 快照日期（默认最新交易日）+ 市场结论（阶段 / 买入窗口 / 涨跌停家数 / 最高板 / 生态评级）+ 当日推荐 + 当日最高板梯队（均可点进个股诊断） |
-| 逻辑层 | `/emotion/logic` | 市场参数与梯队明细 |
-| 算法层 | `/emotion/algorithm` | 公式与阈值（涨停价公式由 `utils/price` 现算，展示层不写死公式） |
-| 策略观察台 | `/emotion/strategy` | LLM 策略信号 + 历史日期切换 |
-| **个股诊断** | `/emotion/stock` · `/stock/<code>` | **输入代码/名称 → 该票的情绪周期体检 + 直观建议 + AI 解读；结果页三张卡（A 现在 / B 过去 / C 值不值）** |
+| 直观层 | `/ecpt/emotion/` | 快照日期（默认最新交易日）+ 市场结论（阶段 / 买入窗口 / 涨跌停家数 / 最高板 / 生态评级）+ 当日推荐 + 当日最高板梯队（均可点进个股诊断） |
+| 逻辑层 | `/ecpt/emotion/logic` | 市场参数与梯队明细 |
+| 算法层 | `/ecpt/emotion/algorithm` | 公式与阈值（涨停价公式由 `utils/price` 现算，展示层不写死公式） |
+| 策略观察台 | `/ecpt/emotion/strategy` | LLM 策略信号 + 历史日期切换 |
+| **个股诊断** | `/ecpt/emotion/stock` · `/ecpt/emotion/stock/<code>` | **输入代码/名称 → 该票的情绪周期体检 + 直观建议 + AI 解读；结果页三张卡（A 现在 / B 过去 / C 值不值）** |
 
 ### 快照日期（历史回看）
 
@@ -179,8 +183,8 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
   + `回到最新`；非法日期或无快照的日期一律回落到最新日并在页面说明
 - 空数据不冒充有数据：当日无 BUY 信号时，页面直接给出 `signal` 表当日/全表行数，并说明"库里快照本身只到 X"
 - 数据来源 `presentation/snapshot.py`（`available_dates` / `resolve_date` / `calendar_ctx` / `banner_ctx`，
-  60s 缓存），API `GET /emotion/api/dates`
-- 注意：nginx 用 `proxy_pass .../` 剥掉 `/emotion` 前缀，服务端只看到 `/`、`/logic`；页面自链接统一由
+  60s 缓存），API `GET /ecpt/emotion/api/dates`
+- 注意：nginx 用 `proxy_pass .../` 剥掉 `/ecpt/emotion` 前缀，服务端只看到 `/`、`/logic`；页面自链接统一由
   `server._request_path()` 补回前缀（否则日历会跳到门户根路径）
 
 ### 个股诊断
@@ -193,9 +197,9 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
   键（既有键名全部不变），昂贵统计由 `stock_service` TTL 缓存注入
 - 展示 `presentation/templates/stock.html` + `static/stock.js`（三张诊断卡
   `#diagnose-a-card` / `#diagnose-b-card` / `#diagnose-c-card`，`renderDiagnose()`，无数据显示「暂无」）
-- API：`GET /emotion/api/stock?code=601811`（规则层，首次 ~2s 全表聚合、缓存后 ~0.15s；
+- API：`GET /ecpt/emotion/api/stock?code=601811`（规则层，首次 ~2s 全表聚合、缓存后 ~0.15s；
   响应新增 `diagnose` 段：A/B/C 三段式）；
-  `GET /emotion/api/stock/llm?code=601811`（AI 解读，4~6s，前端异步取，失败不影响规则层结论）
+  `GET /ecpt/emotion/api/stock/llm?code=601811`（AI 解读，4~6s，前端异步取，失败不影响规则层结论）
 - 页面内容：结论卡（档位 + 逐条依据 + 风险标签）、量价与连板结构（近 30 根 K 线逐日标注涨停/一字/
   换手/炸板/量比）、市场情绪环境与最高板梯队、**同层级历史晋级率/换手口径/次日收益分布**、AI 解读
 - 统计口径与算法层**同源**：层标签、主板池、剔次新、次日 = 日历下一交易日、名义/换手双口径，
@@ -218,7 +222,7 @@ Wind 日额度加不了（用户拍板「慢慢拉」），两条链共用同一
 ```bash
 cd emotion-core
 # 主基线（DB-free，约 2s）
-PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber -q      # 数字随提交变动，以实测为准（2026-10-17：2529 passed）
+PYTHONPATH=src .venv/bin/pytest tests/unit tests/oracle tests/caliber tests/architecture -q   # 数字随提交变动，以实测为准（2026-10-29：2906 passed + 3 skipped；e2e 另算）
 
 # 真库校准（默认自动 skip；晋级率单日口径 vs 算法层逐层相等 + 整链路只读）
 EC_LIVE_DB=1 PYTHONPATH=src .venv/bin/pytest tests/e2e/test_stock_live.py -q
@@ -290,7 +294,7 @@ emotion-core/
 │   ├── algorithms/    Python 算法外壳（PyO3）+ 个股判定
 │   ├── data/          数据层（DB + 同步 + 回填 + 清理 + 独立交易日历）
 │   ├── orchestration/ 编排层（daily.py 14 步 + systemd）
-│   ├── presentation/  展示层（直观/逻辑/算法/策略/个股 5 页 + 4 个 JSON 接口）
+│   ├── presentation/  展示层（直观/逻辑/算法/策略/个股 5 页 + 14 条 `/api/*` 路由）
 │   ├── services/      服务层（覆盖率门槛/校准/LLM/个股诊断/历史信号回填 CLI）
 │   ├── llm/           LLM 层（4 profile + 回退链 + prompts/strategies）
 │   ├── domain/        契约层（bar / ladder / market / position / signal / snapshot）
@@ -310,7 +314,7 @@ lkl 被删除前抢救出来的**文档与报告归档**：525 行策略规格�
 
 ## 关键约束（合并必须正面处理）
 
-口径冲突 **C1~C6 的权威表在 `docs/decisions/README.md`**（合并分析 §6 批量裁决：
+口径冲突 **C1~C6 的权威表在 docs/decisions/README.md**（合并分析 §6 批量裁决：
 单位/`pre_close`、连板、市场状态、晋级率、ST、展示层数据源）。此处只留两条
 不在那张表里的提醒：
 

@@ -14,12 +14,26 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
+import tempfile
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
 from threading import Lock
 
+from emotion_core.utils.dates import today_sh
 from emotion_core.utils.db import query_df as _query_df
+
+# POST 请求体上限：Trade API 只收 batch 结果，单批远小于此；封顶防止内存被打满。
+MAX_BODY_BYTES = 64 * 1024
+# 仅允许 ISO 日期（YYYY-MM-DD），避免把任意字符串拼进 glob/文件名。
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _valid_date(s: str) -> bool:
+    return bool(_DATE_RE.match(s))
+
 
 log = logging.getLogger("emotion_core.trade_api")
 
@@ -32,13 +46,46 @@ _state_lock = Lock()
 
 
 def _load_state() -> dict:
-    if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {"decisions": {}, "processed": []}
+    """读取 state.json；任何损坏/缺键都回落到干净默认，不让一次坏文件拖垮整个接口。"""
+    if not STATE_FILE.exists():
+        return {"decisions": {}, "processed": []}
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        log.warning("state.json 损坏，回落到默认：%s", e)
+        return {"decisions": {}, "processed": []}
+    if not isinstance(data, dict):
+        log.warning("state.json 不是对象，回落到默认")
+        return {"decisions": {}, "processed": []}
+    data.setdefault("decisions", {})
+    data.setdefault("processed", [])
+    return data
 
 
-def _save_state(state: dict):
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+def _save_state(state: dict) -> None:
+    """原子写：先写同目录临时文件再 os.replace，避免进程崩溃留下半截 JSON。
+
+    临时文件与 STATE_FILE 同目录（os.replace 要求同文件系统），STATE_FILE 被
+    测试或部署改到别处时也能正确原子替换。
+    """
+    parent = STATE_FILE.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(dir=parent, prefix=".state-", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, ensure_ascii=False, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, STATE_FILE)
+    except OSError as e:
+        log.error("写 state.json 失败：%s", e)
+        if tmp and os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
 
 
 def _query_signals(for_date: date) -> list[dict]:
@@ -72,7 +119,7 @@ def handle_trade_decisions(query_str: str) -> tuple[dict, int]:
     from urllib.parse import parse_qs
 
     q = parse_qs(query_str)
-    for_date_str = q.get("date", [date.today().isoformat()])[0]
+    for_date_str = q.get("date", [today_sh().isoformat()])[0]
 
     try:
         for_date = date.fromisoformat(for_date_str)
@@ -134,13 +181,15 @@ def handle_trade_decisions(query_str: str) -> tuple[dict, int]:
 def handle_trade_results_post(body: bytes) -> tuple[dict, int]:
     """POST /api/trade/results"""
     log.info("POST /api/trade/results: body_len=%d, body_prefix=%r", len(body), body[:200])
+    if len(body) > MAX_BODY_BYTES:
+        return {"error": f"body too large: {len(body)} > {MAX_BODY_BYTES}"}, 413
     try:
         data = json.loads(body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         log.warning("JSON decode failed: %s (body_len=%d)", e, len(body))
         return {"error": f"invalid JSON: {e}"}, 400
 
-    if not data:
+    if not isinstance(data, dict) or not data:
         return {"error": "empty body"}, 400
 
     batch_id = data.get("batch_id", "")
@@ -149,6 +198,8 @@ def handle_trade_results_post(body: bytes) -> tuple[dict, int]:
 
     if not batch_id or not for_date:
         return {"error": "missing batch_id or for_date"}, 400
+    if not _valid_date(for_date):
+        return {"error": f"invalid for_date: {for_date}"}, 400
 
     with _state_lock:
         state = _load_state()
@@ -175,7 +226,9 @@ def handle_trade_results_get(query_str: str) -> tuple[dict, int]:
     from urllib.parse import parse_qs
 
     q = parse_qs(query_str)
-    for_date = q.get("date", [date.today().isoformat()])[0]
+    for_date = q.get("date", [today_sh().isoformat()])[0]
+    if not _valid_date(for_date):
+        return {"error": f"invalid date: {for_date}"}, 400
     results = sorted(TRADE_DIR.glob(f"results_{for_date}_*.json"), reverse=True)
     if not results:
         return {"for_date": for_date, "trades": []}, 200

@@ -17,6 +17,7 @@ import sys
 import pytest
 
 from emotion_core.data.providers import sina_quote as mine
+from emotion_core.utils.errors import ProviderError
 
 CPT_PATH = "/home/ubuntu/DSH/Chan_Pattern_Trader"
 
@@ -112,16 +113,18 @@ class TestParseMatchesCpt:
 
     def test_too_few_fields_raises(self, cpt_parser):
         bad = 'var hq_str_sz000002="1,2,3";\n'
-        with pytest.raises(ValueError):
+        # 本仓契约：ProviderError；CPT 侧历史上抛 ValueError，现为 ASharePublicError
+        # （RuntimeError 子类）。这里只钉「两边都响亮报错」，不钉具体类型。
+        with pytest.raises(ProviderError):
             mine.parse_sina_quotes(bad)
-        with pytest.raises(ValueError):
+        with pytest.raises((ValueError, RuntimeError)):
             cpt_parser(bad)
 
     def test_none_matched_raises(self, cpt_parser):
         text = _response([("sz000002", _row())])
-        with pytest.raises(ValueError):
+        with pytest.raises(ProviderError):
             mine.parse_sina_quotes(text, expected=["sz999999"])
-        with pytest.raises(ValueError):
+        with pytest.raises((ValueError, RuntimeError)):
             cpt_parser(text, expected=["sz999999"])
 
 
@@ -140,7 +143,7 @@ class TestNormalizeCode:
         assert mine.normalize_code("830799") == "bj830799"
 
     def test_bad_code_raises(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ProviderError):
             mine.normalize_code("abcdef")
 
 

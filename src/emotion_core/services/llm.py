@@ -257,5 +257,3 @@ def get_client(profile: str = "default", **overrides) -> LLMClient:
     if key not in _CACHE:
         _CACHE[key] = LLMClient(profile, **overrides)
     return _CACHE[key]
-
-

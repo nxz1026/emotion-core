@@ -210,12 +210,18 @@ def test_python_board_prefix_extraction_is_not_vacuous():
     """
     prefixes = _python_board_prefixes()
     assert prefixes, "前缀提取器返回空——后续对等断言会空转通过"
-    flat = {p for ps in prefixes.values() for p in ps}
-    # 四个板块必须都在：主板之外，创业/科创 20%、北交所 30%（含 920 号段）
-    for required in ("bj", "30", "68", "4", "8", "92"):
-        assert required in flat, f"前缀提取漏掉 {required!r}：{prefixes}"
     assert 300 in prefixes, f"北交所 30% 分支没抽到：{prefixes}"
     assert 200 in prefixes, f"创业/科创 20% 分支没抽到：{prefixes}"
+
+    # 提取器只要真的抽到了分支即可。**不要钉字面量粒度**：CPT 2026-10-25 把
+    # ("30","68") 改成了 ("300","301","688","689")，语义相同但字面量不同。
+    # 钉死 "30" 会让门禁在正确的重构上误红（本条 2026-10-29 实测）。
+    growth = prefixes[200]
+    assert growth, f"20% 分支没有前缀：{prefixes}"
+    assert all(p.startswith(("30", "68")) for p in growth), f"20% 分支出现非创业/科创前缀：{growth}"
+    bse = prefixes[300]
+    assert "bj" in bse, f"北交所 30% 分支漏掉 akshare 的 bj 前缀：{bse}"
+    assert any(p.startswith(("4", "8", "92")) for p in bse), f"北交所 30% 分支漏掉纯代码号段：{bse}"
 
 
 def _rust_board_pct_body() -> str:
@@ -234,6 +240,17 @@ def _rust_board_pct_body() -> str:
     return _LINE_COMMENT.sub(" ", _BLOCK_COMMENT.sub(" ", body))
 
 
+def _rust_literal_covers(body: str, prefix: str) -> bool:
+    """Rust 侧是否存在一个字符串字面量，按 starts_with 语义覆盖 prefix。
+
+    starts_with("30") 覆盖 "300"/"301"；starts_with("300") 也覆盖 "300"。
+    所以比较的是**前缀关系**，不是字面量逐字相等——CPT 把
+    ("30","68") 细化成 ("300","301","688","689") 时，Rust 侧无需跟着改。
+    """
+    literals = set(re.findall(r'"([^"]*)"', body)) | set(re.findall(r"'([^']*)'", body))
+    return any(lit and (prefix.startswith(lit) or lit.startswith(prefix)) for lit in literals)
+
+
 def test_rust_board_pct_covers_every_python_prefix():
     """★2026-10-07 回归：Rust `board_pct_milli` 必须覆盖 Python 侧的前缀全集。
 
@@ -249,7 +266,7 @@ def test_rust_board_pct_covers_every_python_prefix():
     missing: list[str] = []
     for pct, prefixes in _python_board_prefixes().items():
         for prefix in prefixes:
-            if f'"{prefix}"' not in body and f"'{prefix}'" not in body:
+            if not _rust_literal_covers(body, prefix):
                 missing.append(f"{prefix!r} → {pct} 千分比")
     assert not missing, (
         "Rust indicators.rs 的 board_pct_milli 漏掉了 Python 侧已有的板块前缀：\n  "
