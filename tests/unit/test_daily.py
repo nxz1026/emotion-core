@@ -13,6 +13,7 @@ CoverageBlocked 专用退出码、通用异常退出码、未知步骤拒绝。
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from unittest.mock import MagicMock, call, patch
 
@@ -44,8 +45,20 @@ def patch_trading_day(monkeypatch):
 
 @pytest.fixture
 def patch_today(monkeypatch):
-    """固定 today 为 2026-09-29（周二）。"""
+    """固定 today 为 2026-09-29（周二），并把时钟钉到当天 17:30（收盘后）。
+
+    盘前守卫（`_pre_close_guard`）读真实时钟，不钉住的话本文件会在北京时间
+    15:00 之前整片变成「跳过」——测试结果随执行时刻漂移，是最难查的一类假绿。
+    """
     monkeypatch.setattr(daily, "today_sh", lambda: date(2026, 9, 29))
+    monkeypatch.setattr(daily, "_now_sh", lambda: _at_sh(2026, 9, 29, 17, 30))
+
+
+def _at_sh(y: int, m: int, d: int, hh: int, mm: int):
+    """构造一个北京时间的 aware datetime（供 `_now_sh` 桩用）。"""
+    from datetime import datetime
+
+    return datetime(y, m, d, hh, mm, tzinfo=daily._SH_TZ)
 
 
 @pytest.fixture
@@ -93,6 +106,47 @@ class TestTradingDayGuard:
 
     def test_today_passes(self, patch_today, patch_trading_day):
         assert daily._trading_day_guard(date(2026, 9, 29)) is True
+
+
+# ── 1b. _pre_close_guard ──────────────────────────────────────────
+
+
+class TestPreCloseGuard:
+    """盘前守卫：今天且未收盘 → 跳过；历史日期 / 收盘后 → 放行。
+
+    回归 2026-10-30：重启后的 Persistent 补跑在 07:29（北京时间）就触发了当日
+    daily，snapshot 守卫因行情未产生而 FAILED，凭空炸出一条看门狗告警。
+    """
+
+    def test_pre_close_skips(self, patch_pipeline, patch_trading_day, monkeypatch, caplog):
+        monkeypatch.setattr(daily, "today_sh", lambda: date(2026, 9, 29))
+        monkeypatch.setattr(daily, "_now_sh", lambda: _at_sh(2026, 9, 29, 9, 30))
+        with caplog.at_level(logging.WARNING):
+            rc = daily.run_daily(date(2026, 9, 29))
+        assert rc == 0, "盘前补跑必须退出 0，而非 FAILED"
+        assert daily.pipeline.mark_running.call_count == 0, "不应执行任何步骤"
+        assert "盘前补跑" in caplog.text
+
+    def test_post_close_runs(
+        self, patch_pipeline, patch_all_steps, patch_trading_day, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(daily, "today_sh", lambda: date(2026, 9, 29))
+        monkeypatch.setattr(daily, "_now_sh", lambda: _at_sh(2026, 9, 29, 17, 30))
+        with caplog.at_level(logging.WARNING):
+            rc = daily.run_daily(date(2026, 9, 29))
+        assert rc == 0
+        assert daily.pipeline.mark_running.call_count > 0, "收盘后应正常执行步骤"
+        assert "盘前补跑" not in caplog.text
+
+    def test_historical_date_not_skipped(
+        self, patch_pipeline, patch_all_steps, patch_trading_day, monkeypatch
+    ):
+        # 即便是盘前，显式补跑历史日期也不该被守卫拦下。
+        monkeypatch.setattr(daily, "today_sh", lambda: date(2026, 9, 29))
+        monkeypatch.setattr(daily, "_now_sh", lambda: _at_sh(2026, 9, 29, 9, 30))
+        rc = daily.run_daily(date(2026, 9, 25))
+        assert rc == 0
+        assert daily.pipeline.mark_running.call_count > 0
 
 
 # ── 2. run_daily: 步骤顺序与打点 ──────────────────────────────────────

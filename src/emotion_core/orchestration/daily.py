@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date
+from datetime import date, datetime
+from datetime import time as dtime
+from zoneinfo import ZoneInfo
 
 from emotion_core.orchestration import pipeline
 from emotion_core.services.coverage import EXIT_COVERAGE_BLOCKED, CoverageBlocked
@@ -21,6 +23,16 @@ from emotion_core.utils.config import CONFIG
 from emotion_core.utils.dates import today_sh
 
 log = logging.getLogger("emotion_core.daily")
+
+#: A 股收盘时刻（北京时间）。目标日当天早于此刻运行 ⇒ 当日行情还没产生。
+MARKET_CLOSE = dtime(15, 0)
+_SH_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _now_sh() -> datetime:
+    """当前北京时间（单测替换此函数以固定时钟）。"""
+    return datetime.now(_SH_TZ)
+
 
 # 步骤注册表（顺序即执行顺序）
 STEPS = [
@@ -82,6 +94,27 @@ def _trading_day_guard(trade_date: date) -> bool:
     return True
 
 
+def _pre_close_guard(trade_date: date) -> bool:
+    """盘前守卫：目标日**就是今天**且尚未收盘 → 返回 True（跳过）。
+
+    与 `_trading_day_guard` 的分工是「跑得太早」vs「不该跑」：那条判日历，这条判
+    时刻。两者都返回 0，但语义相反——一个是**没有交易日**，一个是**交易日还没开始**。
+
+    为什么需要它（2026-10-30 生产事故）：机器 10-29 23:28 UTC 重启，daily.timer 的
+    `Persistent=true` 立刻补跑，`today_sh()` 算出目标日 2026-10-30（北京时间 07:29），
+    而当日行情根本还没产生 ⇒ snapshot 守卫报「EM 最新数据日期 2026-10-29 ≠ 传入
+    2026-10-30」⇒ sync 记 FAILED、告警入队、watchdog 一路红到第二天。可当天 17:20
+    的正常触发跑完全绿。**这不是数据延迟，是跑得太早**，而 `_trading_day_guard`
+    的注释里刻意保留的「交易日无数据必须响亮报 FAILED」说的是收盘后仍无数据。
+
+    因此判据只对「目标日 == 今天」生效：历史补跑（`--date` 指定过去某天）不受影响，
+    收盘后（含 17:20 的正常触发）一律放行，仍由 snapshot 守卫把关真数据延迟。
+    """
+    if trade_date != today_sh():
+        return False
+    return _now_sh().time() < MARKET_CLOSE
+
+
 def run_daily(
     trade_date: date | None = None, *, from_step: str | None = None, dry_run: bool = False
 ) -> int:
@@ -99,6 +132,17 @@ def run_daily(
         trade_date = today_sh()
 
     if not _trading_day_guard(trade_date):
+        return 0
+
+    if _pre_close_guard(trade_date):
+        now = _now_sh()
+        log.warning(
+            "目标日 %s 尚未收盘（北京时间 %s < %s），本轮为盘前补跑（如重启后的 "
+            "Persistent 补跑），跳过；由当日 17:20 的正常触发执行",
+            trade_date,
+            now.strftime("%H:%M"),
+            MARKET_CLOSE.strftime("%H:%M"),
+        )
         return 0
 
     log.info("===== emotion-core daily %s =====", trade_date)

@@ -16,6 +16,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from emotion_core.services import notify
 from emotion_core.utils.config import CONFIG
 from emotion_core.utils.db import query_df
@@ -35,15 +37,23 @@ _TRADABLE_CACHE: dict[date, frozenset[str]] = {}
 # 刻意放模块级常量而非 utils/config.py 的 Config：config_hash() 哈希
 # asdict(CONFIG) 的全字段，往 Config 里加键会让 pipeline_state / signal /
 # eval_result 的策略指纹平白换代。env 同名 EC_STRATEGY_* 可覆盖。
-# 另：agnes 单后端时 llm_backend 不重试 429（allow_status_retry 需链长>1），
-# 客户端自带的 max_retry 对限流失效，故这一层防护必须落在调用侧。
+# 注：llm_backend._post 已对 429（限速）做指数退避重试（见该文件 _post，
+# 无论回退链长度都会重试 429），故调用侧**不再二次叠加 429 重试**——
+# 此前调用侧又重试 3 次、每次客户端再试 6 次 ⇒ 单只票失败要撞 18 次 429。
+# 调用侧只负责客户端不会重试的 5xx（单后端链 allow_status_retry=False）。
 CALL_INTERVAL: float = float(os.environ.get("EC_STRATEGY_CALL_INTERVAL", "1.5"))
 MAX_ATTEMPTS: int = int(os.environ.get("EC_STRATEGY_MAX_ATTEMPTS", "3"))
 RETRY_BASE_DELAY: float = float(os.environ.get("EC_STRATEGY_RETRY_BASE_DELAY", "2.0"))
+#: 调用侧退避上限（防 RETRY_BASE_DELAY 被误调大后单次退避失控）。
+BACKOFF_CAP: float = float(os.environ.get("EC_STRATEGY_RETRY_BACKOFF_CAP", "60.0"))
 # 2026-10-09 日志巡检 D：主循环结束后的「失败补跑」退避基数与轮间隔。
 # 瞬时故障（尤其限流）在第一轮退避后往往需要更长冷却，故补跑用更大的基数。
 RETRY_ROUND_DELAY: float = float(os.environ.get("EC_STRATEGY_RETRY_DELAY", "10.0"))
 MAX_CONSECUTIVE_FAILURES: int = int(os.environ.get("EC_STRATEGY_MAX_CONSECUTIVE_FAILURES", "8"))
+# 全局限流冷却（秒）：收到 429 后到该时刻前不再发起**新组合**的调用，
+# 让上游配额窗口恢复，避免「这只撞 429 → 下只立刻又撞」的连续轰炸
+# （2026-10-30 实测一轮 99 次 429，绝大多数是上一只失败后紧接的下一只）。
+RATE_LIMIT_COOLDOWN: float = float(os.environ.get("EC_STRATEGY_RATE_LIMIT_COOLDOWN", "60.0"))
 # 按批落库条数。2026-10-28：上游延迟劣化 5~15 倍，systemd 2h 超时 TERM，
 # 而旧实现只在循环结束后一次性 _save_batch ⇒ 233 次 LLM 调用全部作废，当日
 # 零信号、无快照。现在每 N 条成功信号 UPSERT 一次；中断后重跑靠
@@ -69,6 +79,17 @@ TIME_BUDGET: float = float(os.environ.get("EC_STRATEGY_TIME_BUDGET", "12600"))
 # 收尾路径（数据保住，退出码也干净）。
 _STOP_REQUESTED = threading.Event()
 
+#: 限流冷却截止时刻（单调钟）。由 ``_note_rate_limited`` 写、``_wait_cooldown`` 读。
+_COOLDOWN_UNTIL: float = 0.0
+
+
+class _BudgetExhausted(Exception):
+    """墙钟预算不足以完成下一次 LLM 调用（含退避/冷却等待）。
+
+    在 ``_chat_with_retry`` 里抛出，由主循环/补跑轮捕获后把剩余组合记 skipped 并
+    正常收尾（退出 0），而不是被 systemd TimeoutStartSec 掐成 Result=timeout。
+    """
+
 
 def request_stop() -> None:
     """请求当前这轮策略观察尽快收尾（SIGTERM 处理器调用）。"""
@@ -83,6 +104,26 @@ def stop_requested() -> bool:
 def _budget_exhausted(started: float) -> bool:
     """墙钟预算是否用尽（用单调钟，避免 wall clock 被调整影响判断）。"""
     return time.monotonic() - started >= TIME_BUDGET
+
+
+def _note_rate_limited(delay: float) -> None:
+    """记下「距下次可调用还需冷却 delay 秒」（单调钟，取最远那次）。"""
+    global _COOLDOWN_UNTIL
+    _COOLDOWN_UNTIL = max(_COOLDOWN_UNTIL, time.monotonic() + delay)
+
+
+def _wait_cooldown(deadline: float | None) -> bool:
+    """等到限流冷却结束；若等待会越过 ``deadline`` 则返回 False（预算不够，放弃本次调用）。
+
+    返回 True 表示可以发调用；False 表示预算已撑不起这次冷却，调用方应跳过剩余组合。
+    """
+    wait = _COOLDOWN_UNTIL - time.monotonic()
+    if wait <= 0:
+        return True
+    if deadline is not None and time.monotonic() + wait > deadline:
+        return False
+    time.sleep(wait)
+    return True
 
 
 def _plan_pairs(codes: list[str], skills: list[Skill]) -> list[tuple[Skill, str]]:
@@ -156,39 +197,59 @@ def _has_tradable_bar(trade_date: date, code: str) -> bool:
 
 
 def _retryable(exc: Exception) -> bool:
-    """限流与瞬时故障可退避重试；鉴权失败与输出契约错误不重试。"""
-    import httpx
+    """只在调用侧兜底重试「客户端不会自动重试」的瞬时故障：
 
+    - 5xx：单后端链下 ``llm_backend._post`` 的 ``allow_status_retry=False`` 不会重试；
+    - 超时 / 传输错误：同上，客户端只对链长>1 回退重试。
+    429（限速）**不在此重试** —— 客户端已按指数退避 + Retry-After 重过，调用侧再叠
+    会把单只票的尝试次数乘到 18，纯浪费配额。其它 Python 异常（如 ValueError、JSON
+    解析失败）一律不重试（与迁移前语义一致）。
+    """
     if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
         return True
     if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code == 429 or exc.response.status_code >= 500
+        return exc.response.status_code >= 500
     return False
 
 
-def _chat_with_retry(client: Any, messages: list[dict], base_delay: float | None = None) -> Any:
-    """调用 LLM，对 429 与 5xx 做指数退避。
+def _chat_with_retry(
+    client: Any,
+    messages: list[dict],
+    base_delay: float | None = None,
+    deadline: float | None = None,
+) -> Any:
+    """调用 LLM，对 5xx 做受墙钟预算约束的指数退避。
 
-    agnes 单后端时 `llm_backend._chat_locked` 传入的
-    `allow_status_retry=len(chain) > 1` 为假，客户端自带的 max_retry 对
-    429 不生效，故限流防护落在调用侧。
+    ``base_delay`` 为 ``None`` 时用 ``RETRY_BASE_DELAY``；失败补跑一轮传入更长的
+    ``RETRY_ROUND_DELAY``（2026-10-09 日志巡检 D）。
 
-    ``base_delay`` 为 ``None`` 时用 ``RETRY_BASE_DELAY``；失败补跑一轮
-    传入更长的 ``RETRY_ROUND_DELAY``（2026-10-09 日志巡检 D）。
+    ``deadline``（单调钟）为这轮策略观察的墙钟预算截止时刻：任何「等待」——
+    限流冷却或退避——若会越过 deadline 就抛出 ``_BudgetExhausted``，让调用方把
+    剩余组合记 skipped 并正常收尾，绝不被 systemd TimeoutStartSec 掐成
+    Result=timeout。
     """
     attempts = max(1, MAX_ATTEMPTS)
     delay_base = RETRY_BASE_DELAY if base_delay is None else base_delay
     last: Exception | None = None
     for attempt in range(attempts):
+        # 调用前先让限流冷却（若有），越界则放弃。
+        if deadline is not None and not _wait_cooldown(deadline):
+            raise _BudgetExhausted()
         try:
             return client.chat(messages, purpose="strategy", json_mode=True)
         except Exception as exc:
             last = exc
-            if attempt + 1 >= attempts or not _retryable(exc):
+            retryable = _retryable(exc)
+            if attempt + 1 >= attempts or not retryable:
+                # 429 已记冷却：下一只票在冷却窗口恢复前不会立刻再撞。
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+                    _note_rate_limited(RATE_LIMIT_COOLDOWN)
                 raise
-            delay = delay_base * (2**attempt)
+            delay = min(delay_base * (2**attempt), BACKOFF_CAP)
+            if deadline is not None and time.monotonic() + delay > deadline:
+                raise _BudgetExhausted() from None
             log.warning(
-                "策略 LLM 限流，%.1fs 后重试（%d/%d）：%s", delay, attempt + 1, attempts, exc
+                "策略 LLM 调用失败，%.1fs 后重试（%d/%d）：%s", delay, attempt + 1, attempts, exc
             )
             time.sleep(delay)
     assert last is not None
@@ -392,7 +453,12 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
     # 轮转遍历（Latin 方阵）：见 _plan_pairs 的说明——每票至少轮到 1 个策略，
     # 且同一批里每个策略都轮得到。
     pairs = _plan_pairs(codes, skills)
+    # 每次运行重新计时限流冷却（冷却只应在「同一轮内」跨组合生效，不该跨运行泄漏：
+    # 否则上一次运行记下的 _COOLDOWN_UNTIL 会让下一次运行的第一次调用凭空等待）。
+    global _COOLDOWN_UNTIL
+    _COOLDOWN_UNTIL = 0.0
     started = time.monotonic()
+    deadline = started + TIME_BUDGET
     for index, (skill, code) in enumerate(pairs):
         # 优雅停止：SIGTERM 后不再发起新的 LLM 调用，剩余组合记 skipped，
         # 走正常收尾路径（落库 + 写快照 + 退出 0）。
@@ -428,9 +494,28 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
         if _existing(trade_date, code, skill.name, prompt_hash):
             continue
         if calls or failed_attempts:  # 调用间定速，避免触发上游限流
+            # 定速等待也会越过预算 ⇒ 直接收尾（与 _chat_with_retry 内的判据一致）。
+            if deadline is not None and time.monotonic() + CALL_INTERVAL > deadline:
+                _skip_rest(skipped, pairs[index:], "达到时间预算上限")
+                log.warning(
+                    "策略观察 %s: 墙钟预算 %.0fs 用尽，剩余 %d 组不再调用",
+                    trade_date,
+                    TIME_BUDGET,
+                    len(pairs) - index,
+                )
+                break
             time.sleep(CALL_INTERVAL)
         try:
-            reply = _chat_with_retry(client, messages)
+            reply = _chat_with_retry(client, messages, deadline=deadline)
+        except _BudgetExhausted:
+            _skip_rest(skipped, pairs[index:], "达到时间预算上限")
+            log.warning(
+                "策略观察 %s: 墙钟预算 %.0fs 用尽（含退避/冷却等待），剩余 %d 组不再调用",
+                trade_date,
+                TIME_BUDGET,
+                len(pairs) - index,
+            )
+            break
         except Exception as exc:
             failed_attempts += 1
             consecutive_failures += 1
@@ -500,7 +585,12 @@ def run_for_date(trade_date: date, codes: list[str] | None = None) -> int:
                 continue
             time.sleep(CALL_INTERVAL)
             try:
-                reply = _chat_with_retry(client, messages, base_delay=RETRY_ROUND_DELAY)
+                reply = _chat_with_retry(
+                    client, messages, base_delay=RETRY_ROUND_DELAY, deadline=deadline
+                )
+            except _BudgetExhausted:
+                log.warning("策略观察 %s: 墙钟预算用尽，失败补跑提前结束", trade_date)
+                break
             except Exception as exc:
                 failed_attempts += 1
                 consecutive_failures += 1

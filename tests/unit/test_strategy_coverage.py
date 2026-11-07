@@ -252,7 +252,9 @@ class TestRetryRound:
         assert [s["reason"].split(":", 1)[0] for s in snap.skipped] == ["LLM调用失败"]
 
     def test_retry_uses_longer_backoff_base(self, monkeypatch):
-        client = _FakeClient(always=_http_status_error(429))
+        # 用 5xx（调用侧仍重试）而非 429（429 现已交给 llm_backend 客户端退避，
+        # 调用侧不再叠加）——本测试只验证「主循环退避基数 < 补跑退避基数」。
+        client = _FakeClient(always=_http_status_error(500))
         store, snap = _Store(), _Snapshots()
         sleeps: list[float] = []
         monkeypatch.setattr(runner.time, "sleep", lambda seconds: sleeps.append(seconds))
@@ -269,7 +271,7 @@ class TestRetryRound:
             retry_round_delay=7.0,
         )
         runner.run_for_date(TRADE_DATE)
-        assert sleeps[0] == 1.0, "首轮退避基数应为 RETRY_BASE_DELAY"
+        assert sleeps[0] == 1.0, "主循环退避基数应为 RETRY_BASE_DELAY"
         assert 7.0 in sleeps[1:], "补跑退避基数应为 RETRY_ROUND_DELAY"
 
     def test_retry_skipped_when_quota_already_full(self, monkeypatch, caplog):

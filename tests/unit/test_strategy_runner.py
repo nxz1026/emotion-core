@@ -248,12 +248,14 @@ def _wire(
     max_consecutive_failures=3,
     flush_every=20,
     tradable=None,
+    rate_limit_cooldown=0.0,
     **cfg,
 ):
     """装配一个不碰 DB / 网络 / 磁盘的 run_for_date 环境。
 
     `tradable`（R67-3）：当日有行情 code 集。默认 = 全部 `codes`（即全部可交易），
     保证既有用例的配额/轮转语义不受硬闸门影响；传子集模拟当日缺行情。
+    `rate_limit_cooldown`：限流冷却秒数，默认 0（单测不真睡）；生产默认 60s。
 
     返回被拦截的 `push_watch_signals` 调用列表（R67-4 触发点断言用）。
     """
@@ -265,6 +267,8 @@ def _wire(
     monkeypatch.setattr(runner, "MAX_ATTEMPTS", max_attempts)
     monkeypatch.setattr(runner, "RETRY_BASE_DELAY", retry_base_delay)
     monkeypatch.setattr(runner, "RETRY_ROUND_DELAY", retry_round_delay)
+    monkeypatch.setattr(runner, "RATE_LIMIT_COOLDOWN", rate_limit_cooldown)
+    monkeypatch.setattr(runner, "_COOLDOWN_UNTIL", 0.0)
     monkeypatch.setattr(runner, "MAX_CONSECUTIVE_FAILURES", max_consecutive_failures)
     monkeypatch.setattr(runner, "FLUSH_EVERY", flush_every)
     # R67-3 硬闸门会查库（tradable_codes）——本文件必须 DB-free，按日缓存也要清。
@@ -622,10 +626,31 @@ class TestPromptHashUnification:
 
 
 class TestRateLimitResilience:
-    """B：429 退避重试、失败不占配额、熔断、失败数上报。"""
+    """B：429 客户端已退避 → 调用侧不再叠加；失败不占配额；熔断；失败数上报。"""
 
-    def test_429_is_retried_then_succeeds(self, monkeypatch, caplog):
-        client = _FakeClient(before_success=[_http_status_error(429), _http_status_error(429)])
+    def test_429_not_retried_at_runner_layer(self, monkeypatch, caplog):
+        """429 已由 llm_backend 客户端内部退避，调用侧不得再叠 3 次重试。"""
+        client = _FakeClient(always=_http_status_error(429))
+        store, snap = _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            max_consecutive_failures=5,
+        )
+        runner.run_for_date(TRADE_DATE)
+        # 2 只票 ×（主循环 1 次 + 失败补跑 1 次）= 4 次 chat()；旧实现会在调用侧再
+        # 叠 3 次重试 ⇒ 单票 3 次、总 12 次。4 而非 12 证明 429 不再被调用侧叠加。
+        assert client.attempts == 4, "调用侧不再叠加 429 重试（每只票 1 次 chat）"
+        assert all(s["reason"].startswith("LLM调用失败") for s in snap.skipped)
+
+    def test_5xx_is_retried_then_succeeds(self, monkeypatch, caplog):
+        """5xx 客户端不重试（单后端链），调用侧负责退避重试到成功。"""
+        client = _FakeClient(before_success=[_http_status_error(500), _http_status_error(500)])
         store, snap = _FakeSignalStore(), _Snapshots()
         _wire(
             monkeypatch,
@@ -638,9 +663,9 @@ class TestRateLimitResilience:
         )
         with caplog.at_level(logging.WARNING):
             runner.run_for_date(TRADE_DATE)
-        assert client.attempts == 3, "两次 429 后应重试至成功"
+        assert client.attempts == 3, "两次 5xx 后应在调用侧重试至成功"
         assert len(store.items) == 1
-        assert "限流" in caplog.text
+        assert "重试" in caplog.text
 
     def test_non_retryable_error_is_not_retried(self, monkeypatch):
         client = _FakeClient(always=ValueError("boom"))
@@ -691,7 +716,7 @@ class TestRateLimitResilience:
         runner.run_for_date(TRADE_DATE)
         distinct = {code for _name, code in client.called}
         assert distinct == {"c0", "c1"}, "熔断前只应尝试前 2 个组合"
-        assert client.attempts == 6, "每个组合 3 次尝试（1 次 + 2 次退避重试）"
+        assert client.attempts == 2, "调用侧不再叠加 429 重试（每票仅 1 次 chat()）"
         assert any("熔断" in s["reason"] for s in snap.skipped)
 
     def test_summary_line_reports_failures(self, monkeypatch, caplog):
@@ -710,6 +735,132 @@ class TestRateLimitResilience:
             runner.run_for_date(TRADE_DATE)
         summary = [r.getMessage() for r in caplog.records if "策略观察" in r.getMessage()]
         assert summary and "失败 1" in summary[-1], summary
+
+
+class TestRateLimitCooldown:
+    """2026-10-30：429 后不再紧接撞限流——记下冷却，后续组合等窗口恢复。"""
+
+    def test_note_and_wait_cools_down(self, monkeypatch):
+        sleeps: list[float] = []
+
+        class _Clock:
+            def __init__(self) -> None:
+                self.now = 0.0
+
+            def monotonic(self) -> float:
+                return self.now
+
+            def sleep(self, s: float) -> None:
+                self.now += s
+                sleeps.append(s)
+
+        clock = _Clock()
+        monkeypatch.setattr(runner, "time", clock)
+        monkeypatch.setattr(runner, "_COOLDOWN_UNTIL", 0.0)
+        runner._note_rate_limited(60.0)
+        assert runner._COOLDOWN_UNTIL == 60.0
+        assert runner._wait_cooldown(deadline=None) is True
+        assert clock.now >= 60.0, "应真的等满冷却"
+
+    def test_wait_yields_when_over_deadline(self, monkeypatch):
+        class _Clock:
+            def __init__(self) -> None:
+                self.now = 0.0
+
+            def monotonic(self) -> float:
+                return self.now
+
+            def sleep(self, s: float) -> None:
+                self.now += s
+
+        clock = _Clock()
+        monkeypatch.setattr(runner, "time", clock)
+        monkeypatch.setattr(runner, "_COOLDOWN_UNTIL", 100.0)
+        assert runner._wait_cooldown(deadline=50.0) is False, "冷却会越过预算 ⇒ 放弃"
+
+    def test_429_paces_next_pair(self, monkeypatch):
+        """首只 429 记冷却；第二只调用前等满 60s，再成功。"""
+        sleeps: list[float] = []
+
+        class _Clock:
+            def __init__(self) -> None:
+                self.now = 0.0
+
+            def monotonic(self) -> float:
+                return self.now
+
+            def sleep(self, s: float) -> None:
+                self.now += s
+                sleeps.append(s)
+
+        clock = _Clock()
+        monkeypatch.setattr(runner, "time", clock)
+        monkeypatch.setattr(runner, "_COOLDOWN_UNTIL", 0.0)
+
+        class _PerCodeClient(_FakeClient):
+            def chat(self, messages, purpose="chat", json_mode=False):
+                self.attempts += 1
+                _name, code = _who(messages[1]["content"])
+                self.called.append((_name, code))
+                if code == "c1":
+                    raise _http_status_error(429)
+                return _Reply()
+
+        client = _PerCodeClient()
+        store, snap = _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            max_consecutive_failures=5,
+            rate_limit_cooldown=60.0,
+        )
+        runner.run_for_date(TRADE_DATE)
+        assert any(s >= 60.0 for s in sleeps), "第二只调用前应等满冷却"
+        assert len(store.items) == 1, "c2 最终成功入库"
+        assert runner._COOLDOWN_UNTIL > 0
+
+
+class TestBackoffRespectsBudget:
+    """退避/冷却等待若会越过墙钟预算，立即收尾而非死等（避免被 systemd TERM）。"""
+
+    def test_backoff_gives_up_when_over_budget(self, monkeypatch):
+        class _Clock:
+            def __init__(self) -> None:
+                self.now = 0.0
+
+            def monotonic(self) -> float:
+                return self.now
+
+            def sleep(self, s: float) -> None:
+                self.now += s
+
+        clock = _Clock()
+        monkeypatch.setattr(runner, "time", clock)
+        monkeypatch.setattr(runner, "_COOLDOWN_UNTIL", 0.0)
+        client = _FakeClient(before_success=[_http_status_error(500)])
+        store, snap = _FakeSignalStore(), _Snapshots()
+        _wire(
+            monkeypatch,
+            skills=_skills(["s1"]),
+            codes=["c1", "c2"],
+            store=store,
+            client=client,
+            snap=snap,
+            max_llm=5,
+            retry_base_delay=100.0,
+        )
+        monkeypatch.setattr(runner, "TIME_BUDGET", 10.0)
+
+        count = runner.run_for_date(TRADE_DATE)
+
+        assert count == 0
+        assert client.attempts == 1, "退避前即判定越界，不得二次尝试"
+        assert all(s["reason"] == "达到时间预算上限" for s in snap.skipped)
 
 
 class TestIncrementalFlush:
