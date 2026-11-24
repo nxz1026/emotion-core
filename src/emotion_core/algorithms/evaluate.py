@@ -113,9 +113,19 @@ def _split_rows(rows: list[Row]) -> tuple[list[Row], list[Row]]:
 
 
 def _next_bars(code: str, d0: date, n: int = 5) -> pd.DataFrame:
+    """信号日之后的前 n 根**可交易** bar（升序）。
+
+    停牌占位行不入窗口：`daily_bar` 对停牌票写的是「顺延占位行」——open/high/
+    low 全 0（或全 NULL）、volume=0、close 沿用停牌前收盘。这类行不是交易日，
+    计入前向窗口会把 entry 取成 0（`_pct` / `_exit_family` 除零，2026-11-17
+    `605255` 11-16 停牌行导致 outcome 步 exit-code 1），或把 max_dd5 打成
+    -100%。滤掉后窗口按「实际能成交的交易日」计，停牌日自然顺延到复牌首日。
+    """
     return query_df(
         f"SELECT date, open, high, low, close FROM daily_bar"
-        f" WHERE code = %s AND date > %s ORDER BY date LIMIT {int(n)}",
+        f" WHERE code = %s AND date > %s"
+        f" AND open > 0 AND high > 0 AND low > 0 AND close > 0"
+        f" ORDER BY date LIMIT {int(n)}",
         (code, d0),
     )
 

@@ -6,6 +6,28 @@
 
 ## [Unreleased]
 
+### 修复 · 2026-11-17 outcome 步除零（停牌占位行被当成交易日）
+
+- 事故：`emotion-core-daily.service` 2026-11-16 / 11-17 连续两天在 `outcome` 步
+  `exit-code 1`，watchdog 随后红灯（`division by zero`）。触发信号
+  `2026-11-13 605255 BUY`：其「次日」2026-11-16 是停牌占位行——
+  `daily_bar` 里 `open/high/low = 0`、`volume = 0`、`close` 沿用停牌前收盘 73.82。
+  `_next_bars` 原样返回该行 ⇒ `entry = 0` ⇒ `_pct(nb_close, entry)` 除零。
+  全库同类占位行 235 行（19 只票），`close = 0` 的另有 135 行。
+- 根因不在算法口径，在**读侧把占位行当成了交易日**。修在
+  `algorithms/evaluate._next_bars`：前向窗口加
+  `open > 0 AND high > 0 AND low > 0 AND close > 0`，停牌日顺延到复牌首日。
+  `outcome` 与 `forward_stats` 共用该取数，一处修好两条链——后者此前会把
+  含停牌行的 5 日窗口 `max_dd5` 打成 -100%（静默错值，不报错）。
+- `outcome._outcome_row` 另加基准价守卫：信号日 `close <= 0`（占位行）→ 返回
+  `None`，与「缺数不入库，下轮重试」同口径，不做分母。
+- 效果：`605255` 该信号在复牌前保持 pending（无可成交 bar，不猜）；
+  `002578`（11-09 / 11-10 两条 BUY）补齐 complete。
+- 验证：全量 `pytest tests` **2958 passed / 4 skipped**；daily 全链重跑
+  `Result=success`，`pipeline_state` 13 步全 OK；watchdog 退出 0。
+  新增守卫测试 `TestNextBars::test_sql_excludes_placeholder_bars`、
+  `test_zero_base_close_is_none`。
+
 ### 修复 · 2026-10-29 收尾：时区口径 / mypy 接入 / 孤儿脚本 / 上线生效
 
 - **「今天」统一走 `today_sh()`**：`date.today()` 在 9 个模块里还有 12 处隐式调用，

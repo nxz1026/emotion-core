@@ -132,6 +132,12 @@ class TestOutcomeRow:
         self.stub(monkeypatch, 10.0, None)
         assert outcome._outcome_row(D0, "000017", "BUY") is None
 
+    def test_zero_base_close_is_none(self, monkeypatch):
+        """信号日 close=0（停牌占位行）→ 缺数不入库，不做分母（2026-11-17 事故）。"""
+        seen = self.stub(monkeypatch, 0.0, bars([10.0]))
+        assert outcome._outcome_row(D0, "000017", "BUY") is None
+        assert seen["nb"] == []
+
     def test_short_window_incomplete(self, monkeypatch):
         """前向 3 根 <5：极值列 None、complete=False，其余列照算（右删失不近似）。"""
         nb = bars(

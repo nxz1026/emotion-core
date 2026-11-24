@@ -8,6 +8,9 @@
 - complete = 前向 5 日齐；不足 5 根 bar 时 max_up5 / max_dd5 / t5_close_ret 记
   None（不用窗口末近似——与 evaluate 的右删失口径一致）；
 - 信号日无收盘价、或前向无 bar → 该信号返回 None（缺数不入库，下轮重试）；
+- 前向窗口只取**可交易** bar：停牌占位行（open/high/low 全 0、volume=0、close
+  沿用停牌前收盘）由 `evaluate._next_bars` 的 `open/high/low/close > 0` 过滤，
+  停牌日顺延到复牌首日，entry 不会取到 0（2026-11-17 `605255` 事故）；
 - 幂等 upsert（冲突键 confirm_date + code + action），每日流程末尾跑一次。
 
 与 lkl 的差异（全部是契约/IO 适配，不涉判定规则）：
@@ -89,6 +92,10 @@ def _outcome_row(confirm_date: date, code: str, action: str) -> tuple | None:
     if base.empty:
         return None
     base = float(base["close"].iloc[0])
+    if not base > 0:
+        # 停牌占位行的 close 可能是 0（实测 daily_bar 有 135 行），做分母必炸。
+        # 与「缺数不入库」同口径：本轮跳过，下轮重试。
+        return None
     nb = _next_bars(code, confirm_date, n=5)
     if nb.empty:
         return None

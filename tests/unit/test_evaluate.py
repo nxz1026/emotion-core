@@ -280,6 +280,23 @@ class TestForwardStats:
         assert evaluate.forward_stats(pd.DataFrame([SIG])).empty
 
 
+class TestNextBars:
+    """前向窗口必须排除停牌占位行（open/high/low 全 0、close 沿用前收）。"""
+
+    def test_sql_excludes_placeholder_bars(self, monkeypatch):
+        seen = {}
+
+        def query_df(sql, params=(), conn=None):
+            seen["sql"] = sql
+            return pd.DataFrame()
+
+        monkeypatch.setattr(evaluate, "query_df", query_df)
+        evaluate._next_bars("605255", D2, n=5)
+        for guard in ("open > 0", "high > 0", "low > 0", "close > 0"):
+            assert guard in seen["sql"]
+        assert "LIMIT 5" in seen["sql"]
+
+
 class TestRuleRet:
     def test_empty_family_returns_none(self, monkeypatch):
         monkeypatch.setattr(evaluate, "_exit_family", lambda code, d0: {})
